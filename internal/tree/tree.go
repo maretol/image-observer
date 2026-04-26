@@ -1,6 +1,9 @@
 package tree
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -64,7 +67,16 @@ func List(path string) ([]Node, error) {
 
 	entries, err := os.ReadDir(abs)
 	if err != nil {
-		return nil, err
+		// Tag the error with a prefix the frontend can match on.
+		// See spec-error-handling.md §3.1.
+		switch {
+		case errors.Is(err, fs.ErrPermission):
+			return nil, fmt.Errorf("PERM: %w", err)
+		case errors.Is(err, fs.ErrNotExist):
+			return nil, fmt.Errorf("NOENT: %w", err)
+		default:
+			return nil, err
+		}
 	}
 
 	out := make([]Node, 0, len(entries))

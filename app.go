@@ -49,6 +49,13 @@ func (a *App) ReadImage(path string) (imgread.Result, error) {
 	return imgread.Read(path)
 }
 
+// GetImageInfo returns image dimensions only (header read).
+// Used as a pre-flight check (e.g., size threshold) before opening a tab.
+// See spec-error-handling.md §2.1.
+func (a *App) GetImageInfo(path string) (imgread.Info, error) {
+	return imgread.ReadInfo(path)
+}
+
 // GetState returns the persisted session state, or defaults on failure.
 // See spec-tab-imageview-3c.md §3.4.
 func (a *App) GetState() (state.StateData, error) {

@@ -1,11 +1,16 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { GetImageInfo } from "../../../wailsjs/go/main/App";
+import { useToastFn } from "../../shared/components/Toast";
 import { newTab, type Tab } from "./useTabs";
+
+export type ConfirmFn = (message: string) => Promise<boolean>;
 
 // Future: replace with values from a Settings module (Phase H).
 // Keeping these as a single point of mutation lets us swap to user-configurable
 // values without touching the rest of the grid logic.
 export const MAX_ROWS = 2;
 export const MAX_COLS = 3;
+export const MAX_PIXELS = 200_000_000; // 200MP
 
 export type PanelCoord = { row: number; col: number };
 
@@ -77,8 +82,22 @@ function countTabsInCol(g: Grid, col: number): number {
   return n;
 }
 
-export function useViewerGrid(opts?: { initialGrid?: Grid }) {
+export function useViewerGrid(opts?: {
+  initialGrid?: Grid;
+  confirm?: ConfirmFn;
+}) {
   const [grid, setGrid] = useState<Grid>(opts?.initialGrid ?? initialGrid);
+
+  // Mirror latest grid into a ref so async callbacks (removeRow/Col with
+  // confirm dialog) can read current state without re-creating callbacks
+  // on every grid change.
+  const gridRef = useRef(grid);
+  useEffect(() => {
+    gridRef.current = grid;
+  }, [grid]);
+
+  const confirm = opts?.confirm;
+  const toast = useToastFn();
 
   const setActivePanel = useCallback((coord: PanelCoord) => {
     setGrid((g) => (sameCoord(g.active, coord) ? g : { ...g, active: coord }));
@@ -118,22 +137,57 @@ export function useViewerGrid(opts?: { initialGrid?: Grid }) {
     []
   );
 
-  const openInActive = useCallback((path: string) => {
-    setGrid((g) => {
-      const cur = panelAt(g, g.active);
+  const openInActive = useCallback(
+    async (path: string) => {
+      // Fast path: switch to existing tab without re-checking image info.
+      const cur = panelAt(gridRef.current, gridRef.current.active);
       const existing = cur.tabs.findIndex((t) => t.path === path);
       if (existing >= 0) {
-        return updatePanelInGrid(g, g.active, (p) => ({
-          ...p,
-          activeIndex: existing,
-        }));
+        setGrid((g) =>
+          updatePanelInGrid(g, g.active, (p) => ({
+            ...p,
+            activeIndex: existing,
+          }))
+        );
+        return;
       }
-      return updatePanelInGrid(g, g.active, (p) => {
-        const newTabs = [...p.tabs, newTab(path)];
-        return { tabs: newTabs, activeIndex: newTabs.length - 1 };
+
+      // Pre-flight: header-only read for size threshold check.
+      let info: { width: number; height: number };
+      try {
+        info = await GetImageInfo(path);
+      } catch (e) {
+        toast(`画像を開けません: ${basename(path)} — ${errorMessage(e)}`, "error");
+        return;
+      }
+      if (info.width * info.height > MAX_PIXELS) {
+        const mp = ((info.width * info.height) / 1_000_000).toFixed(1);
+        const limit = MAX_PIXELS / 1_000_000;
+        toast(
+          `画像が大きすぎます: ${basename(path)} (${mp}MP > ${limit}MP)`,
+          "warn"
+        );
+        return;
+      }
+
+      setGrid((g) => {
+        // Re-check existence in case state changed during await.
+        const c = panelAt(g, g.active);
+        const ex = c.tabs.findIndex((t) => t.path === path);
+        if (ex >= 0) {
+          return updatePanelInGrid(g, g.active, (p) => ({
+            ...p,
+            activeIndex: ex,
+          }));
+        }
+        return updatePanelInGrid(g, g.active, (p) => {
+          const newTabs = [...p.tabs, newTab(path)];
+          return { tabs: newTabs, activeIndex: newTabs.length - 1 };
+        });
       });
-    });
-  }, []);
+    },
+    [toast]
+  );
 
   const moveTab = useCallback(
     (srcCoord: PanelCoord, srcIndex: number, dstCoord: PanelCoord) => {
@@ -214,17 +268,20 @@ export function useViewerGrid(opts?: { initialGrid?: Grid }) {
     });
   }, []);
 
-  const removeRow = useCallback(() => {
+  const removeRow = useCallback(async () => {
+    const cur = gridRef.current;
+    if (cur.size.rows <= 1) return;
+    const lastRow = cur.size.rows - 1;
+    const tabCount = countTabsInRow(cur, lastRow);
+    if (tabCount > 0) {
+      if (!confirm) return;
+      const ok = await confirm(
+        `${tabCount} 個のタブが閉じられます。続行しますか?`
+      );
+      if (!ok) return;
+    }
     setGrid((g) => {
       if (g.size.rows <= 1) return g;
-      const lastRow = g.size.rows - 1;
-      const tabCount = countTabsInRow(g, lastRow);
-      if (tabCount > 0) {
-        if (
-          !window.confirm(`${tabCount} 個のタブが閉じられます。続行しますか?`)
-        )
-          return g;
-      }
       const newRows = g.size.rows - 1;
       const newPanels = g.panels.slice(0, newRows * g.size.cols);
       const newActive: PanelCoord =
@@ -237,19 +294,22 @@ export function useViewerGrid(opts?: { initialGrid?: Grid }) {
         active: newActive,
       };
     });
-  }, []);
+  }, [confirm]);
 
-  const removeCol = useCallback(() => {
+  const removeCol = useCallback(async () => {
+    const cur = gridRef.current;
+    if (cur.size.cols <= 1) return;
+    const lastCol = cur.size.cols - 1;
+    const tabCount = countTabsInCol(cur, lastCol);
+    if (tabCount > 0) {
+      if (!confirm) return;
+      const ok = await confirm(
+        `${tabCount} 個のタブが閉じられます。続行しますか?`
+      );
+      if (!ok) return;
+    }
     setGrid((g) => {
       if (g.size.cols <= 1) return g;
-      const lastCol = g.size.cols - 1;
-      const tabCount = countTabsInCol(g, lastCol);
-      if (tabCount > 0) {
-        if (
-          !window.confirm(`${tabCount} 個のタブが閉じられます。続行しますか?`)
-        )
-          return g;
-      }
       const newCols = g.size.cols - 1;
       const newPanels: Panel[] = [];
       for (let r = 0; r < g.size.rows; r++) {
@@ -267,7 +327,7 @@ export function useViewerGrid(opts?: { initialGrid?: Grid }) {
         active: newActive,
       };
     });
-  }, []);
+  }, [confirm]);
 
   const setRowSizes = useCallback((sizes: number[]) => {
     setGrid((g) => ({ ...g, rowSizes: sizes }));
@@ -292,4 +352,16 @@ export function useViewerGrid(opts?: { initialGrid?: Grid }) {
     setRowSizes,
     setColSizes,
   };
+}
+
+function basename(p: string): string {
+  const norm = p.replace(/[\\/]+$/, "");
+  const idx = Math.max(norm.lastIndexOf("/"), norm.lastIndexOf("\\"));
+  return idx >= 0 ? norm.slice(idx + 1) : norm;
+}
+
+function errorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  return String(e);
 }

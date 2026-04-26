@@ -22,6 +22,37 @@ type Result struct {
 	Height   int    `json:"height"`
 }
 
+type Info struct {
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	MimeType string `json:"mimeType"`
+}
+
+// ReadInfo returns image dimensions and mime type without loading pixel data.
+// Used for pre-flight checks (e.g., size threshold) before opening a tab.
+func ReadInfo(path string) (Info, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return Info{}, err
+	}
+	if !tree.IsImage(abs) {
+		return Info{}, fmt.Errorf("not an image: %s", abs)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return Info{}, err
+	}
+	if info.IsDir() {
+		return Info{}, errors.New("path is a directory")
+	}
+	inputExt := strings.ToLower(filepath.Ext(abs))
+	w, h, err := decodeImageDimensions(abs, inputExt)
+	if err != nil {
+		return Info{}, fmt.Errorf("dimensions: %w", err)
+	}
+	return Info{Width: w, Height: h, MimeType: mimeForInput(inputExt)}, nil
+}
+
 // Read returns the original image bytes plus its dimensions.
 // See spec-tab-imageview-3a.md §3.2 for behavior.
 func Read(path string) (Result, error) {

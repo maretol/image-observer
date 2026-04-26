@@ -15,11 +15,13 @@ type Props = {
   expanded: boolean;
   loading: boolean;
   error?: string;
+  noPermission: boolean;
   children?: Node[];
   childrenByPath: Map<string, Node[]>;
   expandedSet: Set<string>;
   loadingSet: Set<string>;
   errors: Map<string, string>;
+  noPermissionSet: Set<string>;
   onToggle: (path: string) => void;
   onRetry: (path: string) => void;
   thumb: ThumbHandlers;
@@ -33,11 +35,13 @@ export function TreeNode(props: Props) {
     expanded,
     loading,
     error,
+    noPermission,
     children,
     childrenByPath,
     expandedSet,
     loadingSet,
     errors,
+    noPermissionSet,
     onToggle,
     onRetry,
     thumb,
@@ -77,7 +81,13 @@ export function TreeNode(props: Props) {
             <ChevronIcon open={expanded} />
           ) : null}
         </span>
-        <span className="tree-icon">{isDir ? <FolderIcon /> : <ImageIcon />}</span>
+        <span className="tree-icon">
+          {isDir ? (
+            <FolderIcon className={noPermission ? "folder-icon-noperm" : undefined} />
+          ) : (
+            <ImageIcon />
+          )}
+        </span>
         <span className="tree-name">{node.name}</span>
       </div>
 
@@ -112,11 +122,13 @@ export function TreeNode(props: Props) {
               expanded={expandedSet.has(child.path)}
               loading={loadingSet.has(child.path)}
               error={errors.get(child.path)}
+              noPermission={noPermissionSet.has(child.path)}
               children={childrenByPath.get(child.path)}
               childrenByPath={childrenByPath}
               expandedSet={expandedSet}
               loadingSet={loadingSet}
               errors={errors}
+              noPermissionSet={noPermissionSet}
               onToggle={onToggle}
               onRetry={onRetry}
               thumb={thumb}

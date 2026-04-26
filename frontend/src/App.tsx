@@ -9,13 +9,19 @@ import { useViewerGrid, type Grid } from "./features/viewer-grid/useViewerGrid";
 import { useTree } from "./features/folder-tree/useTree";
 import { useSessionLoad } from "./features/session/useSessionLoad";
 import { useSessionSave } from "./features/session/useSessionSave";
+import { useConfirm } from "./shared/components/ConfirmDialog";
+import { ToastProvider } from "./shared/components/Toast";
 import { state } from "../wailsjs/go/models";
 import "./App.css";
 
 function App() {
   const { loaded, initialState } = useSessionLoad();
   if (!loaded) return null;
-  return <AppInner initialState={initialState} />;
+  return (
+    <ToastProvider>
+      <AppInner initialState={initialState} />
+    </ToastProvider>
+  );
 }
 
 type AppInnerProps = {
@@ -33,7 +39,8 @@ function AppInner({ initialState }: AppInnerProps) {
   const draggingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const tree = useTree({ initialRootPath: initRoot });
-  const viewer = useViewerGrid({ initialGrid: initGrid });
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const viewer = useViewerGrid({ initialGrid: initGrid, confirm });
 
   // Window dimensions/position — polled because Wails JS runtime has no
   // window-move event. Resize is handled via the browser event for snappiness.
@@ -120,7 +127,7 @@ function AppInner({ initialState }: AppInnerProps) {
   return (
     <div className="app" ref={containerRef}>
       <aside className="pane left" style={{ width: leftWidth }}>
-        <FolderPanel onImageOpen={viewer.openInActive} />
+        <FolderPanel tree={tree} onImageOpen={viewer.openInActive} />
       </aside>
       <div className="splitter" onMouseDown={onMouseDown} />
       <main className="pane right">
@@ -139,6 +146,7 @@ function AppInner({ initialState }: AppInnerProps) {
           onSetColSizes={viewer.setColSizes}
         />
       </main>
+      {confirmDialog}
     </div>
   );
 }

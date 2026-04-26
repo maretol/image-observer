@@ -102,6 +102,46 @@ func TestRead_Directory(t *testing.T) {
 	}
 }
 
+func TestReadInfo_PNG(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.png")
+	writePNG(t, src, 123, 456)
+	info, err := ReadInfo(src)
+	if err != nil {
+		t.Fatalf("ReadInfo: %v", err)
+	}
+	if info.Width != 123 || info.Height != 456 {
+		t.Errorf("dims: got %dx%d, want 123x456", info.Width, info.Height)
+	}
+	if info.MimeType != "image/png" {
+		t.Errorf("mime: got %q, want image/png", info.MimeType)
+	}
+}
+
+func TestReadInfo_NotImage(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.txt")
+	os.WriteFile(src, []byte("hi"), 0o644)
+	if _, err := ReadInfo(src); err == nil {
+		t.Error("expected error for non-image extension")
+	}
+}
+
+func TestReadInfo_NotExist(t *testing.T) {
+	if _, err := ReadInfo(filepath.Join(t.TempDir(), "nope.jpg")); err == nil {
+		t.Error("expected error for non-existent path")
+	}
+}
+
+func TestReadInfo_BrokenHeader(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "broken.png")
+	os.WriteFile(src, []byte("not a real png"), 0o644)
+	if _, err := ReadInfo(src); err == nil {
+		t.Error("expected error for broken header")
+	}
+}
+
 func TestMimeForInput(t *testing.T) {
 	cases := map[string]string{
 		".jpg":  "image/jpeg",

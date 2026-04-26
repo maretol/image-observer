@@ -3,6 +3,7 @@ import { ReadImage } from "../../../wailsjs/go/main/App";
 import { imgread } from "../../../wailsjs/go/models";
 import type { Tab } from "./useTabs";
 import { toDataURL } from "../../shared/utils/base64";
+import { useToastFn } from "../../shared/components/Toast";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8.0;
@@ -18,6 +19,7 @@ export function ImageView({ tab, tabIndex, onUpdateTabState }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [imageData, setImageData] = useState<imgread.Result | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const toast = useToastFn();
   const dragRef = useRef<{
     startX: number;
     startY: number;
@@ -43,7 +45,9 @@ export function ImageView({ tab, tabIndex, onUpdateTabState }: Props) {
       })
       .catch((e) => {
         if (cancelled) return;
-        setLoadError(errorMessage(e));
+        const msg = errorMessage(e);
+        setLoadError(msg);
+        toast(`画像読み込みに失敗: ${basename(tab.path)} — ${msg}`, "error");
       });
     return () => {
       cancelled = true;
@@ -273,4 +277,10 @@ function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (typeof e === "string") return e;
   return String(e);
+}
+
+function basename(p: string): string {
+  const norm = p.replace(/[\\/]+$/, "");
+  const idx = Math.max(norm.lastIndexOf("/"), norm.lastIndexOf("\\"));
+  return idx >= 0 ? norm.slice(idx + 1) : norm;
 }

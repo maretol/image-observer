@@ -179,9 +179,12 @@ image-observer/
         │       ├── useSessionLoad.ts   # 起動時 GetState (2 段階 mount)
         │       └── useSessionSave.ts   # 500ms debounce で SaveState
         ├── shared/                 # 機能横断ユーティリティ (どの feature からも import 可)
+        │   ├── components/         # 機能横断 UI 部品
+        │   │   ├── ConfirmDialog.tsx   # 確認ダイアログ + useConfirm()
+        │   │   └── Toast.tsx           # トースト + ToastProvider + useToastFn()
         │   ├── icons/
         │   │   ├── ChevronIcon.tsx
-        │   │   ├── FolderIcon.tsx
+        │   │   ├── FolderIcon.tsx       # className を受け取る (no-perm 等の状態色用)
         │   │   ├── ImageIcon.tsx
         │   │   ├── SpinnerIcon.tsx
         │   │   ├── ThumbErrorIcon.tsx

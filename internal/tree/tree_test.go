@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -145,7 +146,30 @@ func TestListDirectory_SymlinkToImage(t *testing.T) {
 func TestListDirectory_NotExist(t *testing.T) {
 	_, err := List(filepath.Join(t.TempDir(), "does-not-exist"))
 	if err == nil {
-		t.Error("expected error for non-existent path")
+		t.Fatal("expected error for non-existent path")
+	}
+	if msg := err.Error(); !strings.HasPrefix(msg, "NOENT:") {
+		t.Errorf("expected NOENT prefix, got %q", msg)
+	}
+}
+
+func TestListDirectory_NoPermission(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: ErrPermission is not produced")
+	}
+	dir := t.TempDir()
+	locked := filepath.Join(dir, "locked")
+	if err := os.Mkdir(locked, 0o000); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	_, err := List(locked)
+	if err == nil {
+		t.Fatal("expected permission error")
+	}
+	if msg := err.Error(); !strings.HasPrefix(msg, "PERM:") {
+		t.Errorf("expected PERM prefix, got %q", msg)
 	}
 }
 

@@ -1,15 +1,19 @@
-import { useTree } from "./useTree";
+import type { useTree } from "./useTree";
 import { useThumbnail } from "./useThumbnail";
 import { TreeNode } from "./TreeNode";
 import { ThumbnailPopup } from "./ThumbnailPopup";
 
+export type TreeApi = ReturnType<typeof useTree>;
+
 type Props = {
+  tree: TreeApi;
   onImageOpen: (path: string) => void;
 };
 
-export function FolderPanel({ onImageOpen }: Props) {
-  const { state, pickRoot, toggle, retry } = useTree();
-  const { rootPath, childrenByPath, expanded, loading, errors } = state;
+export function FolderPanel({ tree, onImageOpen }: Props) {
+  const { state, pickRoot, toggle, retry } = tree;
+  const { rootPath, childrenByPath, expanded, loading, errors, noPermission } =
+    state;
 
   const thumb = useThumbnail(256, "letterbox");
 
@@ -45,11 +49,13 @@ export function FolderPanel({ onImageOpen }: Props) {
             expanded={expanded.has(rootNode.path)}
             loading={loading.has(rootNode.path)}
             error={errors.get(rootNode.path)}
+            noPermission={noPermission.has(rootNode.path)}
             children={childrenByPath.get(rootNode.path)}
             childrenByPath={childrenByPath}
             expandedSet={expanded}
             loadingSet={loading}
             errors={errors}
+            noPermissionSet={noPermission}
             onToggle={toggle}
             onRetry={retry}
             thumb={thumbHandlers}
