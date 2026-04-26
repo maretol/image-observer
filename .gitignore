@@ -1,0 +1,16 @@
+# Wails
+build/bin/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Go
+*.exe
+*.test
+*.out
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
