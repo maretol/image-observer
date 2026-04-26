@@ -9,8 +9,8 @@ import {
   sameCoord,
   type Grid,
   type PanelCoord,
-} from "../hooks/useViewerGrid";
-import type { Tab } from "../hooks/useTabs";
+} from "./useViewerGrid";
+import type { Tab } from "./useTabs";
 
 type Props = {
   grid: Grid;

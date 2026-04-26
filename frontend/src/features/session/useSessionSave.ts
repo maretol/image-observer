@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
-import { SaveState } from "../../wailsjs/go/main/App";
-import { useDebounce } from "../utils/debounce";
-import type { Grid } from "./useViewerGrid";
+import { SaveState } from "../../../wailsjs/go/main/App";
+import { useDebounce } from "../../shared/utils/debounce";
+import type { Grid } from "../viewer-grid/useViewerGrid";
 
 export type SessionInput = {
   rootPath: string | null;

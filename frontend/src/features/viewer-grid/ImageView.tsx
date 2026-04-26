@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ReadImage } from "../../wailsjs/go/main/App";
-import { imgread } from "../../wailsjs/go/models";
-import type { Tab } from "../hooks/useTabs";
-import { toDataURL } from "../utils/base64";
+import { ReadImage } from "../../../wailsjs/go/main/App";
+import { imgread } from "../../../wailsjs/go/models";
+import type { Tab } from "./useTabs";
+import { toDataURL } from "../../shared/utils/base64";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8.0;

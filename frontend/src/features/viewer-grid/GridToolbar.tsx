@@ -1,5 +1,5 @@
-import { PlusIcon } from "../icons/PlusIcon";
-import { MinusIcon } from "../icons/MinusIcon";
+import { PlusIcon } from "../../shared/icons/PlusIcon";
+import { MinusIcon } from "../../shared/icons/MinusIcon";
 
 type Props = {
   canAddRow: boolean;

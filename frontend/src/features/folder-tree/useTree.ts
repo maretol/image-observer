@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { ListDirectory, OpenFolderDialog } from "../../wailsjs/go/main/App";
-import { tree } from "../../wailsjs/go/models";
+import { ListDirectory, OpenFolderDialog } from "../../../wailsjs/go/main/App";
+import { tree } from "../../../wailsjs/go/models";
 
 export type Node = tree.Node;
 

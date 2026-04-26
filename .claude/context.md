@@ -158,36 +158,39 @@ image-observer/
         ├── App.css          # ダーク配色 + ツリー/ボタン/スピナー/サムネポップアップ/タブ/ビューア/グリッド/コンテキストメニュー CSS
         ├── style.css        # テンプレ既定
         ├── vite-env.d.ts
-        ├── components/
-        │   ├── FolderPanel.tsx     # ピッカー + ツリー + ThumbnailPopup を統括
-        │   ├── TreeNode.tsx        # 画像ノードに onMouseEnter/Leave で thumb 連携、クリックで onImageOpen
-        │   ├── ThumbnailPopup.tsx  # ホバー時の浮きポップアップ
-        │   ├── ViewerGrid.tsx      # 右ペイン全体: GridToolbar + Panel × N + GridSplitter + TabContextMenu
-        │   ├── GridToolbar.tsx     # [+行] [+列] [-行] [-列] ボタン
-        │   ├── Panel.tsx           # 1 パネル: TabBar + ImageView + active 枠 + 画像領域右クリックでタブメニュー
-        │   ├── GridSplitter.tsx    # 行/列スプリッター (100px 最小クランプ)
-        │   ├── TabContextMenu.tsx  # タブ/画像右クリック: 閉じる + 別パネルへ移動
-        │   ├── TabBar.tsx          # タブ一覧 + クローズ + 中クリッククローズ + ホイール横スクロール + onContextMenu
-        │   └── ImageView.tsx       # 1 枚の画像表示 + zoom/pan + post-restore clampPan
-        ├── icons/
-        │   ├── ChevronIcon.tsx
-        │   ├── FolderIcon.tsx
-        │   ├── ImageIcon.tsx
-        │   ├── SpinnerIcon.tsx
-        │   ├── ThumbErrorIcon.tsx
-        │   ├── CloseIcon.tsx
-        │   ├── PlusIcon.tsx
-        │   └── MinusIcon.tsx
-        ├── hooks/
-        │   ├── useTree.ts          # ツリー状態。initialRootPath で復元 + 自動 loadChildren
-        │   ├── useThumbnail.ts     # ホバー遅延 + キャッシュ Map + GetThumbnail 呼び出し
-        │   ├── useTabs.ts          # Tab 型と newTab ファクトリのみ
-        │   ├── useViewerGrid.ts    # グリッド全体の状態管理 (MAX_ROWS/MAX_COLS 定数 + initialGrid 注入)
-        │   ├── useSessionLoad.ts   # 起動時 GetState (2 段階 mount)
-        │   └── useSessionSave.ts   # 500ms debounce で SaveState
-        ├── utils/
-        │   ├── base64.ts           # Wails []byte の number[] / string 両対応 base64 変換
-        │   └── debounce.ts         # useDebounce ヘルパ
+        ├── features/               # 機能境界 (Go internal/ と対応)
+        │   ├── folder-tree/        # ↔ internal/tree + internal/thumb
+        │   │   ├── FolderPanel.tsx     # ピッカー + ツリー + ThumbnailPopup を統括
+        │   │   ├── TreeNode.tsx        # 画像ノードに onMouseEnter/Leave で thumb 連携、クリックで onImageOpen
+        │   │   ├── ThumbnailPopup.tsx  # ホバー時の浮きポップアップ
+        │   │   ├── useTree.ts          # ツリー状態。initialRootPath で復元 + 自動 loadChildren
+        │   │   └── useThumbnail.ts     # ホバー遅延 + キャッシュ Map + GetThumbnail 呼び出し
+        │   ├── viewer-grid/        # ↔ internal/imgread
+        │   │   ├── ViewerGrid.tsx      # 右ペイン全体: GridToolbar + Panel × N + GridSplitter + TabContextMenu
+        │   │   ├── GridToolbar.tsx     # [+行] [+列] [-行] [-列] ボタン
+        │   │   ├── Panel.tsx           # 1 パネル: TabBar + ImageView + active 枠 + 画像領域右クリックでタブメニュー
+        │   │   ├── GridSplitter.tsx    # 行/列スプリッター (100px 最小クランプ)
+        │   │   ├── TabContextMenu.tsx  # タブ/画像右クリック: 閉じる + 別パネルへ移動
+        │   │   ├── TabBar.tsx          # タブ一覧 + クローズ + 中クリッククローズ + ホイール横スクロール + onContextMenu
+        │   │   ├── ImageView.tsx       # 1 枚の画像表示 + zoom/pan + post-restore clampPan
+        │   │   ├── useTabs.ts          # Tab 型と newTab ファクトリのみ
+        │   │   └── useViewerGrid.ts    # グリッド全体の状態管理 (MAX_ROWS/MAX_COLS 定数 + initialGrid 注入)
+        │   └── session/            # ↔ internal/state (永続化グルー、唯一 viewer-grid の Grid 型を import)
+        │       ├── useSessionLoad.ts   # 起動時 GetState (2 段階 mount)
+        │       └── useSessionSave.ts   # 500ms debounce で SaveState
+        ├── shared/                 # 機能横断ユーティリティ (どの feature からも import 可)
+        │   ├── icons/
+        │   │   ├── ChevronIcon.tsx
+        │   │   ├── FolderIcon.tsx
+        │   │   ├── ImageIcon.tsx
+        │   │   ├── SpinnerIcon.tsx
+        │   │   ├── ThumbErrorIcon.tsx
+        │   │   ├── CloseIcon.tsx
+        │   │   ├── PlusIcon.tsx
+        │   │   └── MinusIcon.tsx
+        │   └── utils/
+        │       ├── base64.ts           # Wails []byte の number[] / string 両対応 base64 変換
+        │       └── debounce.ts         # useDebounce ヘルパ
         └── assets/
 ```
 
@@ -226,3 +229,11 @@ Phase 3 シリーズ完結。残るは Phase G (エラー UX 改善) / H (キー
 - **`internal/state`**: セッション状態の永続化。エクスポート: `StateData` ほか各 JSON 型、`Load()`、`Save(s)`、`DefaultData()`、`StateSchemaVersion`。
 - パッケージ間依存は単方向 (`tree` → 依存なし、`thumb`/`imgread` → `tree`、`state` → 依存なし)。循環参照を避ける。
 - 新機能を追加する際は適切な internal パッケージを選び、`app.go` には Wails バインディング用の薄いラッパだけを置く。Wails の TS バインディングは Go パッケージ単位で namespace を生成する (`tree.Node`、`thumb.Result` など) ので、フロント側の型 import もそれに合わせる。
+
+## 12. フロント feature 境界 (2026-04-26 整理)
+
+- `frontend/src/features/folder-tree/`: 左ペインのツリー UI + ホバーサムネ。`internal/tree` + `internal/thumb` に対応。
+- `frontend/src/features/viewer-grid/`: 右ペインのグリッド/タブ/画像表示。`internal/imgread` に対応。
+- `frontend/src/features/session/`: セッションの保存/復元グルー。`internal/state` に対応。`useSessionSave` のみ `viewer-grid/useViewerGrid` の `Grid` 型を import するクロス feature 依存を持つ (永続化が各 feature の状態を集約するため許容)。
+- `frontend/src/shared/icons/` `frontend/src/shared/utils/`: 機能横断ユーティリティ。どの feature からも import 可。逆に shared 側から features を import しない。
+- `App.tsx` のみ複数 feature を組み合わせるオーケストレーション層。新規コンポーネント/フックは原則どれかの feature 配下に置く。横断的に再利用するユーティリティが出てきた場合のみ shared/ に昇格させる。

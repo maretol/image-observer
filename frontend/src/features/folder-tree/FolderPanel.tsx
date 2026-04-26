@@ -1,5 +1,5 @@
-import { useTree } from "../hooks/useTree";
-import { useThumbnail } from "../hooks/useThumbnail";
+import { useTree } from "./useTree";
+import { useThumbnail } from "./useThumbnail";
 import { TreeNode } from "./TreeNode";
 import { ThumbnailPopup } from "./ThumbnailPopup";
 

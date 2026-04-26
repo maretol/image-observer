@@ -1,6 +1,6 @@
-import { SpinnerIcon } from "../icons/SpinnerIcon";
-import { ThumbErrorIcon } from "../icons/ThumbErrorIcon";
-import type { CacheEntry } from "../hooks/useThumbnail";
+import { SpinnerIcon } from "../../shared/icons/SpinnerIcon";
+import { ThumbErrorIcon } from "../../shared/icons/ThumbErrorIcon";
+import type { CacheEntry } from "./useThumbnail";
 
 type Props = {
   visible: boolean;

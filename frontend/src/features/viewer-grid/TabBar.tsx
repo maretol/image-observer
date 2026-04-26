@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import { CloseIcon } from "../icons/CloseIcon";
-import type { Tab } from "../hooks/useTabs";
+import { CloseIcon } from "../../shared/icons/CloseIcon";
+import type { Tab } from "./useTabs";
 
 type Props = {
   tabs: Tab[];

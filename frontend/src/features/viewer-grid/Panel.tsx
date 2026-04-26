@@ -1,7 +1,7 @@
 import { TabBar } from "./TabBar";
 import { ImageView } from "./ImageView";
-import type { Panel as PanelData, PanelCoord } from "../hooks/useViewerGrid";
-import type { Tab } from "../hooks/useTabs";
+import type { Panel as PanelData, PanelCoord } from "./useViewerGrid";
+import type { Tab } from "./useTabs";
 
 type Props = {
   coord: PanelCoord;

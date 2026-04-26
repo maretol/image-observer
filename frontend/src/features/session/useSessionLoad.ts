@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { GetState } from "../../wailsjs/go/main/App";
-import { state } from "../../wailsjs/go/models";
+import { GetState } from "../../../wailsjs/go/main/App";
+import { state } from "../../../wailsjs/go/models";
 
 export function useSessionLoad() {
   const [loaded, setLoaded] = useState(false);

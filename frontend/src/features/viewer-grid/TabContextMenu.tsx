@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { Grid, PanelCoord } from "../hooks/useViewerGrid";
+import type { Grid, PanelCoord } from "./useViewerGrid";
 
 type Props = {
   srcCoord: PanelCoord;

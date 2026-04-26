@@ -1,8 +1,8 @@
-import { ChevronIcon } from "../icons/ChevronIcon";
-import { FolderIcon } from "../icons/FolderIcon";
-import { ImageIcon } from "../icons/ImageIcon";
-import { SpinnerIcon } from "../icons/SpinnerIcon";
-import type { Node } from "../hooks/useTree";
+import { ChevronIcon } from "../../shared/icons/ChevronIcon";
+import { FolderIcon } from "../../shared/icons/FolderIcon";
+import { ImageIcon } from "../../shared/icons/ImageIcon";
+import { SpinnerIcon } from "../../shared/icons/SpinnerIcon";
+import type { Node } from "./useTree";
 
 export type ThumbHandlers = {
   onEnter: (path: string, rect: DOMRect) => void;

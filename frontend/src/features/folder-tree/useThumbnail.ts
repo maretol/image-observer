@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { GetThumbnail } from "../../wailsjs/go/main/App";
-import { thumb } from "../../wailsjs/go/models";
-import { toDataURL } from "../utils/base64";
+import { GetThumbnail } from "../../../wailsjs/go/main/App";
+import { thumb } from "../../../wailsjs/go/models";
+import { toDataURL } from "../../shared/utils/base64";
 
 export type ThumbMode = "letterbox" | "crop";
 

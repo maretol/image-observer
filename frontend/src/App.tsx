@@ -3,12 +3,12 @@ import {
   WindowGetSize,
   WindowGetPosition,
 } from "../wailsjs/runtime/runtime";
-import { FolderPanel } from "./components/FolderPanel";
-import { ViewerGrid } from "./components/ViewerGrid";
-import { useViewerGrid, type Grid } from "./hooks/useViewerGrid";
-import { useTree } from "./hooks/useTree";
-import { useSessionLoad } from "./hooks/useSessionLoad";
-import { useSessionSave } from "./hooks/useSessionSave";
+import { FolderPanel } from "./features/folder-tree/FolderPanel";
+import { ViewerGrid } from "./features/viewer-grid/ViewerGrid";
+import { useViewerGrid, type Grid } from "./features/viewer-grid/useViewerGrid";
+import { useTree } from "./features/folder-tree/useTree";
+import { useSessionLoad } from "./features/session/useSessionLoad";
+import { useSessionSave } from "./features/session/useSessionSave";
 import { state } from "../wailsjs/go/models";
 import "./App.css";
 
