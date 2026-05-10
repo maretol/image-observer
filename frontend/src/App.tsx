@@ -96,6 +96,18 @@ function AppInner({ initialState }: AppInnerProps) {
   const onSelectList = useCallback(() => setTopTab("list"), []);
   const onSelectViewer = useCallback(() => setTopTab("viewer"), []);
 
+  // Open a list-tab image in the viewer's active panel and switch tabs.
+  // The list view stays scrolled where it was so the user can come back.
+  const onOpenInViewer = useCallback(
+    (filename: string) => {
+      const folder = classification.folderPath;
+      if (!folder) return;
+      void viewer.openInActive(`${folder}/${filename}`);
+      setTopTab("viewer");
+    },
+    [classification.folderPath, viewer],
+  );
+
   return (
     <div className="app-toplevel">
       <nav className="top-tabs" role="tablist" aria-label="トップレベルタブ">
@@ -120,7 +132,10 @@ function AppInner({ initialState }: AppInnerProps) {
       </nav>
       <div className="top-tab-content">
         {topTab === "list" ? (
-          <ClassificationView state={classification} />
+          <ClassificationView
+            state={classification}
+            onOpenInViewer={onOpenInViewer}
+          />
         ) : (
           <ViewerGrid
             grid={viewer.grid}

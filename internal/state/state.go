@@ -8,9 +8,10 @@ import (
 	"path/filepath"
 )
 
-// StateSchemaVersion is bumped to 2 in Phase 4 (top-level tabs + classification list).
-// v1 → v2: no migration; v1 files fall back to defaults via Load().
-const StateSchemaVersion = 2
+// StateSchemaVersion is bumped to 3 in Phase 4 v1.2 (subdirectory grouping
+// adds CollapsedGroups to ListTabState). Earlier versions fall back to
+// DefaultData() — no migration is performed.
+const StateSchemaVersion = 3
 
 type StateData struct {
 	Version int `json:"version"`
@@ -25,9 +26,16 @@ type StateData struct {
 }
 
 // ListTabState holds per-folder UI state for the list (classification) tab.
+//
+// CollapsedGroups (v3): the directory-group keys (POSIX relative paths from
+// the parent folder, "." for the parent's direct files) that the user has
+// collapsed in the accordion view. Persisted so collapse state survives
+// restarts. Filtering still applies to entries in collapsed groups; collapse
+// only hides the cards visually.
 type ListTabState struct {
-	FolderPath string          `json:"folderPath"`
-	Filter     ListFilterState `json:"filter"`
+	FolderPath      string          `json:"folderPath"`
+	Filter          ListFilterState `json:"filter"`
+	CollapsedGroups []string        `json:"collapsedGroups"`
 }
 
 // ListFilterState mirrors the frontend filter store. Tags are an OR set;
@@ -107,6 +115,7 @@ func defaultListTabState() ListTabState {
 			Confidence: "all",
 			Query:      "",
 		},
+		CollapsedGroups: []string{},
 	}
 }
 
@@ -207,6 +216,9 @@ func validateState(s *StateData) error {
 	}
 	if s.List.Filter.Tags == nil {
 		s.List.Filter.Tags = []string{}
+	}
+	if s.List.CollapsedGroups == nil {
+		s.List.CollapsedGroups = []string{}
 	}
 	switch s.List.Filter.Confidence {
 	case "all", "high", "mid", "low":

@@ -1,5 +1,23 @@
 export namespace classification {
 	
+	export class ChildSidecarSummary {
+	    subfolder: string;
+	    source: string;
+	    entryCount: number;
+	    nonEmptyCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChildSidecarSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.subfolder = source["subfolder"];
+	        this.source = source["source"];
+	        this.entryCount = source["entryCount"];
+	        this.nonEmptyCount = source["nonEmptyCount"];
+	    }
+	}
 	export class Entry {
 	    filename: string;
 	    folder: string;
@@ -38,6 +56,44 @@ export namespace classification {
 	        this.hasSidecar = source["hasSidecar"];
 	        this.source = source["source"];
 	        this.mtime = source["mtime"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class MergePreview {
+	    folderPath: string;
+	    children: ChildSidecarSummary[];
+	    hasNonTrivial: boolean;
+	    totalEntries: number;
+	    totalNonEmpty: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new MergePreview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.folderPath = source["folderPath"];
+	        this.children = this.convertValues(source["children"], ChildSidecarSummary);
+	        this.hasNonTrivial = source["hasNonTrivial"];
+	        this.totalEntries = source["totalEntries"];
+	        this.totalNonEmpty = source["totalNonEmpty"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -237,6 +293,7 @@ export namespace state {
 	export class ListTabState {
 	    folderPath: string;
 	    filter: ListFilterState;
+	    collapsedGroups: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ListTabState(source);
@@ -246,6 +303,7 @@ export namespace state {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.folderPath = source["folderPath"];
 	        this.filter = this.convertValues(source["filter"], ListFilterState);
+	        this.collapsedGroups = source["collapsedGroups"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

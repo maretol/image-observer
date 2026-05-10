@@ -54,7 +54,9 @@ export function Card({ folderPath, entry, onClickThumb, onClickEdit }: CardProps
         </button>
       </div>
       <div className="cls-card-info">
-        <div className="cls-card-filename">{entry.filename}</div>
+        <div className="cls-card-filename" title={entry.filename}>
+          {entry.filename}
+        </div>
         <div className="cls-card-badges">
           <span
             className={`cls-badge cls-badge-folder cls-badge-${folderClass(entry.folder)}`}

@@ -17,7 +17,10 @@ import (
 type SidecarRepository interface {
 	// Load reads either _classification.json (preferred) or _classification.csv
 	// from folderPath. Returns Source="none" with nil Data when neither exists.
-	// Mtime is the UnixNano of _classification.json (0 if absent or CSV-only).
+	// Mtime is the UnixMilli of _classification.json (0 if absent or CSV-only).
+	// We use milliseconds, not nanoseconds, because UnixNano (~1.78e18 in 2026)
+	// exceeds JavaScript Number.MAX_SAFE_INTEGER (~9e15) and would lose precision
+	// when round-tripped through Wails IPC, breaking conflict detection.
 	Load(folderPath string) (LoadOutput, error)
 
 	// SaveJSON writes _classification.json atomically with a .bak rotation.
@@ -52,7 +55,7 @@ func (fileRepo) Load(folderPath string) (LoadOutput, error) {
 		if err != nil {
 			return LoadOutput{}, err
 		}
-		return LoadOutput{Data: c, Source: "json", Mtime: info.ModTime().UnixNano()}, nil
+		return LoadOutput{Data: c, Source: "json", Mtime: info.ModTime().UnixMilli()}, nil
 	} else if err != nil && !os.IsNotExist(err) {
 		return LoadOutput{}, fmt.Errorf("stat json: %w", err)
 	}
@@ -79,7 +82,7 @@ func (fileRepo) SaveJSON(folderPath string, c *Classification, expectedMtime int
 	// Conflict check: if expectedMtime is set, compare against current mtime.
 	if expectedMtime > 0 {
 		if info, err := os.Stat(jsonPath); err == nil {
-			if info.ModTime().UnixNano() != expectedMtime {
+			if info.ModTime().UnixMilli() != expectedMtime {
 				return 0, ErrConflict
 			}
 		} else if !os.IsNotExist(err) {
@@ -114,7 +117,7 @@ func (fileRepo) SaveJSON(folderPath string, c *Classification, expectedMtime int
 	if err != nil {
 		return 0, fmt.Errorf("stat after save: %w", err)
 	}
-	return info.ModTime().UnixNano(), nil
+	return info.ModTime().UnixMilli(), nil
 }
 
 func (r fileRepo) CreateJSON(folderPath string, c *Classification) (int64, error) {

@@ -22,8 +22,16 @@ export function LoadClassification(arg1) {
   return window['go']['main']['App']['LoadClassification'](arg1);
 }
 
+export function MergeChildSidecars(arg1) {
+  return window['go']['main']['App']['MergeChildSidecars'](arg1);
+}
+
 export function OpenFolderDialog() {
   return window['go']['main']['App']['OpenFolderDialog']();
+}
+
+export function PreviewChildSidecars(arg1) {
+  return window['go']['main']['App']['PreviewChildSidecars'](arg1);
 }
 
 export function ReadImage(arg1) {

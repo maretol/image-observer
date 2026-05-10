@@ -15,7 +15,11 @@ export function GetThumbnail(arg1:string,arg2:number,arg3:string):Promise<thumb.
 
 export function LoadClassification(arg1:string):Promise<classification.LoadResult>;
 
+export function MergeChildSidecars(arg1:string):Promise<classification.SaveOutput>;
+
 export function OpenFolderDialog():Promise<string>;
+
+export function PreviewChildSidecars(arg1:string):Promise<classification.MergePreview>;
 
 export function ReadImage(arg1:string):Promise<imgread.Result>;
 

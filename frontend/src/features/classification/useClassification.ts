@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CreateEmptyClassification,
   LoadClassification,
+  MergeChildSidecars,
   OpenFolderDialog,
+  PreviewChildSidecars,
   UpdateClassificationEntry,
 } from "../../../wailsjs/go/main/App";
 import { classification } from "../../../wailsjs/go/models";
@@ -10,13 +12,9 @@ import { state as wstate } from "../../../wailsjs/go/models";
 import { useToastFn } from "../../shared/components/Toast";
 import type { ConfirmFn } from "../viewer-grid/useViewerGrid";
 import { applyFilter, type Confidence, type ListTabFilter } from "./filters";
+import { useDirectoryGroups } from "./useDirectoryGroups";
 
 const CONFLICT_PREFIX = "CONFLICT:";
-
-export type LightboxState = {
-  open: boolean;
-  filename: string | null;
-};
 
 export type EditingState = {
   open: boolean;
@@ -28,6 +26,14 @@ export type ConflictPrompt = {
   draft: classification.Entry;
 };
 
+export type MergePromptState = {
+  open: boolean;
+  preview: classification.MergePreview | null;
+  // The folder this prompt is for. Captured at trigger time so the user can
+  // change folder selection (cancel + reopen) without contaminating state.
+  folderPath: string;
+};
+
 export type UseClassificationReturn = {
   folderPath: string;
   loadResult: classification.LoadResult | null;
@@ -35,27 +41,31 @@ export type UseClassificationReturn = {
   error: string | null;
   filter: ListTabFilter;
   filteredEntries: classification.Entry[];
-  lightbox: LightboxState;
   editing: EditingState;
   conflict: ConflictPrompt | null;
+  mergePrompt: MergePromptState;
+  collapsedGroups: string[];
+  isCollapsed: (key: string) => boolean;
+  toggleGroup: (key: string) => void;
+  expandAllGroups: () => void;
   openFolder: () => Promise<void>;
   reload: () => Promise<void>;
   setFilter: (patch: Partial<ListTabFilter>) => void;
   toggleTag: (tag: string) => void;
   clearTags: () => void;
-  openLightbox: (filename: string) => void;
-  closeLightbox: () => void;
-  nextLightbox: () => void;
-  prevLightbox: () => void;
   openEdit: (filename: string) => void;
   closeEdit: () => void;
   saveEdit: (entry: classification.Entry) => Promise<void>;
   resolveConflictReload: () => Promise<void>;
   resolveConflictForce: () => Promise<void>;
   resolveConflictCancel: () => void;
+  resolveMergeMerge: () => Promise<void>;
+  resolveMergeSkip: () => Promise<void>;
+  resolveMergeCancel: () => void;
   persistableState: {
     folderPath: string;
     filter: { tags: string[]; confidence: string; query: string };
+    collapsedGroups: string[];
   };
 };
 
@@ -80,15 +90,17 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilterState] = useState<ListTabFilter>(initFilter);
-  const [lightbox, setLightbox] = useState<LightboxState>({
-    open: false,
-    filename: null,
-  });
   const [editing, setEditing] = useState<EditingState>({
     open: false,
     filename: null,
   });
   const [conflict, setConflict] = useState<ConflictPrompt | null>(null);
+  const [mergePrompt, setMergePrompt] = useState<MergePromptState>({
+    open: false,
+    preview: null,
+    folderPath: "",
+  });
+  const groups = useDirectoryGroups(opts.initialList?.collapsedGroups ?? []);
 
   const toast = useToastFn();
   const { confirm } = opts;
@@ -120,11 +132,54 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     [toast],
   );
 
-  // Auto-load on mount if a folderPath was restored from session.
+  // postLoadFlow runs after a successful Load when the parent has no sidecar.
+  // It first looks for child sidecars to merge (one-time migration path) and
+  // falls back to the "create empty sidecar?" confirm. Used by both the
+  // explicit folder picker and the auto-load on mount, so a session-restored
+  // folder also gets the merge prompt — without this, picking a folder once
+  // and then restarting the app would silently bypass the migration.
+  const postLoadFlow = useCallback(
+    async (path: string, res: classification.LoadResult) => {
+      if (res.hasSidecar) return;
+      let preview: classification.MergePreview | null = null;
+      try {
+        preview = await PreviewChildSidecars(path);
+      } catch {
+        preview = null;
+      }
+      if (preview && preview.hasNonTrivial) {
+        setMergePrompt({ open: true, preview, folderPath: path });
+        return;
+      }
+      const create = await confirm(
+        "サイドカー (_classification.json) がありません。\n新規作成しますか?",
+      );
+      if (!create) return;
+      try {
+        await CreateEmptyClassification(path);
+      } catch (e) {
+        toast(`サイドカー作成に失敗しました: ${errorMessage(e)}`, "error");
+        return;
+      }
+      await loadInternal(path);
+    },
+    [confirm, loadInternal, toast],
+  );
+
+  // Auto-load on mount if a folderPath was restored from session. Also runs
+  // the same merge / create-empty decision tree so the user does not need to
+  // re-pick the folder to see the migration prompt after an app restart.
   useEffect(() => {
-    if (initFolderPath) {
-      loadInternal(initFolderPath);
-    }
+    if (!initFolderPath) return;
+    let cancelled = false;
+    (async () => {
+      const res = await loadInternal(initFolderPath);
+      if (cancelled || !res) return;
+      await postLoadFlow(initFolderPath, res);
+    })();
+    return () => {
+      cancelled = true;
+    };
     // Intentionally run only on mount; `initFolderPath` is a constant captured
     // at hook construction.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,20 +197,8 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     setFolderPath(picked);
     const res = await loadInternal(picked);
     if (!res) return;
-    if (!res.hasSidecar) {
-      const create = await confirm(
-        "サイドカー (_classification.json) がありません。\n新規作成しますか?",
-      );
-      if (!create) return;
-      try {
-        await CreateEmptyClassification(picked);
-      } catch (e) {
-        toast(`サイドカー作成に失敗しました: ${errorMessage(e)}`, "error");
-        return;
-      }
-      await loadInternal(picked);
-    }
-  }, [confirm, loadInternal, toast]);
+    await postLoadFlow(picked, res);
+  }, [loadInternal, postLoadFlow, toast]);
 
   const reload = useCallback(async () => {
     const cur = folderRef.current;
@@ -184,19 +227,6 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   const filteredEntries = loadResult
     ? applyFilter(loadResult.entries, filter)
     : [];
-
-  const openLightbox = useCallback((filename: string) => {
-    setLightbox({ open: true, filename });
-  }, []);
-  const closeLightbox = useCallback(() => {
-    setLightbox({ open: false, filename: null });
-  }, []);
-  const nextLightbox = useCallback(() => {
-    setLightbox((cur) => stepLightbox(cur, filteredEntries, 1));
-  }, [filteredEntries]);
-  const prevLightbox = useCallback(() => {
-    setLightbox((cur) => stepLightbox(cur, filteredEntries, -1));
-  }, [filteredEntries]);
 
   const openEdit = useCallback((filename: string) => {
     setEditing({ open: true, filename });
@@ -276,6 +306,37 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     // Editing popover stays open so the user can copy their draft if needed.
   }, []);
 
+  const resolveMergeMerge = useCallback(async () => {
+    const target = mergePrompt.folderPath;
+    if (!target) return;
+    setMergePrompt({ open: false, preview: null, folderPath: "" });
+    try {
+      await MergeChildSidecars(target);
+    } catch (e) {
+      toast(`マージに失敗しました: ${errorMessage(e)}`, "error");
+      return;
+    }
+    await loadInternal(target);
+  }, [mergePrompt, loadInternal, toast]);
+
+  const resolveMergeSkip = useCallback(async () => {
+    const target = mergePrompt.folderPath;
+    if (!target) return;
+    setMergePrompt({ open: false, preview: null, folderPath: "" });
+    try {
+      await CreateEmptyClassification(target);
+    } catch (e) {
+      toast(`サイドカー作成に失敗しました: ${errorMessage(e)}`, "error");
+      return;
+    }
+    await loadInternal(target);
+  }, [mergePrompt, loadInternal, toast]);
+
+  const resolveMergeCancel = useCallback(() => {
+    setMergePrompt({ open: false, preview: null, folderPath: "" });
+    // Folder selection persists; the user can hit "再読み込み" or pick again.
+  }, []);
+
   const persistableState = {
     folderPath,
     filter: {
@@ -283,6 +344,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       confidence: filter.confidence,
       query: filter.query,
     },
+    collapsedGroups: groups.collapsedList,
   };
 
   return {
@@ -292,38 +354,29 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     error,
     filter,
     filteredEntries,
-    lightbox,
     editing,
     conflict,
+    mergePrompt,
+    collapsedGroups: groups.collapsedList,
+    isCollapsed: groups.isCollapsed,
+    toggleGroup: groups.toggle,
+    expandAllGroups: groups.expandAll,
     openFolder,
     reload,
     setFilter,
     toggleTag,
     clearTags,
-    openLightbox,
-    closeLightbox,
-    nextLightbox,
-    prevLightbox,
     openEdit,
     closeEdit,
     saveEdit,
     resolveConflictReload,
     resolveConflictForce,
     resolveConflictCancel,
+    resolveMergeMerge,
+    resolveMergeSkip,
+    resolveMergeCancel,
     persistableState,
   };
-}
-
-function stepLightbox(
-  cur: LightboxState,
-  entries: classification.Entry[],
-  delta: number,
-): LightboxState {
-  if (!cur.open || !cur.filename || entries.length === 0) return cur;
-  const idx = entries.findIndex((e) => e.filename === cur.filename);
-  if (idx < 0) return cur;
-  const next = (idx + delta + entries.length) % entries.length;
-  return { open: true, filename: entries[next].filename };
 }
 
 function normalizeConfidence(c: string): Confidence | "all" {

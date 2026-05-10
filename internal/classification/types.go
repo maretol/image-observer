@@ -51,9 +51,10 @@ type Classification struct {
 //   sidecar are appended with empty Folder/Confidence/Note.
 // - Orphans: in the sidecar but no file on disk. Hidden from the grid but
 //   preserved when saving so the user does not lose intentional records.
-// - Mtime: UnixNano of _classification.json at load time. Used by the
+// - Mtime: UnixMilli of _classification.json at load time. Used by the
 //   frontend to pass back to Save/UpdateEntry for conflict detection.
 //   Zero when no JSON file exists.
+//   (Milliseconds — not nanoseconds — to fit JS Number safe-integer range.)
 type LoadResult struct {
 	FolderPath string  `json:"folderPath"`
 	Entries    []Entry `json:"entries"`
@@ -78,3 +79,32 @@ var ErrAlreadyExists = errors.New("classification: sidecar already exists")
 
 // ErrDuplicate signals duplicate filename entries in the sidecar.
 var ErrDuplicate = errors.New("classification: duplicate filename in entries")
+
+// ChildSidecarSummary describes one child-folder sidecar that is a candidate
+// for the initial parent-merge flow (Phase 4 v1.2).
+//
+// Subfolder is the relative POSIX path from the parent (e.g. "child1" or
+// "child1/sub"). Source is "json" or "csv". EntryCount is the total number of
+// rows in the child sidecar. NonEmptyCount is the count of rows that carry
+// real data (Folder, Confidence, or Note set) — the prompt is only shown when
+// NonEmptyCount > 0 across all candidates so users are not bothered by
+// blank-template sidecars.
+type ChildSidecarSummary struct {
+	Subfolder     string `json:"subfolder"`
+	Source        string `json:"source"`
+	EntryCount    int    `json:"entryCount"`
+	NonEmptyCount int    `json:"nonEmptyCount"`
+}
+
+// MergePreview is the result of scanning a parent folder for child sidecars.
+// HasNonTrivial == true means at least one ChildSidecarSummary contributes
+// data worth merging; the frontend uses this to decide whether to show the
+// merge prompt. When false, the caller should proceed to the normal
+// "create empty sidecar?" flow.
+type MergePreview struct {
+	FolderPath     string                `json:"folderPath"`
+	Children       []ChildSidecarSummary `json:"children"`
+	HasNonTrivial  bool                  `json:"hasNonTrivial"`
+	TotalEntries   int                   `json:"totalEntries"`
+	TotalNonEmpty  int                   `json:"totalNonEmpty"`
+}

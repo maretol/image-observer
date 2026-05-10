@@ -189,10 +189,10 @@ func TestLoadState_V1FallsBackToDefault(t *testing.T) {
 	}
 }
 
-func TestDefaultData_V2Fields(t *testing.T) {
+func TestDefaultData_V3Fields(t *testing.T) {
 	d := DefaultData()
-	if d.Version != 2 {
-		t.Errorf("Version = %d, want 2", d.Version)
+	if d.Version != 3 {
+		t.Errorf("Version = %d, want 3", d.Version)
 	}
 	if d.TopTab != "list" {
 		t.Errorf("TopTab = %q, want list", d.TopTab)
@@ -202,6 +202,24 @@ func TestDefaultData_V2Fields(t *testing.T) {
 	}
 	if d.List.Filter.Tags == nil {
 		t.Errorf("default Tags must be non-nil empty slice")
+	}
+	if d.List.CollapsedGroups == nil {
+		t.Errorf("default CollapsedGroups must be non-nil empty slice")
+	}
+}
+
+func TestSaveLoadState_V3CollapsedGroupsRoundTrip(t *testing.T) {
+	setStateFile(t)
+	in := DefaultData()
+	in.List.CollapsedGroups = []string{"child1", "child2/sub"}
+	if err := Save(in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out := Load()
+	if len(out.List.CollapsedGroups) != 2 ||
+		out.List.CollapsedGroups[0] != "child1" ||
+		out.List.CollapsedGroups[1] != "child2/sub" {
+		t.Errorf("CollapsedGroups roundtrip: %v", out.List.CollapsedGroups)
 	}
 }
 

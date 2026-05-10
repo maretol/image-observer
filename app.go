@@ -106,6 +106,24 @@ func (a *App) CreateEmptyClassification(folderPath string) (classification.SaveO
 	return classification.SaveOutput{Mtime: mtime}, nil
 }
 
+// PreviewChildSidecars scans the parent folder's immediate children for
+// existing sidecars and reports what could be merged. Used for the one-time
+// "merge from children" prompt; see spec-classification.md §5.12.
+func (a *App) PreviewChildSidecars(folderPath string) (*classification.MergePreview, error) {
+	return a.classification.PreviewChildSidecars(folderPath)
+}
+
+// MergeChildSidecars consumes child sidecars and writes a parent sidecar with
+// filenames prefixed by their child folder name. Returns ErrAlreadyExists if
+// the parent already has a sidecar (frontend should gate the call).
+func (a *App) MergeChildSidecars(folderPath string) (classification.SaveOutput, error) {
+	mtime, err := a.classification.MergeChildSidecars(folderPath)
+	if err != nil {
+		return classification.SaveOutput{}, classificationError(err)
+	}
+	return classification.SaveOutput{Mtime: mtime}, nil
+}
+
 // classificationError tags conflict errors with a "CONFLICT:" prefix so the
 // frontend can detect them via error.message and show the resolution dialog.
 func classificationError(err error) error {

@@ -10,6 +10,7 @@ export type ListPersist = {
     confidence: string; // "all" | "high" | "mid" | "low"
     query: string;
   };
+  collapsedGroups: string[];
 };
 
 export type SessionInput = {
@@ -20,7 +21,7 @@ export type SessionInput = {
 };
 
 const SAVE_DEBOUNCE_MS = 500;
-const STATE_SCHEMA_VERSION = 2;
+const STATE_SCHEMA_VERSION = 3;
 
 export function useSessionSave(input: SessionInput) {
   const serialized = JSON.stringify(input);
@@ -76,6 +77,7 @@ function buildStateData(input: SessionInput) {
         confidence: input.list.filter.confidence,
         query: input.list.filter.query,
       },
+      collapsedGroups: input.list.collapsedGroups,
     },
   };
 }
