@@ -6,9 +6,10 @@ name: CI
 # `release.yml` on tag pushes (Windows-only, see docs/todo.md §I-5).
 
 on:
-  push:
-    branches: ["**"]
   pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 # Cancel superseded runs on the same branch to save Actions minutes.
 concurrency:
@@ -31,12 +32,8 @@ jobs:
   test:
     name: Test (Go + frontend)
     runs-on: ubuntu-latest
-    # Tied to a GitHub Environment so branch / tag rules can be enforced
-    # at the GitHub side (Settings → Environments → "ci"). The status
-    # check that branch protection rules pick up is "CI / Test (Go + frontend)".
-    # The "ci" environment must exist in the repo settings before this
-    # workflow runs — otherwise the job fails with a missing-environment error.
-    environment: ci
+    environment:
+      name: ci
     steps:
       - name: Checkout
         uses: actions/checkout@v6
