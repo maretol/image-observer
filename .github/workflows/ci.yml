@@ -55,7 +55,12 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Go test
-        run: go test ./...
+        # `./...` would also try to build the `main` package, which has
+        # `//go:embed all:frontend/dist` — that directory is gitignored and
+        # only produced by `wails build`. All Go tests live under
+        # `internal/`, so scope to that and skip the frontend build here.
+        # `wails build` (in release.yml) is what actually verifies main.
+        run: go test ./internal/...
 
       - name: Frontend install
         working-directory: frontend
