@@ -258,6 +258,7 @@ function AppInner({ initialState }: AppInnerProps) {
         {topTab === "list" ? (
           <ClassificationView
             state={classification}
+            multiSelectMode={settings.data?.multiSelectMode}
             onOpenInViewer={onOpenInViewer}
             onOpenManyInTabs={onOpenManyInTabs}
             onOpenManyAsSplit={onOpenManyAsSplit}

@@ -9,10 +9,14 @@ export type DirectoryGroupProps = {
   collapsed: boolean;
   folderPath: string;
   isSelected: (filename: string) => boolean;
+  selectionMode: boolean;
+  showCheckbox: boolean;
+  modifierEnabled: boolean;
   onToggle: (key: string) => void;
   onClickThumb: (filename: string) => void;
   onClickEdit: (filename: string) => void;
   onToggleSelect: (filename: string) => void;
+  onExtendSelectionTo: (filename: string) => void;
 };
 
 export function DirectoryGroup({
@@ -21,10 +25,14 @@ export function DirectoryGroup({
   collapsed,
   folderPath,
   isSelected,
+  selectionMode,
+  showCheckbox,
+  modifierEnabled,
   onToggle,
   onClickThumb,
   onClickEdit,
   onToggleSelect,
+  onExtendSelectionTo,
 }: DirectoryGroupProps) {
   const filteredCount = group.entries.length;
   return (
@@ -51,9 +59,13 @@ export function DirectoryGroup({
               folderPath={folderPath}
               entry={entry}
               selected={isSelected(entry.filename)}
+              selectionMode={selectionMode}
+              showCheckbox={showCheckbox}
+              modifierEnabled={modifierEnabled}
               onClickThumb={() => onClickThumb(entry.filename)}
               onClickEdit={() => onClickEdit(entry.filename)}
               onToggleSelect={() => onToggleSelect(entry.filename)}
+              onExtendSelectionTo={() => onExtendSelectionTo(entry.filename)}
             />
           ))}
         </div>

@@ -13,6 +13,9 @@ import type { UseClassificationReturn } from "./useClassification";
 
 export type ClassificationViewProps = {
   state: UseClassificationReturn;
+  // "checkbox" (default) | "modifier" | "both" — see settings.SettingsData.
+  // Falls back to "checkbox" while settings load.
+  multiSelectMode?: string;
   onOpenInViewer: (filename: string) => void;
   onOpenManyInTabs: (filenames: string[]) => void;
   onOpenManyAsSplit: (filenames: string[]) => void;
@@ -24,6 +27,7 @@ const SPLIT_OPEN_LIMIT = 8;
 
 export function ClassificationView({
   state,
+  multiSelectMode = "checkbox",
   onOpenInViewer,
   onOpenManyInTabs,
   onOpenManyAsSplit,
@@ -44,6 +48,7 @@ export function ClassificationView({
     selectedFilenames,
     isSelected,
     toggleSelected,
+    extendSelectionTo,
     clearSelected,
     openFolder,
     reload,
@@ -87,6 +92,19 @@ export function ClassificationView({
     () => groupByDirectory(filteredEntries),
     [filteredEntries],
   );
+
+  // Flat order of currently visible cards for Shift+click range selection.
+  // Folds the groups in display order; collapsed groups are still included
+  // (range can span across collapsed sections, matching Finder behavior).
+  const displayedOrder = useMemo(
+    () => filteredGroups.flatMap((g) => g.entries.map((e) => e.filename)),
+    [filteredGroups],
+  );
+
+  const showCheckbox =
+    multiSelectMode === "checkbox" || multiSelectMode === "both";
+  const modifierEnabled =
+    multiSelectMode === "modifier" || multiSelectMode === "both";
 
   if (!folderPath) {
     return (
@@ -196,10 +214,16 @@ export function ClassificationView({
               collapsed={isCollapsed(g.key)}
               folderPath={folderPath}
               isSelected={isSelected}
+              selectionMode={selectedFilenames.length > 0}
+              showCheckbox={showCheckbox}
+              modifierEnabled={modifierEnabled}
               onToggle={toggleGroup}
               onClickThumb={onOpenInViewer}
               onClickEdit={openEdit}
               onToggleSelect={toggleSelected}
+              onExtendSelectionTo={(filename) =>
+                extendSelectionTo(filename, displayedOrder)
+              }
             />
           ))}
         </div>

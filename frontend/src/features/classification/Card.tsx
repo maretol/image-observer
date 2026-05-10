@@ -9,18 +9,32 @@ export type CardProps = {
   folderPath: string;
   entry: classification.Entry;
   selected: boolean;
+  // True when at least one card in the current view is selected. While ON,
+  // a thumb click toggles selection instead of opening the image — Finder-
+  // like behavior so the user can build up a multi-select without aiming at
+  // the small checkbox each time. The edit-pencil button is unaffected.
+  selectionMode: boolean;
+  // Whether the always-visible checkbox is rendered (modes: checkbox / both).
+  showCheckbox: boolean;
+  // Whether Ctrl-click and Shift-click change behavior (modes: modifier / both).
+  modifierEnabled: boolean;
   onClickThumb: () => void;
   onClickEdit: () => void;
   onToggleSelect: () => void;
+  onExtendSelectionTo: () => void;
 };
 
 export function Card({
   folderPath,
   entry,
   selected,
+  selectionMode,
+  showCheckbox,
+  modifierEnabled,
   onClickThumb,
   onClickEdit,
   onToggleSelect,
+  onExtendSelectionTo,
 }: CardProps) {
   const fullPath = `${folderPath}/${entry.filename}`;
   const { ref, url, state } = useGridThumbnail(fullPath);
@@ -34,8 +48,28 @@ export function Card({
       <div
         ref={ref}
         className="cls-card-thumb"
-        onClick={onClickThumb}
+        onClick={(e) => {
+          if (modifierEnabled && e.shiftKey) {
+            onExtendSelectionTo();
+            return;
+          }
+          if (modifierEnabled && (e.ctrlKey || e.metaKey)) {
+            onToggleSelect();
+            return;
+          }
+          // Plain click. With a visible checkbox + an existing selection we
+          // treat clicks as "extend the selection set" (Finder-like). Modifier
+          // mode skips this branch and always opens the image.
+          if (showCheckbox && selectionMode) {
+            onToggleSelect();
+            return;
+          }
+          onClickThumb();
+        }}
         title={entry.filename}
+        style={
+          showCheckbox && selectionMode ? { cursor: "pointer" } : undefined
+        }
       >
         {url ? (
           <img
@@ -49,18 +83,20 @@ export function Card({
             <ThumbErrorIcon />
           </span>
         ) : null}
-        <label
-          className="cls-card-select"
-          onClick={(e) => e.stopPropagation()}
-          title={selected ? "選択を解除" : "選択"}
-        >
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={onToggleSelect}
-            aria-label={`${entry.filename} を選択`}
-          />
-        </label>
+        {showCheckbox ? (
+          <label
+            className="cls-card-select"
+            onClick={(e) => e.stopPropagation()}
+            title={selected ? "選択を解除" : "選択"}
+          >
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onToggleSelect}
+              aria-label={`${entry.filename} を選択`}
+            />
+          </label>
+        ) : null}
         <button
           type="button"
           className="cls-card-edit"

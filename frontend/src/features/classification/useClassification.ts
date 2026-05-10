@@ -56,6 +56,12 @@ export type UseClassificationReturn = {
   selectedFilenames: string[];
   isSelected: (filename: string) => boolean;
   toggleSelected: (filename: string) => void;
+  // Range select: if an anchor is set (most recent toggle), select every
+  // filename between the anchor and `filename` in `displayedOrder` (which
+  // the caller computes from the visible group ordering). With no anchor or
+  // when either endpoint isn't in the displayed order, falls back to a
+  // single toggle.
+  extendSelectionTo: (filename: string, displayedOrder: string[]) => void;
   clearSelected: () => void;
   openFolder: () => Promise<void>;
   reload: () => Promise<void>;
@@ -110,6 +116,9 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     folderPath: "",
   });
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  // Anchor for Shift+click range selection. Set on every toggle (single or
+  // ctrl); persists across shift-extends so the user can adjust the range.
+  const [selectAnchor, setSelectAnchor] = useState<string | null>(null);
   const groups = useDirectoryGroups(opts.initialList?.collapsedGroups ?? []);
 
   const toast = useToastFn();
@@ -205,8 +214,9 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     }
     if (!picked) return; // user cancelled
     setFolderPath(picked);
-    // Folder change invalidates filename-keyed selection.
+    // Folder change invalidates filename-keyed selection (and its anchor).
     setSelected(new Set());
+    setSelectAnchor(null);
     const res = await loadInternal(picked);
     if (!res) return;
     await postLoadFlow(picked, res);
@@ -253,10 +263,45 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       else next.add(filename);
       return next;
     });
+    setSelectAnchor(filename);
   }, []);
+  const extendSelectionTo = useCallback(
+    (filename: string, displayedOrder: string[]) => {
+      const anchor = selectAnchorRef.current;
+      // No anchor / either endpoint missing → degrade to a plain toggle.
+      const startIdx = anchor != null ? displayedOrder.indexOf(anchor) : -1;
+      const endIdx = displayedOrder.indexOf(filename);
+      if (startIdx < 0 || endIdx < 0) {
+        setSelected((cur) => {
+          const next = new Set(cur);
+          if (next.has(filename)) next.delete(filename);
+          else next.add(filename);
+          return next;
+        });
+        setSelectAnchor(filename);
+        return;
+      }
+      const [lo, hi] =
+        startIdx <= endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+      const range = displayedOrder.slice(lo, hi + 1);
+      setSelected((cur) => {
+        const next = new Set(cur);
+        for (const f of range) next.add(f);
+        return next;
+      });
+      // Anchor stays put so the user can re-shift to a different end-point.
+    },
+    [],
+  );
   const clearSelected = useCallback(() => {
     setSelected((cur) => (cur.size === 0 ? cur : new Set()));
+    setSelectAnchor(null);
   }, []);
+  // Mirror anchor into a ref so extendSelectionTo's identity stays stable.
+  const selectAnchorRef = useRef<string | null>(selectAnchor);
+  useEffect(() => {
+    selectAnchorRef.current = selectAnchor;
+  }, [selectAnchor]);
   const selectedFilenames = Array.from(selected).sort();
 
   const openEdit = useCallback((filename: string) => {
@@ -405,6 +450,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     selectedFilenames,
     isSelected,
     toggleSelected,
+    extendSelectionTo,
     clearSelected,
     openFolder,
     reload,

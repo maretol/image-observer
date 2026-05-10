@@ -33,6 +33,7 @@ Wails v2 (Go バックエンド + React/TS フロント) で実装する **Windo
    - **main.go 連携**: 起動時 `settings.Load()` でログレベルを env-var resolve よりも後に上書き。
    - **フロント `useSettings` hook**: 起動時 `GetSettings` → React state、`update(patch)` / `reset()` で round-trip + logger 仕込み。
    - **設定モーダル** ([SettingsDialog.tsx](../frontend/src/features/settings/SettingsDialog.tsx)): 上部タブバー右端の歯車アイコンで開く。セクション (ロギング: level + ログパス表示 / 一覧タブ: multiSelectMode segment / キーバインド表) + フッタ (既定値に戻す / 閉じる)。Esc / バックドロップクリックで閉じる。
+- **Phase H UX 修正 (実装完了)**: 一覧の選択 UX とビューアの自動再配置を改善。(1) **選択モード時のクリック挙動**: 選択 ≥1 で Card のサムネクリックも選択トグルに変わる (Finder 風)。`Card` に `selectionMode` prop を追加、`ClassificationView` で `selectedFilenames.length > 0` を派生して伝搬。(2) **ビューアパネル再配置 (ResizeObserver)**: パネル / ウィンドウの寸法変化を ImageView の container で観察し、軸独立で再配置: 「収まる軸 → 中央」「はみ出す軸 → 旧 vp 中心の画像ピクセルを新 vp 中心に維持 → clampPan」。zoom は変更しない。effect 内ローカル closure で前回サイズ保持、`tab.initialized` 後に動作。(3) **複数選択モードのオプション化** (案 B 実装): 設定 `multiSelectMode = "checkbox" | "modifier" | "both"` で動作切替。`useClassification` に `selectAnchor` (state) + `extendSelectionTo(filename, displayedOrder)` を追加。Card は `showCheckbox` / `modifierEnabled` の 2 prop で表示と修飾キー反応を分岐。displayedOrder は `ClassificationView` で `groupByDirectory` の結果を flatMap して算出 (collapsed group も含む)。
 - **Phase H4 キーバインド (実装完了)**: ビューア向けキーバインドと DnD Esc キャンセルを実装。
    - **Esc (DnD active 時)**: `useDnD` 内 keydown ハンドラでドロップせずキャンセル + body styles 復元 + `dnd.cancel reason=escape` ログ。
    - **App.tsx グローバル keydown** (viewer タブ + 非エディタブル要素時のみ):

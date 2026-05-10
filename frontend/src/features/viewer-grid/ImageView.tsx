@@ -89,6 +89,57 @@ export function ImageView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.initialized, tab.imageWidth, tab.imageHeight]);
 
+  // Re-pan on viewport (panel) resize. Axis-independent rule:
+  //   - axis where image fits   → center on that axis
+  //   - axis where image hangs  → keep the image-pixel that was at the
+  //                                viewport's geometric center, then clamp
+  // Zoom is never modified here. See spec note in `Phase H UI/UX 修正`.
+  useEffect(() => {
+    if (!tab.initialized) return;
+    const el = containerRef.current;
+    if (!el) return;
+    let prev: { w: number; h: number } | null = null;
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (!cr) return;
+      const newW = cr.width;
+      const newH = cr.height;
+      if (newW <= 0 || newH <= 0) return;
+      const t = tabRef.current;
+      if (t.imageWidth <= 0 || t.imageHeight <= 0 || t.zoom <= 0) return;
+      // First callback after attach records the baseline; nothing to recompute.
+      if (!prev) {
+        prev = { w: newW, h: newH };
+        return;
+      }
+      if (prev.w === newW && prev.h === newH) return;
+
+      const renderedW = t.imageWidth * t.zoom;
+      const renderedH = t.imageHeight * t.zoom;
+      let nx: number;
+      let ny: number;
+      if (renderedW <= newW) {
+        nx = (newW - renderedW) / 2;
+      } else {
+        const imgCenterPx = (prev.w / 2 - t.panX) / t.zoom;
+        nx = newW / 2 - imgCenterPx * t.zoom;
+      }
+      if (renderedH <= newH) {
+        ny = (newH - renderedH) / 2;
+      } else {
+        const imgCenterPy = (prev.h / 2 - t.panY) / t.zoom;
+        ny = newH / 2 - imgCenterPy * t.zoom;
+      }
+      ({ panX: nx, panY: ny } = clampPan(nx, ny, renderedW, renderedH, newW, newH));
+      prev = { w: newW, h: newH };
+      if (nx !== t.panX || ny !== t.panY) {
+        updateRef.current(tabIndexRef.current, { panX: nx, panY: ny });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tab.initialized]);
+
   // After session restore: tab.initialized is true but imageWidth/Height start at 0.
   // Once they arrive (from ReadImage), the saved pan may be out of range if the
   // window was resized between sessions. Clamp once when dims become known.

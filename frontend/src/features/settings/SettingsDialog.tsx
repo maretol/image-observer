@@ -24,13 +24,17 @@ const MULTI_SELECT_MODES: Array<{
   label: string;
   hint: string;
 }> = [
-  { value: "checkbox", label: "チェックボックス", hint: "Card 左上のチェックで選択 (現状)" },
+  { value: "checkbox", label: "チェックボックス", hint: "Card 左上のチェックで選択" },
   {
     value: "modifier",
     label: "修飾キー",
-    hint: "Ctrl+クリックでトグル / Shift+クリックで範囲 (将来実装)",
+    hint: "Ctrl+クリックでトグル / Shift+クリックで範囲選択",
   },
-  { value: "both", label: "両方", hint: "チェックボックス + 修飾キー (将来実装)" },
+  {
+    value: "both",
+    label: "両方",
+    hint: "チェックボックス + Ctrl/Shift+クリック",
+  },
 ];
 
 export function SettingsDialog({
@@ -114,7 +118,7 @@ export function SettingsDialog({
               <Section title="一覧タブ">
                 <Field
                   label="複数選択 UI"
-                  hint="`修飾キー` と `両方` は将来実装予定の選択肢です (現状はチェックボックスのみ動作)"
+                  hint="チェックボックスは Card 左上のチェックで操作、修飾キーは Ctrl+クリック (トグル) と Shift+クリック (範囲選択) で操作します"
                 >
                   <div className="settings-segment">
                     {MULTI_SELECT_MODES.map((opt) => (
@@ -214,6 +218,16 @@ const KEYBINDINGS: Array<{ keys: string; action: string; scope: string }> = [
   { keys: "Ctrl+1", action: "画像を 100% 表示", scope: "ビューア" },
   { keys: "Ctrl++ / Ctrl+=", action: "ズームイン (中心基準)", scope: "ビューア" },
   { keys: "Ctrl+-", action: "ズームアウト (中心基準)", scope: "ビューア" },
+  {
+    keys: "Ctrl+クリック",
+    action: "Card の選択トグル (修飾キー / 両方モード)",
+    scope: "一覧",
+  },
+  {
+    keys: "Shift+クリック",
+    action: "アンカーから現在位置まで範囲選択 (修飾キー / 両方モード)",
+    scope: "一覧",
+  },
 ];
 
 function KeybindingsTable() {
