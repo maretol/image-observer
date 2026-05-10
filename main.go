@@ -20,6 +20,12 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// Version is the build-time release tag, injected via:
+//   go build -ldflags "-X main.Version=v0.1.0"
+// (Wails forwards `-ldflags` from `wails build`.) Untagged builds (local
+// `wails dev` / `wails build` without a flag) leave it as the dev sentinel.
+var Version = "dev"
+
 func main() {
 	// Logging first: any later panic / state-load issue should land in the file.
 	if err := logging.Init(); err != nil {
@@ -39,7 +45,7 @@ func main() {
 		}
 	}()
 
-	logging.Info("app", "starting")
+	logging.Info("app", "starting", "version", Version)
 
 	// Apply persisted user settings: e.g., the log level the user picked in
 	// the settings UI overrides the env-var-resolved level chosen at Init().

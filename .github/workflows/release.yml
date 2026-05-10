@@ -1,0 +1,88 @@
+name: Release
+
+# Builds Windows artifacts (portable EXE + NSIS installer) and uploads them
+# to GitHub Releases when a `v*` tag is pushed. Tag is the source of truth
+# for the version — `wails.json` and the Go-side `main.Version` are derived
+# from it at build time and not committed (see docs/todo.md §I-2).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  # action-gh-release needs to create / update the Release.
+  contents: write
+
+# Toolchain versions are centralised here so future bumps touch one place.
+# Keep these in sync with `.github/workflows/ci.yml`. (`uses:` action pins
+# like `@v6` cannot be templated by GitHub Actions — those still live inline.)
+env:
+  # Pinned to the goenv global on the dev machine (CLAUDE.md).
+  GO_VERSION: "1.26.2"
+  NODE_VERSION: "22"
+  # Wails CLI pin — keep in sync with .claude/context.md §5.
+  WAILS_CLI_VERSION: "v2.12.0"
+
+jobs:
+  build:
+    name: Build & release (windows-latest)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_CLI_VERSION }}
+
+      - name: Resolve version from tag
+        id: version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"      # e.g. v0.1.0
+          VERSION="${TAG#v}"                  # e.g. 0.1.0
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building tag=${TAG} version=${VERSION}"
+
+      - name: Patch wails.json productVersion
+        # Tag is the source of truth; flip the placeholder ("0.0.0") in
+        # wails.json to the real version for this build only. Not committed.
+        shell: bash
+        run: |
+          sed -i 's/"productVersion": "[^"]*"/"productVersion": "${{ steps.version.outputs.version }}"/' wails.json
+          grep productVersion wails.json
+
+      - name: Wails build (Windows + NSIS)
+        shell: bash
+        run: |
+          wails build -platform windows/amd64 -nsis \
+            -ldflags "-X main.Version=${{ steps.version.outputs.tag }}"
+
+      - name: List artifacts
+        shell: bash
+        run: ls -la build/bin
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v3
+        with:
+          # Tag-driven trigger: action picks up GITHUB_REF automatically.
+          files: |
+            build/bin/image-observer.exe
+            build/bin/image-observer-amd64-installer.exe
+          fail_on_unmatched_files: true
+          generate_release_notes: true

@@ -8,6 +8,13 @@
   "frontend:dev:serverUrl": "auto",
   "author": {
     "name": "maretol",
-    "email": "maretol@outlook.com"
+    "email": "contact@maretol.xyz"
+  },
+  "info": {
+    "companyName": "maretol",
+    "productName": "image-observer",
+    "productVersion": "0.0.0",
+    "copyright": "Copyright (c) 2026 maretol",
+    "comments": "Windows-targeted image viewer (Wails v2)."
   }
 }

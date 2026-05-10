@@ -1,0 +1,49 @@
+version: 2
+
+# Each ecosystem gets a single catch-all group so weekly updates land as
+# one PR per ecosystem (per docs/todo.md J-3 follow-up). If a grouped PR
+# fails for a specific dependency, exclude it via `exclude-patterns` and
+# let it open as a standalone PR — keep the default group permissive.
+
+updates:
+  # GitHub Actions (used by .github/workflows/*.yml)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
+
+  # Frontend npm dependencies (React / Vite / vitest / TypeScript / @types)
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    groups:
+      frontend-npm:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
+
+  # Go modules (Wails v2 + golang.org/x/image et al.)
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      gomod:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"

@@ -1,0 +1,64 @@
+name: CI
+
+# Runs on every push and pull request. Verifies the codebase compiles, the
+# Go and TypeScript test suites pass, and the frontend type-checks.
+# Does NOT call `wails build` — release artifacts are produced only by
+# `release.yml` on tag pushes (Windows-only, see docs/todo.md §I-5).
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# Cancel superseded runs on the same branch to save Actions minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Toolchain versions are centralised here so future bumps touch one place.
+# (`uses:` action pins like `@v6` cannot be templated by GitHub Actions —
+# those still live inline.)
+env:
+  # Pinned to the goenv global on the dev machine (CLAUDE.md). Do not
+  # add a `.go-version` file — pin here instead.
+  GO_VERSION: "1.26.2"
+  NODE_VERSION: "22"
+
+jobs:
+  test:
+    name: Test (Go + frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Go test
+        run: go test ./...
+
+      - name: Frontend install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend test (vitest)
+        working-directory: frontend
+        run: npm run test
+
+      - name: Frontend type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
