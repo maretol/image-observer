@@ -28,6 +28,15 @@ jobs:
   build:
     name: Build & release (windows-latest)
     runs-on: windows-latest
+    # Tied to a GitHub Environment so deployment-side guards (required
+    # reviewers / allowed branches-or-tags / wait timers / env-scoped
+    # secrets) can be configured at Settings → Environments → "production".
+    # The status check that branch protection rules pick up is
+    # "Release / Build & release (windows-latest)". The "production"
+    # environment must exist in the repo settings before this workflow runs.
+    environment:
+      name: production
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
 
     steps:
       - name: Checkout
