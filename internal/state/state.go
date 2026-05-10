@@ -8,14 +8,34 @@ import (
 	"path/filepath"
 )
 
-const StateSchemaVersion = 1
+// StateSchemaVersion is bumped to 2 in Phase 4 (top-level tabs + classification list).
+// v1 → v2: no migration; v1 files fall back to defaults via Load().
+const StateSchemaVersion = 2
 
 type StateData struct {
-	Version       int         `json:"version"`
-	RootPath      string      `json:"rootPath"`
-	LeftPaneWidth int         `json:"leftPaneWidth"`
-	Window        WindowState `json:"window"`
-	Grid          GridState   `json:"grid"`
+	Version int `json:"version"`
+	// RootPath / LeftPaneWidth are v1 leftovers kept for JSON-compatibility.
+	// v2 frontends do not read them (left pane was removed in Phase 4).
+	RootPath      string       `json:"rootPath"`
+	LeftPaneWidth int          `json:"leftPaneWidth"`
+	Window        WindowState  `json:"window"`
+	Grid          GridState    `json:"grid"`
+	TopTab        string       `json:"topTab"` // "list" | "viewer"
+	List          ListTabState `json:"list"`
+}
+
+// ListTabState holds per-folder UI state for the list (classification) tab.
+type ListTabState struct {
+	FolderPath string          `json:"folderPath"`
+	Filter     ListFilterState `json:"filter"`
+}
+
+// ListFilterState mirrors the frontend filter store. Tags are an OR set;
+// Confidence is one of "all" | "high" | "mid" | "low".
+type ListFilterState struct {
+	Tags       []string `json:"tags"`
+	Confidence string   `json:"confidence"`
+	Query      string   `json:"query"`
 }
 
 type WindowState struct {
@@ -74,6 +94,19 @@ func DefaultData() StateData {
 		LeftPaneWidth: 280,
 		Window:        WindowState{Width: 1024, Height: 768, X: -1, Y: -1},
 		Grid:          defaultGridState(),
+		TopTab:        "list",
+		List:          defaultListTabState(),
+	}
+}
+
+func defaultListTabState() ListTabState {
+	return ListTabState{
+		FolderPath: "",
+		Filter: ListFilterState{
+			Tags:       []string{},
+			Confidence: "all",
+			Query:      "",
+		},
 	}
 }
 
@@ -168,6 +201,18 @@ func validateState(s *StateData) error {
 	}
 	if s.Window.Height < 200 {
 		s.Window.Height = 768
+	}
+	if s.TopTab != "list" && s.TopTab != "viewer" {
+		s.TopTab = "list"
+	}
+	if s.List.Filter.Tags == nil {
+		s.List.Filter.Tags = []string{}
+	}
+	switch s.List.Filter.Confidence {
+	case "all", "high", "mid", "low":
+		// ok
+	default:
+		s.List.Filter.Confidence = "all"
 	}
 	return nil
 }

@@ -1,3 +1,78 @@
+export namespace classification {
+	
+	export class Entry {
+	    filename: string;
+	    folder: string;
+	    confidence: string;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Entry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.filename = source["filename"];
+	        this.folder = source["folder"];
+	        this.confidence = source["confidence"];
+	        this.note = source["note"];
+	    }
+	}
+	export class LoadResult {
+	    folderPath: string;
+	    entries: Entry[];
+	    orphans: Entry[];
+	    hasSidecar: boolean;
+	    source: string;
+	    mtime: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new LoadResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.folderPath = source["folderPath"];
+	        this.entries = this.convertValues(source["entries"], Entry);
+	        this.orphans = this.convertValues(source["orphans"], Entry);
+	        this.hasSidecar = source["hasSidecar"];
+	        this.source = source["source"];
+	        this.mtime = source["mtime"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SaveOutput {
+	    mtime: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SaveOutput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mtime = source["mtime"];
+	    }
+	}
+
+}
+
 export namespace imgread {
 	
 	export class Info {
@@ -143,6 +218,54 @@ export namespace state {
 		    return a;
 		}
 	}
+	export class ListFilterState {
+	    tags: string[];
+	    confidence: string;
+	    query: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListFilterState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tags = source["tags"];
+	        this.confidence = source["confidence"];
+	        this.query = source["query"];
+	    }
+	}
+	export class ListTabState {
+	    folderPath: string;
+	    filter: ListFilterState;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListTabState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.folderPath = source["folderPath"];
+	        this.filter = this.convertValues(source["filter"], ListFilterState);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	
 	export class WindowState {
@@ -169,6 +292,8 @@ export namespace state {
 	    leftPaneWidth: number;
 	    window: WindowState;
 	    grid: GridState;
+	    topTab: string;
+	    list: ListTabState;
 	
 	    static createFrom(source: any = {}) {
 	        return new StateData(source);
@@ -181,6 +306,8 @@ export namespace state {
 	        this.leftPaneWidth = source["leftPaneWidth"];
 	        this.window = this.convertValues(source["window"], WindowState);
 	        this.grid = this.convertValues(source["grid"], GridState);
+	        this.topTab = source["topTab"];
+	        this.list = this.convertValues(source["list"], ListTabState);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -219,31 +346,6 @@ export namespace thumb {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.data = source["data"];
 	        this.mimeType = source["mimeType"];
-	    }
-	}
-
-}
-
-export namespace tree {
-	
-	export class Node {
-	    path: string;
-	    name: string;
-	    kind: string;
-	    mtime: number;
-	    size: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new Node(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.path = source["path"];
-	        this.name = source["name"];
-	        this.kind = source["kind"];
-	        this.mtime = source["mtime"];
-	        this.size = source["size"];
 	    }
 	}
 

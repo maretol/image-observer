@@ -1,18 +1,20 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   WindowGetSize,
   WindowGetPosition,
 } from "../wailsjs/runtime/runtime";
-import { FolderPanel } from "./features/folder-tree/FolderPanel";
+import { ClassificationView } from "./features/classification/ClassificationView";
+import { useClassification } from "./features/classification/useClassification";
 import { ViewerGrid } from "./features/viewer-grid/ViewerGrid";
 import { useViewerGrid, type Grid } from "./features/viewer-grid/useViewerGrid";
-import { useTree } from "./features/folder-tree/useTree";
 import { useSessionLoad } from "./features/session/useSessionLoad";
 import { useSessionSave } from "./features/session/useSessionSave";
 import { useConfirm } from "./shared/components/ConfirmDialog";
 import { ToastProvider } from "./shared/components/Toast";
 import { state } from "../wailsjs/go/models";
 import "./App.css";
+
+type TopTab = "list" | "viewer";
 
 function App() {
   const { loaded, initialState } = useSessionLoad();
@@ -29,21 +31,22 @@ type AppInnerProps = {
 };
 
 function AppInner({ initialState }: AppInnerProps) {
-  const initLeftWidth = initialState?.leftPaneWidth ?? 280;
-  const initRoot = initialState?.rootPath || null;
   const initGrid = initialState?.grid
     ? gridFromGridState(initialState.grid)
     : undefined;
 
-  const [leftWidth, setLeftWidth] = useState(initLeftWidth);
-  const draggingRef = useRef(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const tree = useTree({ initialRootPath: initRoot });
+  const initTopTab: TopTab =
+    initialState?.topTab === "viewer" ? "viewer" : "list";
+  const [topTab, setTopTab] = useState<TopTab>(initTopTab);
+
   const { confirm, dialog: confirmDialog } = useConfirm();
   const viewer = useViewerGrid({ initialGrid: initGrid, confirm });
+  const classification = useClassification({
+    initialList: initialState?.list ?? null,
+    confirm,
+  });
 
-  // Window dimensions/position — polled because Wails JS runtime has no
-  // window-move event. Resize is handled via the browser event for snappiness.
+  // Window dimensions/position polling (Wails has no window-move event).
   const [windowState, setWindowState] = useState({
     width: initialState?.window?.width ?? 1024,
     height: initialState?.window?.height ?? 768,
@@ -83,81 +86,64 @@ function AppInner({ initialState }: AppInnerProps) {
     };
   }, []);
 
-  // Persist to disk (debounced)
   useSessionSave({
-    rootPath: tree.state.rootPath,
-    leftPaneWidth: leftWidth,
     window: windowState,
     grid: viewer.grid,
+    topTab,
+    list: classification.persistableState,
   });
 
-  const onMouseDown = useCallback(() => {
-    draggingRef.current = true;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-  }, []);
-
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!draggingRef.current || !containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const next = Math.min(Math.max(e.clientX - rect.left, 120), rect.width - 200);
-      setLeftWidth(next);
-    };
-    const onUp = () => {
-      draggingRef.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    const onResize = () => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      setLeftWidth((w) => Math.min(Math.max(w, 120), Math.max(rect.width - 200, 120)));
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      window.removeEventListener("resize", onResize);
-    };
-  }, []);
+  const onSelectList = useCallback(() => setTopTab("list"), []);
+  const onSelectViewer = useCallback(() => setTopTab("viewer"), []);
 
   return (
-    <div className="app" ref={containerRef}>
-      <aside className="pane left" style={{ width: leftWidth }}>
-        <FolderPanel tree={tree} onImageOpen={viewer.openInActive} />
-      </aside>
-      <div className="splitter" onMouseDown={onMouseDown} />
-      <main className="pane right">
-        <ViewerGrid
-          grid={viewer.grid}
-          onActivatePanel={viewer.setActivePanel}
-          onSelectTab={viewer.setActiveTab}
-          onCloseTab={viewer.closeTab}
-          onUpdateTabState={viewer.updateTabState}
-          onMoveTab={viewer.moveTab}
-          onAddRow={viewer.addRow}
-          onAddCol={viewer.addCol}
-          onRemoveRow={viewer.removeRow}
-          onRemoveCol={viewer.removeCol}
-          onSetRowSizes={viewer.setRowSizes}
-          onSetColSizes={viewer.setColSizes}
-        />
-      </main>
+    <div className="app-toplevel">
+      <nav className="top-tabs" role="tablist" aria-label="トップレベルタブ">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={topTab === "list"}
+          className={`top-tab ${topTab === "list" ? "active" : ""}`}
+          onClick={onSelectList}
+        >
+          一覧
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={topTab === "viewer"}
+          className={`top-tab ${topTab === "viewer" ? "active" : ""}`}
+          onClick={onSelectViewer}
+        >
+          ビューア
+        </button>
+      </nav>
+      <div className="top-tab-content">
+        {topTab === "list" ? (
+          <ClassificationView state={classification} />
+        ) : (
+          <ViewerGrid
+            grid={viewer.grid}
+            onActivatePanel={viewer.setActivePanel}
+            onSelectTab={viewer.setActiveTab}
+            onCloseTab={viewer.closeTab}
+            onUpdateTabState={viewer.updateTabState}
+            onMoveTab={viewer.moveTab}
+            onAddRow={viewer.addRow}
+            onAddCol={viewer.addCol}
+            onRemoveRow={viewer.removeRow}
+            onRemoveCol={viewer.removeCol}
+            onSetRowSizes={viewer.setRowSizes}
+            onSetColSizes={viewer.setColSizes}
+          />
+        )}
+      </div>
       {confirmDialog}
     </div>
   );
 }
 
 // Convert Wails-generated GridState (persisted shape) to the runtime Grid type.
-// Tabs from disk are marked initialized=true so we use their saved zoom/pan
-// directly. imageWidth/Height start at 0 and are filled by ImageView's first
-// ReadImage; clampPan then runs to fix any out-of-range pan.
-//
-// If a saved zoom is non-positive (corruption), treat the tab as uninitialized
-// so ImageView re-runs the initial fit.
 function gridFromGridState(gs: state.GridState): Grid {
   return {
     size: { rows: gs.rows, cols: gs.cols },

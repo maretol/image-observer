@@ -3,18 +3,26 @@ import { SaveState } from "../../../wailsjs/go/main/App";
 import { useDebounce } from "../../shared/utils/debounce";
 import type { Grid } from "../viewer-grid/useViewerGrid";
 
+export type ListPersist = {
+  folderPath: string;
+  filter: {
+    tags: string[];
+    confidence: string; // "all" | "high" | "mid" | "low"
+    query: string;
+  };
+};
+
 export type SessionInput = {
-  rootPath: string | null;
-  leftPaneWidth: number;
   window: { width: number; height: number; x: number; y: number };
   grid: Grid;
+  topTab: "list" | "viewer";
+  list: ListPersist;
 };
 
 const SAVE_DEBOUNCE_MS = 500;
+const STATE_SCHEMA_VERSION = 2;
 
 export function useSessionSave(input: SessionInput) {
-  // Serialize so the debounce only fires when the data actually changes.
-  // The savings are tiny for our state size; this is simpler than per-field deps.
   const serialized = JSON.stringify(input);
   const debouncedJson = useDebounce(serialized, SAVE_DEBOUNCE_MS);
   const skipFirstRef = useRef(true);
@@ -39,9 +47,10 @@ export function useSessionSave(input: SessionInput) {
 
 function buildStateData(input: SessionInput) {
   return {
-    version: 1,
-    rootPath: input.rootPath ?? "",
-    leftPaneWidth: input.leftPaneWidth,
+    version: STATE_SCHEMA_VERSION,
+    // v1 leftovers; kept in payload to satisfy the Go struct shape but unused.
+    rootPath: "",
+    leftPaneWidth: 280,
     window: input.window,
     grid: {
       rows: input.grid.size.rows,
@@ -58,6 +67,15 @@ function buildStateData(input: SessionInput) {
         })),
         activeIndex: p.activeIndex,
       })),
+    },
+    topTab: input.topTab,
+    list: {
+      folderPath: input.list.folderPath,
+      filter: {
+        tags: input.list.filter.tags,
+        confidence: input.list.filter.confidence,
+        query: input.list.filter.query,
+      },
     },
   };
 }

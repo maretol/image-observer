@@ -1,0 +1,1068 @@
+# 分類タブ + トップレベルタブ化 実装仕様書 (Phase 4)
+
+Phase 3 シリーズで完成した「左ペイン (フォルダツリー) + 右ペイン (ビューアグリッド)」の 2 ペイン UI を、**トップレベル 2 タブ「一覧 / ビューア」**に再編し、新タブとして「分類ビュー」を追加する。
+
+本書の **元仕様** は [docs/new_thumbnail.md](new_thumbnail.md)。本書はそれを当アプリに統合するための差分仕様であり、原則として元仕様を踏襲する。元仕様と本書が矛盾する箇所は本書を優先する (元仕様§0 の方針に従う)。
+
+参考実装: [docs/new_thumbnail/sample.html](new_thumbnail/sample.html) / [docs/new_thumbnail/sample.csv](new_thumbnail/sample.csv)。
+
+---
+
+## 0. 元仕様との差分サマリ
+
+| 項目 | 元仕様 (new_thumbnail.md) | 本書での扱い |
+|---|---|---|
+| 分類ビューの位置付け | 既存タブ UI 内に「分類タブ」を 1 枚追加 (§5.1) | **トップレベルで「一覧」「ビューア」の 2 タブに再編** し、「一覧」タブ内に分類ビューを実装 |
+| 既存の左ペイン (フォルダツリー) | 言及なし (前提として残す想定) | **完全削除** ([features/folder-tree/](../frontend/src/features/folder-tree/) と `app.go::ListDirectory` / `internal/tree::List` を撤去) |
+| フォルダ選択 UI | サイドカーが置かれたフォルダを開いた時点で有効化 | 「一覧」タブのヘッダ内に「フォルダを開く」ボタンを置く |
+| ライトボックスの folder 表示 (§5.8) | 「ファイル名 ─ folder (confidence) ─ note」を文字列で表示 | 文字列表示に加え、**グリッドカードと同等の色付きバッジで folder を視覚化** + **抽出タグ (§4.4) を個別の小バッジで併記** (本書§5.8.1 で詳細化) |
+| 分類サムネのアスペクト | aspect-ratio 1:1 / object-fit: contain (§5.3) | 同左 (本書独自の差分なし) |
+| サムネ生成 | 元仕様は実装方針未指定 (§6.3.5 で 2 案提示) | 既存の `internal/thumb` を流用 (256px / `letterbox`) |
+| クリックで開く先 | ライトボックス (§5.8) | ライトボックスのまま。「ビューアタブで開く」連携は v1 スコープ外 (本書§13) |
+| セッション復元 | 言及なし | `state.json` を v2 にバージョンアップし、トップレベルアクティブタブ + フォルダパス + フィルタ状態を保存 |
+| メタデータ正本 | JSON 優先 / CSV は互換用 (§4.1) | **正本は JSON のみ**。CSV は **初回 import 専用** と位置付け、JSON が無いフォルダで一度だけ読み、保存以降は JSON のみ参照。AI / 手動編集も JSON を直接編集する想定 |
+| 外部編集との整合 | 言及なし | **JSON ファイルの mtime を保持し、保存時に競合検出**。AI / 外部エディタによる書き換えと同時編集を検知して警告ダイアログ。**手動「再読み込み」ボタン** を一覧タブヘッダに置く |
+| タグ命名と配色 | キャラ名固定マップ (iroha / kaguya / shugo / fumei …) と "shugo は集合 / fumei は不明" の特別扱い | **アプリは汎用画像分類ツールとしてレベル 1 汎用化**: スキーマと抽出ロジックは汎用、ロジック上の `shugo` / `fumei` 特別扱いは撤廃 (`fumei` はただの単一タグ扱い、複合分類は `主 (sub + sub)` 構文として一般化)。配色は既知タグマップ + 未知タグの**決定的ハッシュ自動割当**を v1 から実装 (元仕様§7.2 で言及されていた将来案を v1 に前倒し)。サンプルキャラ色は `defaultPalette.ts` に分離 |
+
+---
+
+## 1. ゴール (DoD)
+
+- 起動するとトップレベルに「一覧」「ビューア」の 2 タブが見え、初期は「一覧」がアクティブ。
+- 「一覧」タブで「フォルダを開く」を押し、サイドカーがあるフォルダを選ぶ → 分類グリッドが表示される。
+- サイドカーがないフォルダを選んだ場合 → 「サイドカーがありません。新規作成しますか?」のダイアログが出て、はいで `_classification.json` が生成され、画像を空エントリで列挙したグリッドが表示される。
+- タグチップ・信頼度・検索の 3 種フィルタが AND で機能する (元仕様§5.4 / §5.5 / §5.6)。
+- カードの編集アイコンからポップオーバーが開き、folder / confidence / note を編集 → 保存でカード表示が更新される。再起動後も保持されている (元仕様§5.7)。
+- サムネクリックでライトボックスが開く。`←/→` でフィルタ後順序の前後に移動。`Esc` で閉じる。**ライトボックス内で folder の分類が色付きバッジで視覚的に把握できる** (本書§5.8.1)。
+- 「ビューア」タブは Phase 3c までの既存挙動 (グリッド + パネル + タブ + zoom/pan) をそのまま保持する。**機能変更なし**。
+- セッション復元: 終了 → 再起動の往復で「アクティブなトップレベルタブ」「一覧タブのフォルダパス」「一覧タブのフィルタ状態」「ビューアタブのグリッド/タブ状態 (Phase 3c 既存)」が復元される。
+- 既存 folder-tree feature が完全に取り除かれている (使われないコードが残らない)。
+- 一覧タブヘッダに **「再読み込み」ボタン** があり、外部 (AI / テキストエディタ) で `_classification.json` を編集した直後にワンクリックで反映できる。
+- アプリ内編集中に外部から JSON が書き換えられていた場合、**保存時に競合検出ダイアログが出て破棄/上書きを選べる** (mtime ベース)。
+- サンプル外のタグ文字列 (例: `cat (kuro + shiro)` / `landscape` / 未知のキャラ名) でも色付きバッジが付き、フィルタも問題なく機能する (既知タグマップ未登録の場合は決定的ハッシュで自動色割当)。
+- `wails build` 通過、`go test ./...` 全通過、`tsc --noEmit` クリア。
+
+---
+
+## 2. アーキテクチャ概観
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ [一覧] [ビューア]                                             │  TopTabBar
+├──────────────────────────────────────────────────────────────┤
+│ <一覧タブのとき>                                              │
+│  ┌─ Header: [フォルダを開く] (path) [件数: 123/155] [↻] ─┐   │
+│  ├─ TagChips: [すべて] [tagA 35] [tagB 11] ...        ─┤   │
+│  ├─ SubToolbar: 信頼度 [all][high][mid][low] | 検索 [_] ┤   │
+│  └─ Grid: Card[] (サムネ + ファイル名 + 分類バッジ + 編集)─┘    │
+│                                                              │
+│ <ビューアタブのとき>                                          │
+│  既存 ViewerGrid (rows × cols × Panel × Tab)                 │
+└──────────────────────────────────────────────────────────────┘
+```
+
+```
++-------------------------+        Wails Bind        +---------------------------+
+|  Frontend (React/TS)    |  <===================>   |  Backend (Go)             |
+|  - TopTabs              |                          |  - internal/classification|
+|  - features/list/       |                          |    (new package)          |
+|  - features/viewer-grid/|                          |  - internal/thumb (流用)  |
+|  - features/session/    |                          |  - internal/imgread (流用)|
++-------------------------+                          +---------------------------+
+```
+
+---
+
+## 3. Go 側設計
+
+### 3.1 パッケージ構成 (新規 + 削除)
+
+```
+internal/
+├── tree/        # 削除 (List + tree_unix/windows + test ごと)
+│                # ※ IsImage は廃止予定だが他パッケージから参照されているため
+│                #   §3.2 で internal/imgfile への移設を行う
+├── thumb/       # 既存 (流用、変更なし)
+├── imgread/     # 既存 (流用、変更なし)
+├── state/       # 既存 (Phase 4 で v2 へバージョンアップ、§3.6)
+├── imgfile/     # 新規: tree.IsImage を移設 (拡張子判定のみ)
+│   └── imgfile.go
+└── classification/   # 新規
+    ├── types.go         # Confidence / Entry / Classification / LoadResult
+    ├── repository.go    # SidecarRepository interface + jsonRepo / csvRepo の合成
+    ├── scanner.go       # FileScanner interface + 実装
+    ├── service.go       # Service struct (Load / Save / UpdateEntry / CreateEmpty)
+    └── *_test.go
+```
+
+### 3.2 `internal/imgfile/imgfile.go` (新設)
+
+`internal/tree::IsImage` を `internal/imgfile::IsImage` に移設する。`thumb` / `imgread` / `classification/scanner` の 3 箇所から呼ばれる。
+
+```go
+package imgfile
+
+import "strings"
+
+// IsImage returns true when the given filename has a supported image extension.
+// Extensions are matched case-insensitively. Used by thumbnail generation,
+// image reading, and folder scanning.
+func IsImage(name string) bool {
+    lower := strings.ToLower(name)
+    for _, ext := range []string{
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff",
+    } {
+        if strings.HasSuffix(lower, ext) {
+            return true
+        }
+    }
+    return false
+}
+```
+
+`internal/thumb` / `internal/imgread` の `tree.IsImage` 参照を `imgfile.IsImage` に書き換える。テストは `imgfile/imgfile_test.go` に移植。
+
+### 3.3 `internal/classification/types.go`
+
+```go
+package classification
+
+import "time"
+
+type Confidence string
+
+const (
+    ConfHigh Confidence = "high"
+    ConfMid  Confidence = "mid"
+    ConfLow  Confidence = "low"
+    ConfNone Confidence = ""
+)
+
+const SchemaVersion = 1
+
+type Entry struct {
+    Filename   string     `json:"filename"`
+    Folder     string     `json:"folder"`
+    Confidence Confidence `json:"confidence"`
+    Note       string     `json:"note"`
+}
+
+type Classification struct {
+    Version   int       `json:"version"`
+    UpdatedAt time.Time `json:"updated_at"`
+    Entries   []Entry   `json:"entries"`
+}
+
+// LoadResult はフロントへ返す合成結果。
+// Entries は実ファイルとマージ済 (未分類は folder="" で含む)。
+// Orphans はサイドカーには記載があるが実ファイルが無いエントリ。
+// Mtime は読み込み時の _classification.json の mtime (UnixNano)。
+// 保存時に競合検出 (外部からの書き換えがあるか) のために使う。
+// サイドカー不在 (Source="none") のときは 0。
+type LoadResult struct {
+    FolderPath string  `json:"folderPath"`
+    Entries    []Entry `json:"entries"`
+    Orphans    []Entry `json:"orphans"`
+    HasSidecar bool    `json:"hasSidecar"`
+    Source     string  `json:"source"` // "json" | "csv" | "none"
+    Mtime      int64   `json:"mtime"`  // UnixNano of _classification.json at load time, 0 if none
+}
+```
+
+JSON フィールド名は元仕様§4.2 では snake_case (`updated_at` / `folder_path`) だが、本プロジェクトの既存コード (state.go の `rootPath` 等) は **camelCase で統一** している。本書では **camelCase に統一する** (`folderPath`, `hasSidecar`, `updatedAt`, `mtime`)。Wails 自動生成 TS バインディングがそのまま使えることを優先する。
+
+`Mtime` は **UnixNano (`int64`)** で扱う。JSON では Wails が JS の `number` に変換するが、`int64` の上限内 (2262 年まで) なので Number 精度の問題は無視できる範囲。
+
+#### 3.3.1 タグの汎用化方針 (本書差分)
+
+本書では Entry の `Folder` 文字列を **「主タグ + 任意の補助タグ」** として汎用解釈する:
+
+- 構文 `主 (sub1 + sub2 + ...)` は元仕様§4.4 のまま維持 (パース規則は変更しない)。
+- ただし **「`shugo` は集合専用 / `fumei` は不明専用」** といったドメイン語の特別扱いは Go 側にも TS 側にも一切持たない。`fumei` はただの単一タグ、`shugo (...)` はただの「主 `shugo` + 補助タグ群」として扱われる。
+- 未分類は `Folder == ""` (空文字) で表現。仕様書§4.5 のルールを踏襲。
+- v2 で `Tags []string` のような完全自由形式に再設計する余地は残すが、本フェーズでは行わない (互換性維持のため)。
+
+### 3.4 `internal/classification/repository.go`
+
+#### 3.4.1 メタデータ保存方針 (重要)
+
+本書では以下を厳格に守る:
+
+- **正本は `_classification.json` のみ**。アプリの保存・編集は常に JSON に対して行う。
+- **`_classification.csv` は「初回 import 専用」**。JSON が無いフォルダで CSV があれば、Load 時に内部 JSON 形式へ変換して返すが、保存時に CSV を更新することはしない。一度ユーザーが何かを保存して `_classification.json` が生成されたら、以降 CSV は無視され続ける (古いまま残置 OK、削除はアプリからは行わない)。
+- AI / 外部エディタが直接 JSON を編集する想定 → **JSON ファイルは人間にも読みやすい整形** (`MarshalIndent("", "  ")`) を保つ。
+
+#### 3.4.2 インターフェース
+
+```go
+package classification
+
+const (
+    sidecarJSON = "_classification.json"
+    sidecarCSV  = "_classification.csv"
+    backupJSON  = "_classification.json.bak"
+    tempJSON    = "_classification.json.tmp"
+)
+
+type LoadOutput struct {
+    Data   *Classification
+    Source string // "json" | "csv" | "none"
+    Mtime  int64  // UnixNano of _classification.json (0 if not present)
+}
+
+type SidecarRepository interface {
+    // Load はフォルダ直下の _classification.json または .csv を読む。
+    // - JSON が存在すれば JSON を採用 (CSV は無視)。Source="json"、Mtime に JSON の mtime。
+    // - JSON が無く CSV があれば CSV を読む。Source="csv"、Mtime=0。
+    // - どちらも無ければ {Data: nil, Source: "none", Mtime: 0}, nil を返す (エラーではない)。
+    Load(folderPath string) (LoadOutput, error)
+
+    // SaveJSON は _classification.json に書き出す。
+    // expectedMtime > 0 のとき、書き込み直前にディスク上の JSON の mtime を再取得し、
+    // expectedMtime と一致しなければ ErrConflict を返す (外部編集との競合検出)。
+    // expectedMtime == 0 は新規作成扱い (既存ファイルがあっても上書き)。
+    //
+    // 成功時は新しい mtime (UnixNano) を返す。フロントは LoadResult.Mtime を更新する。
+    //
+    // 手順:
+    //   1) (expectedMtime > 0 のとき) 既存 JSON の mtime を再取得 → 比較。不一致なら ErrConflict。
+    //   2) 既存 JSON を .bak へコピー (新規作成時はスキップ)。
+    //   3) 新内容を .tmp に書く。
+    //   4) os.Rename(.tmp, .json) で原子的に置換。
+    //   5) 置換後の mtime を返す。
+    SaveJSON(folderPath string, c *Classification, expectedMtime int64) (int64, error)
+}
+
+var ErrConflict = errors.New("classification: external modification detected")
+var ErrAlreadyExists = errors.New("classification: sidecar already exists")
+```
+
+#### 3.4.3 実装上の注意
+
+- CSV は `encoding/csv` を使い、BOM (`﻿`) を読み飛ばす。
+- ヘッダ行は `filename, proposed_folder, confidence, note` を期待。順序が異なる場合はヘッダ名でカラムを解釈する。CSV の `proposed_folder` は内部モデルの `Folder` にマップ。
+- JSON 出力は `json.MarshalIndent(c, "", "  ")` (BOM なし、UTF-8、末尾改行 1 つ)。
+- 読み込み時に `Entries` 内に重複 `filename` があれば `error` を返す (元仕様§4.5 の整合性ルール)。CSV → JSON 変換でも同じ。
+- `SaveJSON` は `os.Rename` 失敗時に通常上書きへフォールバックしない。`.bak` が直前に残っているため、ユーザー手動復旧が可能。フォールバックの正当性が低い (§15 のリスク表で「ネットワークドライブ」のリスクは記載するが、対策は v1 では `.bak` 復旧手段提供のみ)。
+- 競合検出の mtime 取得は `os.Stat(...).ModTime().UnixNano()` を使う。ファイルシステムによって精度が秒単位の場合があるが、人間や AI による編集間隔と比較すれば十分検知できる。
+
+### 3.5 `internal/classification/scanner.go`
+
+```go
+type FileScanner interface {
+    // ListImageFiles はフォルダ直下の画像ファイル名 (パスなし、basename のみ) を返す。
+    // 大文字小文字を保持する (重複検出はそのまま大小区別あり)。
+    // サブフォルダは走査しない。
+    ListImageFiles(folderPath string) ([]string, error)
+}
+```
+
+実装は `os.ReadDir` + `imgfile.IsImage` のフィルタのみ。
+
+### 3.6 `internal/classification/service.go`
+
+```go
+type Service struct {
+    repo    SidecarRepository
+    scanner FileScanner
+}
+
+func NewService(repo SidecarRepository, scanner FileScanner) *Service
+
+// Load: サイドカー読込 + フォルダ走査でマージ。
+// サイドカーが無い場合: HasSidecar=false / Source="none" / Entries は実ファイルから空エントリ生成。
+// 同 Service 内で「再読み込み」も同一メソッドで処理する (フロントの「再読み込み」ボタン
+// から再度 Load を呼ぶだけ)。
+func (s *Service) Load(folderPath string) (*LoadResult, error)
+
+// Save: 全データを書き出し (UpdatedAt は now で上書き)。
+// expectedMtime > 0 のとき、外部編集との競合をチェックし、不一致なら ErrConflict を返す。
+// 成功時は新しい mtime を返す (フロントは LoadResult.Mtime を更新する)。
+func (s *Service) Save(folderPath string, entries []Entry, expectedMtime int64) (int64, error)
+
+// UpdateEntry: filename で一致するものを置換、なければ追加。順序保持。
+// 内部実装は: Load (mtime 取得) → Entries patch → Save(expectedMtime=直前 Load の mtime)。
+// expectedMtime はフロントが保持する LoadResult.Mtime を渡す。
+// 競合時は ErrConflict を返す。成功時は新しい mtime を返す。
+func (s *Service) UpdateEntry(folderPath string, entry Entry, expectedMtime int64) (int64, error)
+
+// CreateEmpty: フォルダ内の画像を folder=""/conf=""/note="" で列挙した
+// _classification.json を新規作成。既存があれば ErrAlreadyExists を返す。
+// 成功時は新しい mtime を返す。
+func (s *Service) CreateEmpty(folderPath string) (int64, error)
+```
+
+`Load` のマージ規則 (元仕様§6.2.5 の再掲):
+
+1. リポジトリから既存サイドカーを読む (なければ `nil`)。
+2. スキャナでフォルダ内の全画像を取る。
+3. 画像にあるが `Entries` にない → folder/conf/note 空の Entry を末尾に追加。
+4. `Entries` にあるが画像にない → `Orphans` に分離。
+5. `Entries` の順序は「サイドカー記載順 + 末尾に新規追加」を保つ。
+
+`UpdateEntry` の競合検出フロー:
+
+```
+フロント:                      Go Service:                         JSON ファイル:
+  保存ボタン押下                   ─────────►
+                                Load (現在の mtime を取得 m_now) ─►  読む
+                                                                    mtime = m_now
+                                m_now != expectedMtime ?
+                                  Yes → ErrConflict 返却 ◄────
+                                  No → entries を patch
+                                       Save (expectedMtime=m_now) ► 書く
+                                                                    mtime = m_new
+                                m_new を返却 ◄─────────────────
+  LoadResult.Mtime を更新
+```
+
+これにより、AI / 外部エディタが JSON を書き換えてからアプリが保存しようとすると、**書き換えを検知してダイアログを出せる**。逆に外部編集が無いケースでは通常通り保存される。
+
+### 3.7 `app.go` 追加バインディング
+
+```go
+import "image-observer/internal/classification"
+
+// SaveResult / UpdateResult はフロント向けに「新しい mtime」を返す薄いラッパ。
+type ClassificationSaveResult struct {
+    Mtime int64 `json:"mtime"`
+}
+
+// Load: サイドカー読込 + マージ。「再読み込み」ボタンも同 API を再呼出するだけ。
+func (a *App) LoadClassification(folderPath string) (*classification.LoadResult, error)
+
+// Save: 全データを書き出し。expectedMtime はフロントが LoadResult.Mtime を渡す。
+// 競合検出で ErrConflict が返れば JS 側で Promise reject となり、メッセージから判定する。
+func (a *App) SaveClassification(folderPath string, entries []classification.Entry, expectedMtime int64) (ClassificationSaveResult, error)
+
+// UpdateEntry: filename で一致するものを置換、なければ追加。expectedMtime で競合検出。
+func (a *App) UpdateClassificationEntry(folderPath string, entry classification.Entry, expectedMtime int64) (ClassificationSaveResult, error)
+
+// CreateEmpty: 新規サイドカー作成。expectedMtime は使わない (新規なので)。
+func (a *App) CreateEmptyClassification(folderPath string) (ClassificationSaveResult, error)
+```
+
+エラーは Promise reject される。フロント側は `error.message` の `"classification: external modification detected"` 部分を判定するか、もしくは Wails の `error` を判別するために **専用の判別文字列を error message に含める**。実装簡略化のため、本書では `errors.Is(err, classification.ErrConflict)` を Go 側で判定し、`fmt.Errorf("CONFLICT: %w", err)` のように **prefix `"CONFLICT:"`** を error message 先頭に付けて返す。フロントは `e.message.startsWith("CONFLICT:")` で判定する。
+
+App 構造体に `*classification.Service` を持たせる。`NewApp()` で `classification.NewService(jsonOrCsvRepo{}, fsScanner{})` を組み立てる。
+
+`ListDirectory` / `internal/tree::List` は **削除する** (左ペイン廃止に伴い呼び出し元なし)。`tree_unix.go` / `tree_windows.go` も削除。
+
+### 3.8 `internal/state` の v2 化
+
+`state.go` に以下を追加:
+
+```go
+const StateSchemaVersion = 2  // 1 -> 2 に更新
+
+type StateData struct {
+    Version       int               `json:"version"`
+    RootPath      string            `json:"rootPath"`        // 互換のため残す (v1 の遺物、v2 では未使用)
+    LeftPaneWidth int               `json:"leftPaneWidth"`   // 互換のため残す (v1 の遺物、v2 では未使用)
+    Window        WindowState       `json:"window"`
+    Grid          GridState         `json:"grid"`
+    TopTab        string            `json:"topTab"`          // 新規: "list" | "viewer"
+    List          ListTabState      `json:"list"`            // 新規
+}
+
+type ListTabState struct {
+    FolderPath string         `json:"folderPath"` // "" if not selected
+    Filter     ListFilterState `json:"filter"`
+}
+
+type ListFilterState struct {
+    Tags       []string `json:"tags"`       // OR; empty = no tag filter
+    Confidence string   `json:"confidence"` // "all" | "high" | "mid" | "low"
+    Query      string   `json:"query"`
+}
+```
+
+- `RootPath` / `LeftPaneWidth` は v2 ではフロント側で参照されない (左ペイン廃止のため)。後方互換 (古い state.json が読める) を考慮し型は残す。
+- v1 の state.json を読んだ場合は `Version` 不一致で `DefaultData()` にフォールバックする (Phase 3c の既存挙動)。マイグレーションは行わない (Phase 3c で確定した方針)。
+- `validateState` で `TopTab` が `"list"` / `"viewer"` 以外なら `"list"` に補正。`Confidence` も `"all"|"high"|"mid"|"low"` 以外は `"all"` に補正。
+
+`DefaultData()` の更新:
+
+```go
+return StateData{
+    Version: StateSchemaVersion,
+    Window:  WindowState{Width: 1024, Height: 768, X: -1, Y: -1},
+    Grid:    defaultGridState(),
+    TopTab:  "list",
+    List:    ListTabState{FolderPath: "", Filter: ListFilterState{Tags: []string{}, Confidence: "all", Query: ""}},
+}
+```
+
+---
+
+## 4. フロント側設計
+
+### 4.1 ファイル構成
+
+```
+frontend/src/
+├── App.tsx                      # 全面書き換え (左ペイン削除 + TopTabs 導入)
+├── App.css                      # 左ペイン関連 CSS 削除 + TopTabs / ClassificationView CSS 追加
+├── features/
+│   ├── folder-tree/             # 削除
+│   ├── viewer-grid/             # 既存 (変更なし)
+│   ├── session/                 # 既存 + ListTabState 対応で軽微更新
+│   └── classification/          # 新規 (元仕様 §6.3.1 を簡略化)
+│       ├── ClassificationView.tsx  # 一覧タブのトップ (header + chips + grid + lightbox + edit popover を統括)
+│       ├── ClassificationHeader.tsx # フォルダ選択 + 件数表示
+│       ├── TagChips.tsx
+│       ├── ConfidenceSegment.tsx
+│       ├── SearchBox.tsx
+│       ├── ClassificationGrid.tsx
+│       ├── Card.tsx
+│       ├── EditPopover.tsx
+│       ├── Lightbox.tsx
+│       ├── filters.ts            # extractTags / tagSummary / applyFilter (純関数)
+│       ├── filters.test.ts       # § 11 のテスト対象
+│       ├── colors.ts             # tagColor (汎用配色 + ハッシュフォールバック)
+│       ├── colors.test.ts        # 既知タグ / 未知タグ / 空文字 のテスト
+│       ├── defaultPalette.ts     # サンプル提供のキャラ名→色マップ (差し替え可能)
+│       └── useClassification.ts  # 状態管理 (loadResult / filter / lightbox / editing)
+└── shared/
+    ├── components/
+    │   └── ConflictDialog.tsx    # 新規: 3 択 (再読み込み/強制上書き/キャンセル)
+    └── icons/
+        ├── EditIcon.tsx          # 新規: 編集ペンアイコン (SVG 直書き)
+        ├── ReloadIcon.tsx        # 新規: 再読み込みアイコン
+        └── SearchIcon.tsx        # 新規: 検索アイコン (任意)
+```
+
+### 4.2 トップレベルタブ (`App.tsx`)
+
+```tsx
+function AppInner({ initialState }: AppInnerProps) {
+  const [topTab, setTopTab] = useState<"list" | "viewer">(
+    initialState?.topTab === "viewer" ? "viewer" : "list"
+  );
+  const viewer = useViewerGrid({ initialGrid: initGrid, confirm });
+  const classification = useClassification({ initialList: initialState?.list });
+
+  useSessionSave({
+    window: windowState,
+    grid: viewer.grid,
+    topTab,
+    list: classification.persistableState,
+  });
+
+  return (
+    <ToastProvider>
+      <div className="app-toplevel">
+        <nav className="top-tabs">
+          <button
+            className={`top-tab ${topTab === "list" ? "active" : ""}`}
+            onClick={() => setTopTab("list")}
+          >
+            一覧
+          </button>
+          <button
+            className={`top-tab ${topTab === "viewer" ? "active" : ""}`}
+            onClick={() => setTopTab("viewer")}
+          >
+            ビューア
+          </button>
+        </nav>
+        <div className="top-tab-content">
+          {topTab === "list" ? (
+            <ClassificationView state={classification} />
+          ) : (
+            <ViewerGrid {...viewerProps} />
+          )}
+        </div>
+      </div>
+    </ToastProvider>
+  );
+}
+```
+
+レンダリング戦略は **`display: none` 切替ではなく、条件レンダリング (アンマウント)** とする。理由:
+
+- ビューアタブ側の `Tab` は Phase 3c で `initialized` フラグを持ち、再 mount 時に必要なら ReadImage を再呼び出す設計。アンマウント → リマウントしても表示状態は維持される (zoom / pan は state 経由で復元される)。
+- 一覧タブ側のアンマウント時に `loadResult` が消えるとフォルダ切替時に都度 `LoadClassification` が走る。**`useClassification` は App スコープで `useState` を維持する** ことでアンマウントされても state が保持される (hook を `App.tsx` で持つ)。
+- パフォーマンス: 1 万件サムネを抱えたまま隠すよりはアンマウントする方がメモリ的に安全。サムネ画像は `IntersectionObserver` で画面外にあれば未ロード、再 mount 時に観測再開すれば良い。
+
+### 4.3 ライトボックス内の folder 視覚化 (本書独自)
+
+#### 4.3.1 仕様
+
+仕様書§5.8 では拡大画像下に「ファイル名 ─ folder (confidence) ─ note」を **テキストで** 表示するだけだが、本書では以下に強化する:
+
+```
+┌─────────────────────────────────────────────────┐
+│ ×                                               │
+│           ┌───────────────────┐                 │
+│           │                   │                 │
+│           │   (拡大画像)       │                 │
+│           │                   │                 │
+│           └───────────────────┘                 │
+│                                                 │
+│  HCEIkjWaMAE0NNx.jpg                            │
+│  [shugo (iroha + kaguya + yachiyo)]  [high]     │  ← 主バッジ (folder 全文 + 信頼度)
+│  Tags: [shugo] [iroha] [kaguya] [yachiyo]       │  ← 抽出タグ (色付き小バッジ)
+│  3キャラの顔アップ                                │  ← note
+└─────────────────────────────────────────────────┘
+```
+
+要素ごとの仕様:
+
+| 要素 | 表示内容 | スタイル |
+|---|---|---|
+| ファイル名 | `entry.filename` そのまま | 等幅 / 14px / 白 |
+| 主バッジ (folder) | `entry.folder` 文字列をそのまま (元仕様§4.4 の表示ルールに準拠) | グリッドカードの分類バッジと同じ色付け (`tagColor(extractTags(folder)[0])` で **第一タグの色** を使う、§4.8)。`folder=""` (未分類) のときは `(未分類)` と表示してグレー (`var(--unclassified)`) |
+| 信頼度バッジ | `entry.confidence` (空なら表示しない) | グリッドカードの信頼度バッジと同じ色 |
+| 抽出タグ列 | `extractTags(entry.folder)` の結果。`Tags:` ラベル + 個別バッジ | 各タグごとに `tagColor(t)` を適用 (§4.8 の汎用配色)。`folder = "iroha"` のような単一タグの場合は **主バッジと同色になり情報が冗長になるので、抽出タグが 1 個だけのときは `Tags:` 行ごと省略する** |
+| note | 改行を保ち全文表示 | 12px / 白 |
+
+#### 4.3.2 「フォルダ分けがわかる」目的
+
+`主 (sub + sub + ...)` のような複合分類を、文字列だけでなく **構成タグの色付きバッジ** として一目で把握できるようにする。例えば `shugo (iroha + kaguya + yachiyo)` なら主バッジ (shugo の色) に加え、内訳の `iroha` / `kaguya` / `yachiyo` が個別の色付きバッジとして並ぶことで、何の集合かが視覚的に識別できる。**サンプル外のタグでも `tagColor` (§4.8) で色が動的に決まるため、このメカニズムはドメインに依存しない**。
+
+#### 4.3.3 キーボード/クリック操作
+
+元仕様§5.8 通り:
+- `Esc` または背景クリック で閉じる
+- `←` `→` でフィルタ後順序の前後画像へ
+- 拡大画像クリック (中央領域) は無反応 (誤クリックでの閉じを防止)
+
+### 4.4 `useClassification` (状態管理)
+
+```ts
+import type { Confidence, Entry, LoadResult } from "../../types/classification";
+import * as Api from "../../wailsjs/go/main/App";
+
+export type ListTabFilter = {
+  tags: string[];          // OR
+  confidence: Confidence | "all";
+  query: string;
+};
+
+type State = {
+  folderPath: string | null;
+  loadResult: LoadResult | null;       // mtime もここに含まれる
+  filter: ListTabFilter;
+  loading: boolean;
+  error: string | null;
+  lightbox: { open: boolean; filename: string | null };
+  editing: { open: boolean; filename: string | null };
+};
+
+export function useClassification(opts?: { initialList?: state.ListTabState }) {
+  // 初期 state を opts から組み立てる
+  // フォルダパスがあれば mount 時に LoadClassification を呼ぶ (useEffect)
+  // ...
+
+  return {
+    state,
+    persistableState,        // useSessionSave に渡すもの (folderPath + filter のみ)
+    openFolder,              // OpenFolderDialog → LoadClassification
+    reload,                  // 同 folderPath で再 LoadClassification (再読み込みボタン)
+    setFilter,               // partial update
+    openLightbox / closeLightbox / nextLightbox / prevLightbox,
+    openEdit / closeEdit / saveEdit,
+    createEmptySidecar,
+  };
+}
+```
+
+- `nextLightbox / prevLightbox` は **フィルタ後の Entries** をベースに `filename` ベースで前後インデックスを算出する。
+- `saveEdit` は `App.UpdateClassificationEntry(folderPath, entry, loadResult.mtime)` を呼ぶ。**競合検出**:
+  - 成功時: 戻りの新 mtime で `loadResult.mtime` を更新、`loadResult.entries` の該当エントリを patch、ポップオーバーを閉じる。
+  - `e.message.startsWith("CONFLICT:")` なら **競合ダイアログ** を出す (本書§4.11)。「再読み込み」「上書き」「キャンセル」の 3 択。
+  - その他のエラーはトースト「保存に失敗しました: <reason>」、ポップオーバーは開いたまま。
+- `openFolder` は OpenFolderDialog を呼び、選択結果を LoadClassification に渡す。`HasSidecar=false` の戻りなら確認ダイアログ → `CreateEmptyClassification` → 再 Load の流れ。
+- `reload` は **「再読み込み」ボタン** に対応。同 `folderPath` で `LoadClassification` を再呼出し、`loadResult` (mtime 含む) を差し替える。フィルタ状態 / lightbox / editing は維持する。
+
+### 4.5 サムネ取得方針 (元仕様§6.3.5 への回答)
+
+**既存 `App.GetThumbnail(path, size, mode)` を流用する**。以下の理由:
+
+- 既存 Phase 2 でサムネ生成 + ディスクキャッシュ + worker pool が完成しており、フロントから `[]byte` (Wails が base64 化) を受け取って Blob URL 化する実装が `useThumbnail.ts` (folder-tree 内) にある。folder-tree は削除するが、ロジックは新 hook `useGridThumbnail.ts` (classification 内) に移植する。
+- サイズは **256px** / モードは **`letterbox`** で固定 (元仕様§5.3 「aspect 1:1 / object-fit: contain」と整合)。Phase H の設定 UI が出来たら設定値に置き換える。
+- IntersectionObserver で **viewport 内に入ったときだけ** `GetThumbnail` を呼ぶ。一度ロードしたものは hook 内 Map にキャッシュ (path → blob URL)。アンマウント時に `URL.revokeObjectURL` でクリーンアップ。
+- カード内の `<img>` は `loading="lazy"` も併用 (二重で OK、ブラウザネイティブと IntersectionObserver の冗長は問題ない)。
+
+### 4.6 元画像参照 (ライトボックス用)
+
+ライトボックスは原寸を見せるため `App.ReadImage(path)` を使う。`useImageView` 相当のロジックは新規実装するが、ビューアタブの `ImageView.tsx` ほど高機能 (zoom/pan) ではなく、**画面いっぱいに letterbox 表示するだけ** で良い (元仕様§5.8 はズーム機能を要求していない)。
+
+### 4.7 セッション永続化への組み込み
+
+`useSessionSave` の input に `topTab` と `list` を追加:
+
+```ts
+useSessionSave({
+  window: windowState,
+  grid: viewer.grid,
+  topTab,
+  list: { folderPath, filter },  // useClassification.persistableState
+});
+```
+
+`useSessionSave` 内で `buildStateData` が `topTab` / `list` を `StateData` の対応フィールドに詰める。Wails 自動生成の `state.StateData` 型は新フィールドを含むようになっているので、TS 型は再生成に追従する。
+
+`useSessionLoad` 側は変更不要 (`GetState` の戻りに新フィールドが乗ってくるだけ)。
+
+### 4.8 配色 (`colors.ts` + `defaultPalette.ts`) — 汎用化
+
+#### 4.8.1 設計
+
+サンプル ([docs/new_thumbnail/sample.html:396](new_thumbnail/sample.html#L396)) の `folderClass` のような **ドメイン特有の特別扱い** (`startsWith("shugo")` / `=== "fumei"`) は **完全に廃止する**。
+
+代わりに以下の純粋なロジックで色を決める:
+
+```ts
+// colors.ts
+
+import { DEFAULT_PALETTE } from "./defaultPalette";
+
+// 既知タグ → CSS 色文字列のマップ。defaultPalette.ts に同梱されたサンプル値を初期値とし、
+// 将来的に Phase H でユーザー設定から差し替え可能にする (本フェーズでは差し替え UI なし)。
+export const KNOWN_TAG_COLORS: Readonly<Record<string, string>> = DEFAULT_PALETTE;
+
+// ハッシュフォールバック用の色プール (HSL ベース、彩度/明度を一定に保ち見やすい色のみ)。
+// 16 色で衝突確率は十分低い。
+const HASH_PALETTE = [
+  "#5b8def", "#e07b5b", "#7bb86d", "#d36ab6", "#c9a23a",
+  "#4caea4", "#9c6bd9", "#d65d5d", "#5db8c5", "#e08e3a",
+  "#7d9b3a", "#b15c8e", "#3f7fbc", "#a26b3a", "#6dac68",
+  "#7c7c7c",
+];
+
+// FNV-1a 32bit (決定的・高速・実装が短い)
+function hashString(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+// tagColor は引数のタグ文字列に対し決定的に色を返す。
+// 1) 既知タグマップに登録があればそれを返す。
+// 2) 無ければ FNV-1a ハッシュ → HASH_PALETTE のインデックスから色を返す。
+// 3) 空文字 (未分類) は固定の `--unclassified` (グレー)。
+export function tagColor(tag: string): string {
+  if (tag === "") return "var(--unclassified)";
+  const known = KNOWN_TAG_COLORS[tag];
+  if (known) return known;
+  return HASH_PALETTE[hashString(tag) % HASH_PALETTE.length];
+}
+
+// バッジ要素の文字色は背景色から WCAG 準拠の白/黒判定で決める (黄色など明色のとき黒にする)。
+export function readableTextColor(bgHex: string): "#fff" | "#222" {
+  // bgHex = "#rrggbb" 前提。HSL の明度 L > 0.6 程度なら黒、それ以外白。
+  // 簡易実装: R+G+B 平均で閾値判定。
+  const r = parseInt(bgHex.slice(1, 3), 16);
+  const g = parseInt(bgHex.slice(3, 5), 16);
+  const b = parseInt(bgHex.slice(5, 7), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? "#222" : "#fff";
+}
+```
+
+```ts
+// defaultPalette.ts — サンプル "超かぐや姫" 系のキャラ名 → 色マップ。
+// このファイルは サンプル提供 として同梱するが、アプリ本体のロジックには
+// 一切ハードコードされない。Phase H でユーザーが置換可能にする。
+export const DEFAULT_PALETTE: Readonly<Record<string, string>> = {
+  iroha:   "#1976d2",
+  kaguya:  "#f9a825",
+  yachiyo: "#c2185b",
+  roka:    "#388e3c",
+  mami:    "#fb8c00",
+  mikado:  "#d32f2f",
+  shugo:   "#7b1fa2",
+  fumei:   "#757575",
+  // ... サンプル値のみ
+};
+```
+
+#### 4.8.2 信頼度バッジの色
+
+信頼度 (`high` / `mid` / `low`) は **配色マップから独立** で、CSS 変数 `--conf-high` / `--conf-mid` / `--conf-low` (元仕様§7.2 の値) を使う。これは「サンプル依存ではなく汎用的な意味色」なので固定で問題ない。
+
+#### 4.8.3 既知タグマップの上書きについて (将来)
+
+Phase H で `settings.json` に `tagColors` セクションを追加し、起動時に `KNOWN_TAG_COLORS` を上書きする想定。本フェーズでは API は用意せず、ハードコードされた `defaultPalette.ts` の値を使う。
+
+### 4.9 再読み込み機能 (`ClassificationHeader.tsx`)
+
+「一覧」タブのヘッダ右側に **「再読み込み」ボタン** を配置する。クリックで `useClassification.reload()` を呼ぶ。
+
+UI:
+
+```
+[フォルダを開く]  C:\path\to\folder        [件数: 123 / 155]  [↻ 再読み込み]
+```
+
+- アイコンは SVG 直書き (`shared/icons/ReloadIcon.tsx`)。
+- フォルダ未選択時は disabled。
+- `reload` 中はスピナー表示 (ボタンは disabled)。
+- 成功でトースト不要。失敗は通常のエラートースト。
+
+### 4.10 競合検出ダイアログ
+
+`saveEdit` / `Save` で `CONFLICT:` プレフィックスのエラーが返ったとき、`shared/components/ConfirmDialog.tsx` ベースの **3 択ダイアログ** を出す:
+
+```
+┌──────────────────────────────────────────────────────┐
+│ ⚠ 外部編集を検出しました                               │
+│                                                      │
+│ このファイルを開いてからの間に、別のプロセス (AI ツール  │
+│ やテキストエディタ) が _classification.json を編集    │
+│ しました。                                            │
+│                                                      │
+│ どうしますか?                                          │
+│                                                      │
+│   [再読み込み (推奨)]  [強制上書き]  [キャンセル]       │
+└──────────────────────────────────────────────────────┘
+```
+
+選択肢の挙動:
+- **再読み込み (推奨)**: `reload()` を呼んで最新 JSON を読み込む。アプリ内の編集中の変更は破棄される (ユーザー意図的に選んだので警告のみ)。
+- **強制上書き**: `expectedMtime=0` で `App.UpdateClassificationEntry` を再呼出 (mtime チェックを skip)。外部編集分は失われる。
+- **キャンセル**: 何もしない。ポップオーバーは開いたまま。ユーザーが手動でコピーするなど対処できる。
+
+実装メモ: 既存の `ConfirmDialog` は 2 択 (はい/いいえ) なので、本フェーズで 3 択対応の `useConflictDialog` を追加するか、`ConfirmDialog` を多択化する。本書では `shared/components/ConflictDialog.tsx` を新設する方針 (既存の 2 択 dialog はそのまま)。
+
+### 4.11 削除する箇所
+
+| ファイル / 箇所 | 削除理由 |
+|---|---|
+| [frontend/src/features/folder-tree/](../frontend/src/features/folder-tree/) (フォルダ全体) | 左ペイン廃止 |
+| [App.tsx](../frontend/src/App.tsx) の左ペイン / Splitter / `leftWidth` 関連 | 同上 |
+| [App.css](../frontend/src/App.css) の `.app` (2 ペイン Flexbox), `.pane.left`, `.splitter` 関連 | 同上 |
+| `internal/tree/` のうち `List`, `tree_unix.go`, `tree_windows.go`, それらのテスト | 左ペイン廃止 + ディレクトリ列挙 API 不要 |
+| `app.go` の `ListDirectory` メソッド | 上に同じ |
+| 自動生成 `wailsjs/go/main/App.d.ts` の `ListDirectory` | 再生成で消える |
+
+`tree.IsImage` だけは新パッケージ `internal/imgfile/IsImage` に **移設** する (削除ではない)。
+
+---
+
+## 5. 機能要件 (元仕様の再掲 + 本書独自)
+
+元仕様§5 をそのまま採用する。差分のみ列挙:
+
+### 5.1 タブ統合 → トップレベルタブ化 (本書差分)
+
+- アプリ全体に「一覧」「ビューア」のトップレベルタブを設ける。
+- 起動直後はセッション復元値に従う。初回起動 (state.json なし) では「一覧」がアクティブ。
+- 「一覧」タブ内には元仕様§5.1 の機能 (フォルダ選択 / サイドカー有無判定 / 新規作成ダイアログ) を持つが、**「タブ自体のグレーアウト」は廃止する** (タブが常時 2 枚しかなく、一覧タブが無効化されるとアプリの入口がなくなるため)。代わりに「一覧」タブの中身として「フォルダを開く」ボタンが常に表示され、フォルダ未選択時は空ステート画面を出す。
+
+### 5.2 メタデータ読み込み (元仕様§5.2 のまま)
+
+- `LoadClassification` で取得。エラーはトーストで表示し、空ステート画面に戻す (§9 のエラー方針に従う)。
+
+### 5.3 グリッド表示 (元仕様§5.3 のまま)
+
+仮想スクロールは v1 では未実装。1 万件で初回描画 1.5 秒以内 (元仕様§10) は IntersectionObserver による画像遅延ロードで達成見込み (DOM 自体の生成はカードあたり軽量に保つ)。
+
+### 5.7 編集 (元仕様§5.7 + 本書差分: 競合検出)
+
+元仕様§5.7 の挙動を踏襲。**追加**:
+
+- 保存時に外部編集との競合を検出する (本書§4.10 / §3.6)。
+- 競合時はモーダル「外部編集を検出しました」を出し、「再読み込み」「強制上書き」「キャンセル」から選ばせる。
+- 楽観的 UI 更新は元仕様通り行わない。
+
+### 5.8 ライトボックス (本書§4.3 で強化)
+
+元仕様§5.8 の挙動 + 本書§4.3 の folder 視覚化を実装する。
+
+### 5.10 再読み込み (本書独自)
+
+- ヘッダの「再読み込み」ボタンクリックで `LoadClassification` を再実行する。
+- AI / 外部エディタが JSON を編集した直後にユーザーが手動で反映できる。
+- 自動ファイル監視 (`fsnotify`) は v1 では実装しない (§13 スコープ外)。
+- 編集中に再読み込みすると編集中のローカル変更は失われる。これはユーザー操作なので警告のみ (将来的に「未保存があります」確認を追加してもよいが本フェーズでは不要)。
+
+---
+
+## 6. UI 仕様
+
+元仕様§7 のレイアウトを「一覧」タブの中身として配置する。配色 (元仕様§7.2) は CSS 変数で `App.css` または `features/classification/style.css` に定義。
+
+### 6.1 トップタブバーのスタイル
+
+- 高さ 36px、背景はダーク系 (App.css の既存配色に合わせる)
+- アクティブタブは下線 + テキスト白、非アクティブはグレー
+- タブクリックでフォーカスリング (キーボード操作のため)
+- キーボードショートカット: `Ctrl+1` で一覧、`Ctrl+2` でビューア (任意、Phase H で広いショートカット体系を入れる予定なので **v1 では未実装**)
+
+### 6.2 「一覧」タブ未選択時 (フォルダ未指定) の空ステート
+
+```
+┌─────────────────────────────────────────────────┐
+│                                                 │
+│                                                 │
+│             📁 (大きな folder アイコン)           │
+│                                                 │
+│        分類対象のフォルダを選択してください       │
+│                                                 │
+│           [ フォルダを開く ]                     │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## 7. 永続化スキーマ (state.json v2)
+
+### 7.1 ファイル
+
+`os.UserConfigDir()/image-observer/state.json` (Phase 3c から場所変更なし)。
+
+### 7.2 v2 スキーマ全体 (Go)
+
+```go
+type StateData struct {
+    Version       int          `json:"version"`        // 2
+    RootPath      string       `json:"rootPath"`       // v1 互換、v2 では未使用
+    LeftPaneWidth int          `json:"leftPaneWidth"`  // v1 互換、v2 では未使用
+    Window        WindowState  `json:"window"`
+    Grid          GridState    `json:"grid"`
+    TopTab        string       `json:"topTab"`         // "list" | "viewer"
+    List          ListTabState `json:"list"`
+}
+
+type ListTabState struct {
+    FolderPath string          `json:"folderPath"`
+    Filter     ListFilterState `json:"filter"`
+}
+
+type ListFilterState struct {
+    Tags       []string `json:"tags"`
+    Confidence string   `json:"confidence"` // "all" | "high" | "mid" | "low"
+    Query      string   `json:"query"`
+}
+```
+
+### 7.3 マイグレーション
+
+v1 → v2 のマイグレーションは **行わない**。`Version != 2` で `DefaultData()` フォールバック (Phase 3c 既存挙動と同じ)。これにより、既存の v1 state.json を持つユーザーは「ウィンドウ位置 / グリッド / タブ」が一度初期化される。Phase 3c 完了直後の本フェーズなので影響範囲は小さい (開発者のみ)。
+
+---
+
+## 8. ファイル仕様 (元仕様§8 を踏襲 + 本書差分)
+
+### 8.1 正本 / 互換
+
+- **正本**: `_classification.json`。アプリの読み書き・AI / 手動編集の対象はこれ一本。
+- **互換 (初回 import 専用)**: `_classification.csv`。JSON が無いフォルダで Load されたとき、内部形式に変換して使う。**保存時に CSV を更新することはしない**。一度ユーザーが何か保存して JSON が生成されると、以降 CSV は無視される。古い CSV はアプリからは削除しない (ユーザーが手動で削除する想定)。
+
+### 8.2 JSON フォーマット
+
+- `MarshalIndent("", "  ")` (BOM なし、UTF-8、2 スペースインデント、末尾改行 1 つ)。
+- 人間 / AI が読み書きしやすい形式を保つ (フィールド順序は struct 定義順)。
+
+### 8.3 バックアップ + 競合検出
+
+- 保存フロー: 既存 `.json` を `.bak` にコピー → `.tmp` に書き → `os.Rename(.tmp, .json)`。
+- 既存 `.bak` は上書き OK (1 世代のみ保持)。
+- 保存直前に `expectedMtime` と現在のディスク mtime を比較。不一致なら競合エラーで中止 (`.bak` も `.tmp` も生成しない)。
+
+---
+
+## 9. エラーハンドリング (元仕様§9 を踏襲 + 本書差分)
+
+| ケース | 振る舞い |
+|---|---|
+| サイドカー不在 | フォルダ選択直後にダイアログ「サイドカーがありません。新規作成しますか?」。「はい」で `CreateEmptyClassification` → 再 `LoadClassification`。「いいえ」で空ステートに戻る (元仕様§5.9 を踏襲、ただし「タブグレーアウト」は廃止) |
+| JSON パース失敗 | トーストでエラーメッセージ表示、空ステートに戻す。本書ではモーダル禁止 (Phase 3c のエラー UX とトーストで統一) |
+| CSV ヘッダ不正 | 同上 |
+| 同一 filename 重複 | 同上 |
+| フォルダ走査失敗 | 同上 |
+| 保存失敗 (一般) | トースト「保存に失敗しました: <reason>」。編集ポップオーバーは開いたままにし、再試行可能な状態に戻す。表示の楽観更新はしないので UI ロールバック処理は不要 |
+| **保存時の競合検出** | 本書§4.10 のダイアログを表示 (再読み込み / 強制上書き / キャンセル)。`error.message` が `"CONFLICT:"` で始まることで判別 |
+| 大量読み込み中 | フォルダ選択直後に「読み込み中…」スピナーを表示。完了で消す |
+| **再読み込み中** | ヘッダの ↻ ボタンを disabled + スピナー化。完了で復帰 |
+
+---
+
+## 10. 非機能要件
+
+- 元仕様§10 を踏襲 (1 万件 / メモリ 500MB / UTF-8 / 日本語ファイル名対応)。
+- 仮想スクロールは v1 未実装 (元仕様§10 既定)。
+- 画像遅延ロードは IntersectionObserver 必須 (元仕様§10 既定)。
+
+---
+
+## 11. テスト
+
+### 11.1 Go 側
+
+- `internal/classification/repository_test.go`:
+  - JSON 読み書きラウンドトリップ + Mtime が更新されること
+  - CSV 読み込み (BOM あり/なし、ヘッダ順入替)
+  - 重複 filename 検出
+  - `os.Rename` フォールバック挙動
+  - **競合検出**: `expectedMtime` 不一致で `ErrConflict` が返り、`.bak` も `.tmp` も作られないこと
+  - **競合検出 (`expectedMtime=0`)**: 既存ファイルがあっても上書きされること (強制上書きのため)
+- `internal/classification/scanner_test.go`: `t.TempDir()` で実ファイルを置き、画像拡張子のみが返ることを確認。
+- `internal/classification/service_test.go`:
+  - マージ規則 (未分類追加 / Orphan 分離 / 順序保持) のテスト
+  - `UpdateEntry` が既存を置換し新規を末尾追加することのテスト
+  - **競合検出**: `UpdateEntry` の `expectedMtime` が古ければ `ErrConflict` を返すこと
+- `internal/imgfile/imgfile_test.go`: `tree_test.go` から `IsImage` 関連を移植。
+- `internal/state/state_test.go`: v2 への version up に伴い v1 state.json 読み込みでデフォルトに落ちることを確認するケースを追加。
+
+### 11.2 フロント側
+
+- `features/classification/filters.test.ts`: 元仕様§4.4 の例 (`iroha` / `shugo (iroha + kaguya)` / `shugo (iroha + kaguya + yachiyo)` / `fumei`) に加えて、**サンプル外** (`cat (kuro + shiro)` / `landscape` / 空文字) で `extractTags` が期待値を返すこと。`applyFilter` が tags OR / confidence / query で正しく絞り込めること。
+- `features/classification/colors.test.ts`:
+  - 既知タグ (`iroha` 等) → `DEFAULT_PALETTE` の値を返す
+  - 未知タグ (`cat` / `landscape` / `任意の文字列`) → `HASH_PALETTE` のいずれかを返し、**同じ入力に対して常に同じ色を返す** (決定性のテスト)
+  - 空文字 → `var(--unclassified)` を返す
+  - 別の異なる入力を 50 件ほど投げ、衝突分布が極端に偏らないこと (簡易ヒストグラム検証)
+- それ以外のフロント単体テストは本フェーズではスコープ外 (Phase J で全面導入の方針)。`wails dev` で目視確認する。
+
+---
+
+## 12. 受け入れ基準 (元仕様§11 を踏襲 + 本書差分)
+
+### 12.1 機能テスト
+
+- [ ] 既存の `_classification.csv` (参考実装の出力) を画像フォルダに置いてフォルダ選択 → 一覧タブに 155 件のグリッド表示
+- [ ] サイドカーがないフォルダを選ぶ → 確認ダイアログ → 「はい」で `_classification.json` が生成され、画像枚数分のエントリが空で並ぶ
+- [ ] タグチップ「iroha」をクリック → iroha 単独 + iroha を含む shugo がフィルタされる (`extractTags` の挙動が§4.4と一致)
+- [ ] タグチップ「iroha」「kaguya」両方選択 → どちらかに該当 (OR)
+- [ ] 信頼度「high」で high のみ表示
+- [ ] 検索「フグ」で note に含むエントリのみ表示 (150ms デバウンス)
+- [ ] カード編集アイコン → ポップオーバー → 変更 → 保存 → カード反映 → 再起動後も保持
+- [ ] サムネクリック → ライトボックス、`←/→` で前後移動 (フィルタ後順序)、`Esc` で閉じる
+- [ ] **ライトボックス内で folder の主バッジが色付きで表示される。`shugo (iroha + kaguya + yachiyo)` のとき、内訳タグが個別の色付きバッジで併記される (本書§4.3.1 / §4.3.2)**
+- [ ] サイドカー記載 + 実体なし → グリッドに出ない、コンソールに警告ログ、サイドカーには残る
+- [ ] サイドカー記載なし + 実体あり → 「未分類」末尾表示
+- [ ] **サンプル外データ**: `cat (kuro + shiro)` / `landscape` / 全く新しい文字列タグでも、フィルタ・ライトボックスが機能し、決定的ハッシュで色が割り当たる
+- [ ] **再読み込み**: 一覧表示中に外部 (テキストエディタ等) で `_classification.json` を編集 → ヘッダの ↻ ボタンクリック → 編集内容が反映される
+- [ ] **競合検出**: アプリで編集中に外部から JSON を書き換え → 保存ボタン → 競合ダイアログが表示される。「再読み込み」を選ぶと最新 JSON が反映される。「強制上書き」を選ぶとアプリ側の内容で上書きされる
+- [ ] **正本 JSON / CSV 互換**: CSV のみあるフォルダを開いて何も編集せず再起動 → 次回も CSV から読まれる。CSV のみあるフォルダで何かを編集して保存 → JSON が生成される。次回以降は JSON のみ参照され、CSV は無視される (古いまま残置)
+
+### 12.2 トップレベルタブ
+
+- [ ] 起動時、初期状態で「一覧」タブがアクティブ
+- [ ] 「ビューア」タブをクリック → 既存ビューアグリッドが全幅表示される
+- [ ] 「ビューア」タブで Phase 3c の機能 (タブ追加 / 削除 / グリッド分割 / zoom/pan) が問題なく動作する
+- [ ] 「一覧」⇄「ビューア」を行き来しても、一覧側のフォルダ + フィルタ + ビューア側のグリッド/タブが維持される
+- [ ] 再起動後、最後にアクティブだったトップレベルタブが復元される
+- [ ] 再起動後、一覧側のフォルダパスとフィルタが復元される (LoadClassification が自動で走る)
+
+### 12.3 削除確認
+
+- [ ] [features/folder-tree/](../frontend/src/features/folder-tree/) ディレクトリが完全に削除されている
+- [ ] `internal/tree/` から `List`, `tree_unix.go`, `tree_windows.go` 関連が削除されている
+- [ ] `app.go` から `ListDirectory` が削除されている
+- [ ] `App.tsx` に左ペイン / Splitter 関連コードが残っていない
+- [ ] grep で `folder-tree` / `FolderPanel` / `useTree` / `ListDirectory` の参照が見つからない
+
+### 12.4 データ整合性 / コード品質 (元仕様§11.2 §11.4)
+
+- [ ] `SaveJSON` 後、`.bak` 生成
+- [ ] `.tmp` が通常終了時に残らない
+- [ ] CSV → JSON 変換が値を完全保持
+- [ ] `go vet ./...` エラーなし
+- [ ] `go test ./...` 全通過
+- [ ] `tsc --noEmit` クリア
+- [ ] `Service` / `Repository` / `Scanner` がインターフェース越しでテスト可能
+
+---
+
+## 13. スコープ外 (Phase 4 では作らない)
+
+### 13.1 タブ間連携 / UI
+
+- 「ビューア」タブと「一覧」タブの連携 (例: ライトボックスから「ビューアで開く」、ビューアで開いたタブを一覧側で強調表示等)。**v1 ではライトボックス内で完結**。連携が必要になった段階で Phase 5 等で追加検討。
+- 仮想スクロール (`react-window` 等) — 元仕様§10 既定通り未実装。1 万件超えで体感悪化したら導入。
+- 一括編集 / 複数選択 (元仕様§2.2 既定通り)。
+- ソート機能 (元仕様§2.2 既定通り)。
+- AI 自動分類 (元仕様§2.2 既定通り)。
+- キーボードショートカット (`Ctrl+1` / `Ctrl+2` 等) — Phase H。
+- 設定 UI (サムネサイズ / mode 等の変更) — Phase H。
+
+### 13.2 外部編集サポートの拡張
+
+- **ファイル監視 (`fsnotify`) による自動リロード**。本フェーズでは「手動リロードボタン」のみ。プラットフォーム差異 / デバウンス / 複数イベント発火の取り回しが重く、Phase 5+ で検討。
+- **JSON エクスポート** (フィルタ後の Entries だけを別 JSON に出力。AI 入力データ作成用)。Phase 5+。
+- **JSON インポート / マージ** (外部生成された JSON を現在のサイドカーとマージ。LLM が大量に分類した結果を取り込む等)。Phase 5+。手動の場合はファイル自体を差し替えて再読み込みすれば足りる。
+- **CSV エクスポート** (元仕様§4.1 で v1 スコープ外)。Phase 5+ で検討。
+
+### 13.3 汎用化のさらなる発展 (レベル 2 以上)
+
+- **データ型の自由形式化**: 現状は `Folder` 文字列ベースだが、`Tags []string` のような完全配列形式へのマイグレーション。Phase 5+ で検討するが破壊的変更になるため慎重に。
+- **配色のユーザーカスタマイズ UI**: `defaultPalette.ts` の値を Phase H の `settings.json` で上書き可能に。本フェーズでは API のみ用意せず、ハードコードのみ。
+- **マルチドメインのテンプレート**: フォルダごとに「タグセット定義 + 配色」を JSON で同梱できる仕組み。Phase 5+。
+- **タグ正規化 / 曖昧マッチ** (元仕様§12 既定通り。例: 大文字小文字の同一視、表記ゆれの統合)。Phase 5+。
+
+---
+
+## 14. 実装手順 (推奨)
+
+1. **Go パッケージ整理**: `internal/imgfile` を新設して `tree.IsImage` を移設。`internal/thumb` / `internal/imgread` の参照を切り替え。`go test ./...` 通過確認
+2. **`internal/tree` の削除と `app.go::ListDirectory` の撤去**: 残コンパイルエラーが出ないことを確認 (左ペイン削除はフロント側でまとめて行うので一時的に未使用扱いになる)
+3. **`internal/classification` の実装** (`types` → `repository` → `scanner` → `service` の順)。テストファースト。**Mtime / ErrConflict / expectedMtime のサイクルもここで完成させる**。
+4. **`internal/state` の v2 化**: 型追加 + `validateState` 拡張 + `DefaultData` 更新 + テスト更新。
+5. **`app.go` の Wails バインディング追加**: `LoadClassification` / `SaveClassification` / `UpdateClassificationEntry` / `CreateEmptyClassification`。`CONFLICT:` プレフィックスのエラー整形もここで実装。
+6. **`wails build`**: TS バインディング再生成を確認。
+7. **フロント — folder-tree 削除**: [App.tsx](../frontend/src/App.tsx) を「ViewerGrid のみ全幅表示」に一旦縮小、folder-tree 関連 import / CSS / hooks を全削除。`tsc --noEmit` 通過。
+8. **フロント — TopTabs 導入**: `App.tsx` でトップレベルタブを導入し、ViewerGrid をビューアタブに、空コンポーネントを一覧タブに割り当て。
+9. **フロント — 配色汎用化基盤**: `colors.ts` (`tagColor` + ハッシュフォールバック) と `defaultPalette.ts` を実装し、`colors.test.ts` を通す。先に作るのは Card / EditPopover / Lightbox の各バッジが全部これに依存するため。
+10. **フロント — 一覧タブのスケルトン**: `features/classification/ClassificationView.tsx` + `ClassificationHeader.tsx` (フォルダ選択 + **再読み込みボタン**) + `useClassification.ts` を作り、フォルダ選択 → `LoadClassification` → カード並べ表示まで。
+11. **フィルタ実装**: `filters.ts` (純関数) + テスト → TagChips / ConfidenceSegment / SearchBox。
+12. **編集ポップオーバー** + 保存フロー (`App.UpdateClassificationEntry`)。**競合検出ダイアログ** (`ConflictDialog.tsx`) も併せて実装。
+13. **ライトボックス** + `←/→` 操作 + folder バッジ視覚化 (主バッジ + 抽出タグ列)。
+14. **セッション永続化への組み込み**: `useSessionSave` の input に topTab / list を追加。動作確認。
+15. **CSV → JSON 初回 import の動作確認**: CSV のみのフォルダで一度編集 → JSON 生成 → 再起動して JSON のみ参照されることを確認。
+16. **受け入れ基準 (§12) を一通り走らせる**。
+
+---
+
+## 15. リスクと留意点
+
+| リスク | 対策 |
+|---|---|
+| state.json v1 → v2 の互換性 | マイグレーションせずデフォルトに落とす方針で割り切る (Phase 3c 完了直後の影響範囲は開発機のみ) |
+| `internal/tree` 削除に伴う他パッケージへの影響 | `IsImage` を `imgfile` に移設してから tree を削る。各テストで先に通過確認 |
+| トップレベルタブ切替時の状態消失 | `useClassification` を `App.tsx` で持ちアンマウントしないようにする (本書§4.2 の戦略) |
+| 1 万件のサムネで OOM | IntersectionObserver で viewport 外は未ロード、Map キャッシュは `URL.revokeObjectURL` でアンマウント時に解放。さらに上限が必要なら Phase H で LRU 化 |
+| ライトボックスの抽出タグが多すぎて折り返す (`shugo (a + b + c + d + e)`) | 折り返し OK。可読性を保つため小バッジは `flex-wrap: wrap` |
+| ファイルシステムの mtime 精度差 (秒単位など) で競合検出が誤検知 / 見落とし | 人間 / AI の編集間隔 (数秒〜分単位) と比較すれば実害なし。秒単位精度でも保存と保存の間に外部編集があれば mtime は確実にズレる。ナノ秒精度のシステムで「同一秒内の連打保存」が起きる場合のみ取りこぼす可能性があるが、その時はフロント側で連打防止 (debounce) で吸収済み |
+| ネットワークドライブで mtime が嘘をつく (キャッシュ) | リスクは認識するが対策は Phase 5+。現状ローカルディスク前提 |
+| 強制上書き選択時の外部編集の損失 | ユーザーが明示的に選んでいるため警告のみ。`.bak` には書き換え直前の内容が残るので最後の手段で復旧可 |
+| 配色のハッシュ衝突で異なるタグが同色になる | 16 色プールなので確率的には 1/16 で衝突。同一ビュー内に並ぶ複合分類で見分けがつかなくなった場合、ユーザーは Phase H の `defaultPalette.ts` 上書きで対処できる |
+
+---
+
+## 16. 参考
+
+- 元仕様: [docs/new_thumbnail.md](new_thumbnail.md)
+- 参考 HTML: [docs/new_thumbnail/sample.html](new_thumbnail/sample.html)
+- 参考 CSV: [docs/new_thumbnail/sample.csv](new_thumbnail/sample.csv)
+- Phase 3c 仕様 (state.json v1): [docs/spec-tab-imageview-3c.md](spec-tab-imageview-3c.md)
+- Phase 2 サムネ仕様: [docs/spec-thumbnail.md](spec-thumbnail.md)
+
+---
+
+## 17. 用語集 (本書での再定義)
+
+元仕様§13 の「集合 (shugo)」「不明 (fumei)」のようなドメイン語の用語集は **本書では採用しない**。汎用化のため以下を採用する:
+
+| 用語 | 定義 |
+|---|---|
+| サイドカー | 画像本体に紐付けて同じフォルダに置かれるメタデータファイル (`_classification.json` または `_classification.csv`)。本書の正本は前者 |
+| エントリ | 1 画像に対応する 1 分類レコード (`Entry`) |
+| 主タグ | `Folder` 文字列の `(` 以前の部分。`Folder = "iroha"` なら `iroha`、`Folder = "shugo (a + b)"` なら `shugo` |
+| 補助タグ | `Folder` 文字列の `(...)` 内を `+` で split したもの。元仕様§4.4 のアルゴリズムで抽出 |
+| 抽出タグ (タグ) | 主タグ + 補助タグ (重複除去後)。フィルタ・配色の単位 |
+| 複合分類 | `主 (sub + sub)` 形式の Folder 文字列。元仕様で「集合 (shugo)」と呼ばれていたものを汎用化したもの。`shugo` は単に「複合分類でよく使われるサンプル上の主タグ名」にすぎない |
+| 単一タグ | 補助タグなしの Folder 文字列。`fumei` も単一タグの一例。本書ではドメイン特有の意味を持たせない |
+| 未分類 | `Folder == ""` (空文字) のエントリ。サイドカーに記載がない実ファイルや、ユーザーが意図的に空文字にしたエントリ |
+| 孤立エントリ | サイドカーには記載があるが画像フォルダに実体がないエントリ (`Orphans`) |
+| 既知タグ | `defaultPalette.ts` に色定義があるタグ |
+| 未知タグ | 既知タグ以外。色は決定的ハッシュで自動割当 (§4.8) |
+| 競合 | `expectedMtime` と現在のディスク上の `_classification.json` の mtime が一致しないこと。外部 (AI / エディタ) による書き換えを示す |

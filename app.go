@@ -2,21 +2,29 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"image-observer/internal/classification"
 	"image-observer/internal/imgread"
 	"image-observer/internal/state"
 	"image-observer/internal/thumb"
-	"image-observer/internal/tree"
 )
 
 type App struct {
-	ctx context.Context
+	ctx            context.Context
+	classification *classification.Service
 }
 
 func NewApp() *App {
-	return &App{}
+	return &App{
+		classification: classification.NewService(
+			classification.NewFileRepository(),
+			classification.NewFileScanner(),
+		),
+	}
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -29,12 +37,6 @@ func (a *App) OpenFolderDialog() (string, error) {
 	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "フォルダを選択",
 	})
-}
-
-// ListDirectory returns immediate children (one level only) of the given path.
-// See spec-folder-tree.md §3.2 for behavior contract.
-func (a *App) ListDirectory(path string) ([]tree.Node, error) {
-	return tree.List(path)
 }
 
 // GetThumbnail returns a thumbnail for the given image path.
@@ -66,4 +68,49 @@ func (a *App) GetState() (state.StateData, error) {
 // See spec-tab-imageview-3c.md §3.4.
 func (a *App) SaveState(s state.StateData) error {
 	return state.Save(s)
+}
+
+// LoadClassification reads (and merges with the folder contents) the sidecar
+// metadata for the given folder. See spec-classification.md §3.7.
+func (a *App) LoadClassification(folderPath string) (*classification.LoadResult, error) {
+	return a.classification.Load(folderPath)
+}
+
+// SaveClassification writes the full entry list to JSON. expectedMtime is the
+// mtime the frontend received from the most recent Load (or Update); pass 0 to
+// force overwrite after the user resolves a conflict.
+func (a *App) SaveClassification(folderPath string, entries []classification.Entry, expectedMtime int64) (classification.SaveOutput, error) {
+	mtime, err := a.classification.Save(folderPath, entries, expectedMtime)
+	if err != nil {
+		return classification.SaveOutput{}, classificationError(err)
+	}
+	return classification.SaveOutput{Mtime: mtime}, nil
+}
+
+// UpdateClassificationEntry replaces (or appends) a single entry by Filename.
+func (a *App) UpdateClassificationEntry(folderPath string, entry classification.Entry, expectedMtime int64) (classification.SaveOutput, error) {
+	mtime, err := a.classification.UpdateEntry(folderPath, entry, expectedMtime)
+	if err != nil {
+		return classification.SaveOutput{}, classificationError(err)
+	}
+	return classification.SaveOutput{Mtime: mtime}, nil
+}
+
+// CreateEmptyClassification creates a brand-new sidecar populated from the
+// folder's image files (all entries blank).
+func (a *App) CreateEmptyClassification(folderPath string) (classification.SaveOutput, error) {
+	mtime, err := a.classification.CreateEmpty(folderPath)
+	if err != nil {
+		return classification.SaveOutput{}, classificationError(err)
+	}
+	return classification.SaveOutput{Mtime: mtime}, nil
+}
+
+// classificationError tags conflict errors with a "CONFLICT:" prefix so the
+// frontend can detect them via error.message and show the resolution dialog.
+func classificationError(err error) error {
+	if errors.Is(err, classification.ErrConflict) {
+		return fmt.Errorf("CONFLICT: %w", err)
+	}
+	return err
 }

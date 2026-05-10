@@ -2,7 +2,7 @@
 
 新規セッションでこのプロジェクトを開いた Claude が、まず読んで全体像を把握するためのファイル。詳細は本文中で参照しているドキュメントを参照する。
 
-最終更新: 2026-04-26 (Phase 0/1/2/3a/3b/3c すべて実装完了。Go コードを `internal/{tree,thumb,imgread,state}` に分割整理。次は仕上げフェーズ G/H/I/J)
+最終更新: 2026-05-10 (Phase 4 実装完了: トップレベルタブ化 + 分類タブ + 左ペイン廃止)。`internal/tree` 削除、`IsImage` を `internal/imgfile` に移設、`internal/classification` 新設。state schema v2。次は仕上げフェーズ G/H/I/J および Phase 4 の `wails dev` での目視テスト。
 
 ---
 
@@ -19,7 +19,8 @@ Wails v2 (Go バックエンド + React/TS フロント) で実装する **Windo
 - Phase 2: ホバーポップアップでサムネ表示。Go 側に `GetThumbnail` API + worker pool + シャーディングキャッシュ (`os.UserCacheDir()/image-observer/cache/thumbnails/<mode>/<size>/<2>/<30>.<ext>`)。WebP は PNG フォールバック (cgo 依存回避のため)。Go テスト 11 ケース全パス、`wails build` パス済み。
 - **Phase 3a (実装完了)**: 単一パネル + タブ + 画像表示 + ズーム/パン + 背景 (チェッカ柄)。EXIF Orientation は v1 非対応 (todo.md E9 改定)。原寸表示は再エンコードせずディスクバイトをそのまま返す方針。spec は [spec-tab-imageview-3a.md](../spec-tab-imageview-3a.md)。
 - **Phase 3b (実装完了)**: ビューア領域を最大 2 行 × 3 列 = 6 パネルのグリッドに分割 + アクティブパネル (青枠ハイライト) + パネル間タブ移動 (右クリックメニュー)。`useViewerGrid` hook で全状態を一元管理、`MAX_ROWS / MAX_COLS` 定数で将来 UI 化の境界を分離。Go 側変更なし。spec は [spec-tab-imageview-3b.md](../spec-tab-imageview-3b.md)。
-- **Phase 3c (実装完了)**: セッション復元。`os.UserConfigDir()/image-observer/state.json` にアトミック書き込み、debounce 500ms。Go 側 `GetState` / `SaveState` + `main.go` 起動時 loadState + OnStartup で `WindowSetPosition`。フロントは `useSessionLoad` (2 段階 mount) + `useSessionSave` (`JSON.stringify` で stable diff) + `useTree` / `useViewerGrid` の `initialRootPath` / `initialGrid` 注入 + ImageView の post-restore `clampPan`。spec は [spec-tab-imageview-3c.md](../spec-tab-imageview-3c.md)。todo.md F は本フェーズで部分確定済み (設定値の永続化は Phase H で別ファイル `settings.json`)。
+- **Phase 3c (実装完了)**: セッション復元。`os.UserConfigDir()/image-observer/state.json` にアトミック書き込み、debounce 500ms。Go 側 `GetState` / `SaveState` + `main.go` 起動時 loadState + OnStartup で `WindowSetPosition`。フロントは `useSessionLoad` (2 段階 mount) + `useSessionSave` (`JSON.stringify` で stable diff) + `useTree` / `useViewerGrid` の `initialRootPath` / `initialGrid` 注入 + ImageView の post-restore `clampPan`。spec は [spec-tab-imageview-3c.md](../docs/spec-tab-imageview-3c.md)。todo.md F は本フェーズで部分確定済み (設定値の永続化は Phase H で別ファイル `settings.json`)。
+- **Phase 4 (実装完了)**: 左ペイン (フォルダツリー) を完全廃止し、トップレベルタブ「一覧 / ビューア」に再編。「一覧」タブに分類ビュー (タグチップ + 信頼度 + 検索 + サムネグリッド + 編集ポップオーバー + ライトボックス) を新設。サイドカー `_classification.json` (正本) + `_classification.csv` (初回 import 専用) ベース。AI / 手動編集を想定して `mtime` ベースの **競合検出** + 「再読み込み」ボタンを実装。配色は **既知タグマップ + FNV-1a ハッシュフォールバック** で汎用化 (`shugo`/`fumei` などのドメイン特別扱い撤廃)。Go: `internal/tree` 削除、`IsImage` を `internal/imgfile` に移設、`internal/classification/{types,repository,scanner,service}` 新設、`internal/state` を v2 化 (`TopTab` / `List` 追加、v1 はマイグレーションせず default fallback)。フロント: `features/folder-tree/` 削除、`features/classification/` 新設、`useSessionSave` を v2 化。spec は [spec-classification.md](../docs/spec-classification.md)、元仕様は [new_thumbnail.md](../docs/new_thumbnail.md)。Go テスト全通過 (29 ケース: imgfile 1 + classification 15 + state 13 (うち追加 4) + 既存)、`wails build` 通過、`tsc --noEmit` クリア。実機動作確認 (受け入れ基準§12) は `wails dev` で要実施。
 
 ## 3. 重要ドキュメント (このディレクトリの兄弟ファイル)
 
@@ -31,7 +32,9 @@ Wails v2 (Go バックエンド + React/TS フロント) で実装する **Windo
 | [spec-thumbnail.md](../spec-thumbnail.md) | Phase 2 実装仕様書。**実装完了** (DoD §9 全項目 `[x]`)。 |
 | [spec-tab-imageview-3a.md](../spec-tab-imageview-3a.md) | Phase 3a 実装仕様書 (単一パネル分)。**実装完了** (DoD §9 全項目 `[x]`)。 |
 | [spec-tab-imageview-3b.md](../spec-tab-imageview-3b.md) | Phase 3b 実装仕様書 (グリッド分割 + タブ移動)。**実装完了** (DoD §9 全項目 `[x]`)。 |
-| [spec-tab-imageview-3c.md](../spec-tab-imageview-3c.md) | Phase 3c 実装仕様書 (セッション復元 + F 部分確定)。**実装完了** (DoD §9 全項目 `[x]`)。 |
+| [spec-tab-imageview-3c.md](../docs/spec-tab-imageview-3c.md) | Phase 3c 実装仕様書 (セッション復元 + F 部分確定)。**実装完了** (DoD §9 全項目 `[x]`)。 |
+| [spec-classification.md](../docs/spec-classification.md) | Phase 4 実装仕様書 (トップレベルタブ化 + 分類タブ + 競合検出 + 配色汎用化)。**実装完了**。受け入れ基準§12 の実機確認は要 `wails dev`。 |
+| [new_thumbnail.md](../docs/new_thumbnail.md) | Phase 4 の元仕様 (汎用 v1.0)。`spec-classification.md` の§0 にすべての差分を集約済み。 |
 | [README.md](../README.md) | ユーザー向けの使い方 (環境要件、`wails dev` / `wails build` 手順、現状スコープ)。 |
 
 ## 4. 確定済みの方針 (todo.md A〜C より要点抜粋)

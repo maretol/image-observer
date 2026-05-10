@@ -170,6 +170,86 @@ func TestValidateState_ResetTinyZoom(t *testing.T) {
 	}
 }
 
+func TestLoadState_V1FallsBackToDefault(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	// v1 schema (no topTab/list, version=1)
+	if err := os.WriteFile(p, []byte(`{"version":1,"rootPath":"/old","leftPaneWidth":300}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.Version != StateSchemaVersion {
+		t.Errorf("expected schema v%d, got %d", StateSchemaVersion, s.Version)
+	}
+	if s.TopTab != "list" {
+		t.Errorf("default TopTab = %q, want list", s.TopTab)
+	}
+	if s.RootPath != "" {
+		t.Errorf("v1 rootPath should not survive fallback, got %q", s.RootPath)
+	}
+}
+
+func TestDefaultData_V2Fields(t *testing.T) {
+	d := DefaultData()
+	if d.Version != 2 {
+		t.Errorf("Version = %d, want 2", d.Version)
+	}
+	if d.TopTab != "list" {
+		t.Errorf("TopTab = %q, want list", d.TopTab)
+	}
+	if d.List.Filter.Confidence != "all" {
+		t.Errorf("default Confidence = %q, want all", d.List.Filter.Confidence)
+	}
+	if d.List.Filter.Tags == nil {
+		t.Errorf("default Tags must be non-nil empty slice")
+	}
+}
+
+func TestValidateState_TopTabClamped(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	bad := DefaultData()
+	bad.TopTab = "bogus"
+	bad.List.Filter.Confidence = "weird"
+	data, _ := json.Marshal(bad)
+	os.WriteFile(p, data, 0o644)
+	s := Load()
+	if s.TopTab != "list" {
+		t.Errorf("TopTab not clamped, got %q", s.TopTab)
+	}
+	if s.List.Filter.Confidence != "all" {
+		t.Errorf("Confidence not clamped, got %q", s.List.Filter.Confidence)
+	}
+}
+
+func TestSaveLoadState_V2RoundTrip(t *testing.T) {
+	setStateFile(t)
+	in := DefaultData()
+	in.TopTab = "viewer"
+	in.List.FolderPath = "/img/folder"
+	in.List.Filter = ListFilterState{
+		Tags:       []string{"iroha", "kaguya"},
+		Confidence: "high",
+		Query:      "フグ",
+	}
+	if err := Save(in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out := Load()
+	if out.TopTab != "viewer" {
+		t.Errorf("TopTab roundtrip: %q", out.TopTab)
+	}
+	if out.List.FolderPath != "/img/folder" {
+		t.Errorf("FolderPath roundtrip: %q", out.List.FolderPath)
+	}
+	if len(out.List.Filter.Tags) != 2 || out.List.Filter.Tags[0] != "iroha" {
+		t.Errorf("Tags roundtrip: %v", out.List.Filter.Tags)
+	}
+	if out.List.Filter.Query != "フグ" {
+		t.Errorf("Query roundtrip: %q", out.List.Filter.Query)
+	}
+}
+
 func TestValidateState_RowSizesEqualFix(t *testing.T) {
 	p := setStateFile(t)
 	os.MkdirAll(filepath.Dir(p), 0o755)

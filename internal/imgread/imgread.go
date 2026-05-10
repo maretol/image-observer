@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/image/webp"
 
-	"image-observer/internal/tree"
+	"image-observer/internal/imgfile"
 )
 
 type Result struct {
@@ -35,7 +35,7 @@ func ReadInfo(path string) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
-	if !tree.IsImage(abs) {
+	if !imgfile.IsImage(abs) {
 		return Info{}, fmt.Errorf("not an image: %s", abs)
 	}
 	info, err := os.Stat(abs)
@@ -60,7 +60,7 @@ func Read(path string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if !tree.IsImage(abs) {
+	if !imgfile.IsImage(abs) {
 		return Result{}, fmt.Errorf("not an image: %s", abs)
 	}
 	info, err := os.Stat(abs)

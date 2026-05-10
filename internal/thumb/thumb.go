@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"image-observer/internal/tree"
+	"image-observer/internal/imgfile"
 )
 
 type Config struct {
@@ -28,7 +28,7 @@ func Get(path string, size int, mode string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if !tree.IsImage(abs) {
+	if !imgfile.IsImage(abs) {
 		return Result{}, fmt.Errorf("not an image: %s", abs)
 	}
 
