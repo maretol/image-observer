@@ -86,12 +86,35 @@ jobs:
         shell: bash
         run: ls -la build/bin
 
+      - name: Stage release artifacts
+        # Resolve the actual installer filename Wails produced — its NSIS
+        # template names the installer `<name>-<arch>-installer.exe` but
+        # the prefix can shift between Wails versions, so glob it here and
+        # fail loudly if nothing matched. Then copy both the portable EXE
+        # and the installer into a stable directory for the upload step.
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp build/bin/image-observer.exe dist/
+          installer=$(ls build/bin/*installer*.exe 2>/dev/null | head -n1 || true)
+          if [ -z "$installer" ]; then
+            echo "::error::No NSIS installer .exe found in build/bin/. Wails -nsis output naming may have changed."
+            ls -la build/bin
+            exit 1
+          fi
+          cp "$installer" dist/
+          ls -la dist
+          echo "installer=$installer" >> "$GITHUB_OUTPUT"
+
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v3
         with:
           # Tag-driven trigger: action picks up GITHUB_REF automatically.
+          # Glob covers the installer (`-amd64-installer.exe` etc.) plus the
+          # portable EXE; `dist/` only contains files we explicitly copied.
           files: |
-            build/bin/image-observer.exe
-            build/bin/image-observer-amd64-installer.exe
+            dist/*.exe
           fail_on_unmatched_files: true
           generate_release_notes: true
