@@ -48,6 +48,14 @@ export type UseClassificationReturn = {
   isCollapsed: (key: string) => boolean;
   toggleGroup: (key: string) => void;
   expandAllGroups: () => void;
+  // Multi-select state. Selection is keyed by filename (POSIX-relative inside
+  // the current folder) and is cleared automatically when folderPath changes.
+  // It survives filter / collapse changes so the user can refine and then
+  // open the survivors in bulk.
+  selectedFilenames: string[];
+  isSelected: (filename: string) => boolean;
+  toggleSelected: (filename: string) => void;
+  clearSelected: () => void;
   openFolder: () => Promise<void>;
   reload: () => Promise<void>;
   setFilter: (patch: Partial<ListTabFilter>) => void;
@@ -100,6 +108,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     preview: null,
     folderPath: "",
   });
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const groups = useDirectoryGroups(opts.initialList?.collapsedGroups ?? []);
 
   const toast = useToastFn();
@@ -195,6 +204,8 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     }
     if (!picked) return; // user cancelled
     setFolderPath(picked);
+    // Folder change invalidates filename-keyed selection.
+    setSelected(new Set());
     const res = await loadInternal(picked);
     if (!res) return;
     await postLoadFlow(picked, res);
@@ -227,6 +238,25 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   const filteredEntries = loadResult
     ? applyFilter(loadResult.entries, filter)
     : [];
+
+  // Selection actions. The displayed selection list is sorted DFS-style by
+  // sticking close to the on-disk filename order (= POSIX relative path).
+  const isSelected = useCallback(
+    (filename: string) => selected.has(filename),
+    [selected],
+  );
+  const toggleSelected = useCallback((filename: string) => {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(filename)) next.delete(filename);
+      else next.add(filename);
+      return next;
+    });
+  }, []);
+  const clearSelected = useCallback(() => {
+    setSelected((cur) => (cur.size === 0 ? cur : new Set()));
+  }, []);
+  const selectedFilenames = Array.from(selected).sort();
 
   const openEdit = useCallback((filename: string) => {
     setEditing({ open: true, filename });
@@ -361,6 +391,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     isCollapsed: groups.isCollapsed,
     toggleGroup: groups.toggle,
     expandAllGroups: groups.expandAll,
+    selectedFilenames,
+    isSelected,
+    toggleSelected,
+    clearSelected,
     openFolder,
     reload,
     setFilter,

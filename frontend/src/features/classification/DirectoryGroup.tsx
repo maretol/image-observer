@@ -8,9 +8,11 @@ export type DirectoryGroupProps = {
   totalCount: number; // number of entries in this group BEFORE filtering
   collapsed: boolean;
   folderPath: string;
+  isSelected: (filename: string) => boolean;
   onToggle: (key: string) => void;
   onClickThumb: (filename: string) => void;
   onClickEdit: (filename: string) => void;
+  onToggleSelect: (filename: string) => void;
 };
 
 export function DirectoryGroup({
@@ -18,9 +20,11 @@ export function DirectoryGroup({
   totalCount,
   collapsed,
   folderPath,
+  isSelected,
   onToggle,
   onClickThumb,
   onClickEdit,
+  onToggleSelect,
 }: DirectoryGroupProps) {
   const filteredCount = group.entries.length;
   return (
@@ -46,8 +50,10 @@ export function DirectoryGroup({
               key={entry.filename}
               folderPath={folderPath}
               entry={entry}
+              selected={isSelected(entry.filename)}
               onClickThumb={() => onClickThumb(entry.filename)}
               onClickEdit={() => onClickEdit(entry.filename)}
+              onToggleSelect={() => onToggleSelect(entry.filename)}
             />
           ))}
         </div>

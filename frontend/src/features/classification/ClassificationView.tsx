@@ -14,11 +14,19 @@ import type { UseClassificationReturn } from "./useClassification";
 export type ClassificationViewProps = {
   state: UseClassificationReturn;
   onOpenInViewer: (filename: string) => void;
+  onOpenManyInTabs: (filenames: string[]) => void;
+  onOpenManyAsSplit: (filenames: string[]) => void;
 };
+
+// Visual sanity ceiling for the "split-open" path. 8 panels in a row already
+// gets cramped on a 1080p display; beyond that we suggest "tabs" instead.
+const SPLIT_OPEN_LIMIT = 8;
 
 export function ClassificationView({
   state,
   onOpenInViewer,
+  onOpenManyInTabs,
+  onOpenManyAsSplit,
 }: ClassificationViewProps) {
   const {
     folderPath,
@@ -33,6 +41,10 @@ export function ClassificationView({
     toggleGroup,
     expandAllGroups,
     collapsedGroups,
+    selectedFilenames,
+    isSelected,
+    toggleSelected,
+    clearSelected,
     openFolder,
     reload,
     setFilter,
@@ -130,6 +142,46 @@ export function ClassificationView({
           </button>
         ) : null}
       </div>
+      {selectedFilenames.length > 0 ? (
+        <div className="cls-bulk-toolbar" role="region" aria-label="選択操作">
+          <span className="cls-bulk-count">
+            {selectedFilenames.length} 件選択中
+          </span>
+          <button
+            type="button"
+            className="cls-bulk-btn"
+            onClick={() => {
+              onOpenManyInTabs(selectedFilenames);
+              clearSelected();
+            }}
+          >
+            タブで開く
+          </button>
+          <button
+            type="button"
+            className="cls-bulk-btn"
+            onClick={() => {
+              onOpenManyAsSplit(selectedFilenames);
+              clearSelected();
+            }}
+            disabled={selectedFilenames.length > SPLIT_OPEN_LIMIT}
+            title={
+              selectedFilenames.length > SPLIT_OPEN_LIMIT
+                ? `パネル分割で開けるのは ${SPLIT_OPEN_LIMIT} 枚までです (タブで開いてください)`
+                : "選択した画像をそれぞれ別パネルに開く"
+            }
+          >
+            パネル分割で開く
+          </button>
+          <button
+            type="button"
+            className="cls-bulk-clear"
+            onClick={clearSelected}
+          >
+            選択解除
+          </button>
+        </div>
+      ) : null}
       {loading && allEntries.length === 0 ? (
         <div className="cls-grid-loading">読み込み中…</div>
       ) : filteredGroups.length === 0 ? (
@@ -143,9 +195,11 @@ export function ClassificationView({
               totalCount={totalCountByGroup.get(g.key) ?? g.entries.length}
               collapsed={isCollapsed(g.key)}
               folderPath={folderPath}
+              isSelected={isSelected}
               onToggle={toggleGroup}
               onClickThumb={onOpenInViewer}
               onClickEdit={openEdit}
+              onToggleSelect={toggleSelected}
             />
           ))}
         </div>

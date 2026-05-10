@@ -15,12 +15,13 @@ import {
   setSplitRatio,
   splitFromContextMenu,
   splitTabIntoEdge,
+  splitWithNewLeaf,
   updateTabInLeaf,
   type Edge,
   type Layout,
   type SplitDirection,
 } from "./layout";
-import type { Tab } from "./useTabs";
+import { newTab, type Tab } from "./useTabs";
 
 export type ConfirmFn = (message: string) => Promise<boolean>;
 
@@ -164,9 +165,90 @@ export function useViewerGrid(opts?: {
     setLayout((cur) => setSplitRatio(cur, splitId, ratio));
   }, []);
 
+  // Pre-flight one image: returns true if the path is openable (size OK), false
+  // if it's oversized or unreadable. Side-effects: emits a toast on rejection.
+  const preflight = useCallback(
+    async (path: string): Promise<boolean> => {
+      let info: { width: number; height: number };
+      try {
+        info = await GetImageInfo(path);
+      } catch (e) {
+        toast(`画像を開けません: ${basename(path)} — ${errorMessage(e)}`, "error");
+        return false;
+      }
+      if (info.width * info.height > MAX_PIXELS) {
+        const mp = ((info.width * info.height) / 1_000_000).toFixed(1);
+        const limit = MAX_PIXELS / 1_000_000;
+        toast(
+          `画像が大きすぎます: ${basename(path)} (${mp}MP > ${limit}MP)`,
+          "warn",
+        );
+        return false;
+      }
+      return true;
+    },
+    [toast],
+  );
+
+  // Bulk: append each image as a new tab in the active panel. Existing paths
+  // are deduped (focus moves to the existing tab instead of creating one).
+  const openManyInActive = useCallback(
+    async (paths: string[]): Promise<{ opened: number; skipped: number }> => {
+      let opened = 0;
+      let skipped = 0;
+      for (const path of paths) {
+        const ok = await preflight(path);
+        if (!ok) {
+          skipped++;
+          continue;
+        }
+        setLayout((l) => appendOrFocusInActive(l, path));
+        opened++;
+      }
+      return { opened, skipped };
+    },
+    [preflight],
+  );
+
+  // Bulk: split the active panel for each image so each lands in its own
+  // panel. The first image fills the active leaf if it is currently empty
+  // (avoids creating a useless empty sibling on app start).
+  const openManyAsSplit = useCallback(
+    async (paths: string[]): Promise<{ opened: number; skipped: number }> => {
+      let opened = 0;
+      let skipped = 0;
+      for (const path of paths) {
+        if (countLeaves(layoutRef.current.root) >= MAX_PANELS) {
+          toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
+          skipped += paths.length - (opened + skipped);
+          break;
+        }
+        const ok = await preflight(path);
+        if (!ok) {
+          skipped++;
+          continue;
+        }
+        setLayout((l) => {
+          const active = findLeaf(l.root, l.activeId);
+          if (active && active.tabs.length === 0) {
+            // First-image-into-empty-active: fill in place rather than split.
+            return appendOrFocusInActive(l, path);
+          }
+          const r = splitWithNewLeaf(l, l.activeId, "right", newTab(path));
+          return r.ok ? r.layout : l;
+        });
+        opened++;
+      }
+      return { opened, skipped };
+    },
+    [preflight, toast],
+  );
+
   return {
     layout,
     openInActive,
+    openManyInActive,
+    openManyAsSplit,
     setActivePanel: setActivePanelCb,
     setActiveTab,
     closeTab,

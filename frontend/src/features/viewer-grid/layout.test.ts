@@ -28,6 +28,7 @@ import {
   setSplitRatio,
   splitFromContextMenu,
   splitTabIntoEdge,
+  splitWithNewLeaf,
   updateLeaf,
   updateSplit,
   updateTabInLeaf,
@@ -492,6 +493,44 @@ describe("splitTabIntoEdge", () => {
       layout.activeId,
       "right",
     );
+    expect(overflow.ok).toBe(false);
+    expect(overflow.layout).toBe(layout);
+  });
+});
+
+describe("splitWithNewLeaf", () => {
+  it("splits dst with a fresh tab on the right", () => {
+    const layout = { root: leafOf("L", [t("a")], 0), activeId: "L" };
+    const r = splitWithNewLeaf(layout, "L", "right", t("/img/x.png"));
+    expect(r.ok).toBe(true);
+    const split = r.layout.root as SplitNode;
+    expect(split.direction).toBe("col");
+    expect((split.a as LeafNode).tabs[0].path).toBe("a");
+    expect((split.b as LeafNode).tabs[0].path).toBe("/img/x.png");
+    expect(r.layout.activeId).toBe(split.b.id);
+  });
+
+  it("places the new leaf above for edge='top'", () => {
+    const layout = { root: leafOf("L", [t("a")], 0), activeId: "L" };
+    const r = splitWithNewLeaf(layout, "L", "top", t("/img/y.png"));
+    expect(r.ok).toBe(true);
+    const split = r.layout.root as SplitNode;
+    expect(split.direction).toBe("row");
+    expect((split.a as LeafNode).tabs[0].path).toBe("/img/y.png");
+    expect((split.b as LeafNode).tabs[0].path).toBe("a");
+  });
+
+  it("returns ok:false when panel limit is reached", () => {
+    let layout = initialLayout();
+    layout = appendOrFocusInActive(layout, "/p0");
+    layout = appendOrFocusInActive(layout, "/p1");
+    while (countLeaves(layout.root) < MAX_PANELS) {
+      const r = splitWithNewLeaf(layout, layout.activeId, "right", t("/x"));
+      if (!r.ok) break;
+      layout = r.layout;
+    }
+    expect(countLeaves(layout.root)).toBe(MAX_PANELS);
+    const overflow = splitWithNewLeaf(layout, layout.activeId, "right", t("/y"));
     expect(overflow.ok).toBe(false);
     expect(overflow.layout).toBe(layout);
   });

@@ -719,6 +719,61 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+/* Bulk-action toolbar: only rendered when ≥1 card is selected. Sits below
+   the subtoolbar so the user always sees their selection count alongside
+   the open buttons. */
+.cls-bulk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #04395e;
+  color: #e6f1fb;
+  border-bottom: 1px solid #06283d;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.cls-bulk-count {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.cls-bulk-btn {
+  background: #007acc;
+  color: #fff;
+  border: 1px solid #0090ee;
+  border-radius: 3px;
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cls-bulk-btn:hover:not(:disabled) {
+  background: #0090ee;
+}
+
+.cls-bulk-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cls-bulk-clear {
+  margin-left: auto;
+  background: transparent;
+  color: #cfe6f8;
+  border: 1px solid #3f6f93;
+  border-radius: 3px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cls-bulk-clear:hover {
+  background: #06283d;
+  color: #fff;
+}
+
 .cls-segment {
   display: inline-flex;
   align-items: center;
@@ -964,12 +1019,49 @@ html, body, #root {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: transform 0.12s, box-shadow 0.12s;
+  transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
 }
 
 .cls-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* Selected card: blue ring matching the active-panel highlight. */
+.cls-card-selected {
+  border-color: #007acc;
+  box-shadow: 0 0 0 1px #007acc inset;
+}
+
+.cls-card-select {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  cursor: pointer;
+  /* Always visible (per UI plan A); subtle by default and pops on hover. */
+  opacity: 0.55;
+  transition: opacity 0.12s, background 0.12s;
+}
+
+.cls-card:hover .cls-card-select,
+.cls-card-selected .cls-card-select {
+  opacity: 1;
+}
+
+.cls-card-select input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+  accent-color: #007acc;
 }
 
 .cls-card-thumb {

@@ -19,6 +19,13 @@ Phase 3 シリーズで完成した「左ペイン (フォルダツリー) + 右
    - **state schema v2 → v3**: `ListTabState.CollapsedGroups []string` を追加。マイグレーションせず default fallback。
    - **Card filename**: パスが長くなるので `text-overflow: ellipsis` で省略 + `title` 属性でフルパス表示。
    - 関連スコープ追加: `groups.ts` (純関数 `groupByDirectory` / `groupKeyOf`) + テスト、`useDirectoryGroups` フック、`DirectoryGroup` コンポーネント、`MergePromptDialog` (shared)。
+- **v1.4 (2026-05-10)**: 一覧の **複数選択 + バルクオープン**。
+   - **選択 UI (案 A: 常時 checkbox)**: Card 左上に小さな checkbox を表示。サムネクリックは従来通り単発オープン。`useClassification` に `selectedFilenames` / `isSelected` / `toggleSelected` / `clearSelected` を追加。選択は `Set<filename>` で保持し、フォルダを変えると自動でクリア (フィルタ・折りたたみは無関係)。セッション保存はしない (一時状態)。
+   - **バルクツールバー**: 選択が 1 件以上で `cls-subtoolbar` の直下に表示。「N 件選択中 / [タブで開く] / [パネル分割で開く] / [選択解除]」。
+   - **タブで開く**: アクティブパネルに各画像を新規タブとして連続追加 (`useViewerGrid.openManyInActive`)。重複パスはフォーカスのみ (既存 `openInActive` の dedup を継承)。サイズ制限超過は個別にスキップ + トースト。
+   - **パネル分割で開く**: アクティブパネルを画像数だけ右に分割し、各画像を別パネルへ (`useViewerGrid.openManyAsSplit`)。アクティブパネルが空の場合は最初の 1 枚を空 leaf に流し込み (無駄な空 leaf を作らない)。`MAX_PANELS = 16` に達したら以降スキップ。視認性の都合で **8 枚を超える選択時はボタンを disable** (tooltip 案内)。
+   - **`layout.ts` 追加**: `splitWithNewLeaf(layout, dstLeafId, edge, tab)` (新規タブ用の split helper)。vitest +3 ケース (合計 93)。
+   - **将来オプション (案 B 実装時)**: `Ctrl+クリック` で選択トグル / `Shift+クリック` で範囲選択。`docs/todo.md H` に「複数選択 UI のオプション化」として記載。設定キー候補: `list.selection.mode = "checkbox" | "modifier" | "both"`。Phase H で settings.json と一緒に実装。
 
 ---
 

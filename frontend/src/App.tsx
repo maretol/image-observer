@@ -113,6 +113,31 @@ function AppInner({ initialState }: AppInnerProps) {
     [classification.folderPath, viewer],
   );
 
+  // Bulk-open: append all selected images as new tabs in the active panel.
+  const onOpenManyInTabs = useCallback(
+    (filenames: string[]) => {
+      const folder = classification.folderPath;
+      if (!folder || filenames.length === 0) return;
+      const paths = filenames.map((f) => `${folder}/${f}`);
+      void viewer.openManyInActive(paths);
+      setTopTab("viewer");
+    },
+    [classification.folderPath, viewer],
+  );
+
+  // Bulk-open: split the active panel for each selected image so each gets
+  // its own panel. Skips oversized images and stops at MAX_PANELS.
+  const onOpenManyAsSplit = useCallback(
+    (filenames: string[]) => {
+      const folder = classification.folderPath;
+      if (!folder || filenames.length === 0) return;
+      const paths = filenames.map((f) => `${folder}/${f}`);
+      void viewer.openManyAsSplit(paths);
+      setTopTab("viewer");
+    },
+    [classification.folderPath, viewer],
+  );
+
   return (
     <div className="app-toplevel">
       <nav className="top-tabs" role="tablist" aria-label="トップレベルタブ">
@@ -140,6 +165,8 @@ function AppInner({ initialState }: AppInnerProps) {
           <ClassificationView
             state={classification}
             onOpenInViewer={onOpenInViewer}
+            onOpenManyInTabs={onOpenManyInTabs}
+            onOpenManyAsSplit={onOpenManyAsSplit}
           />
         ) : (
           <ViewerGrid

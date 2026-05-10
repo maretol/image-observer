@@ -8,11 +8,20 @@ import { useGridThumbnail } from "./useGridThumbnail";
 export type CardProps = {
   folderPath: string;
   entry: classification.Entry;
+  selected: boolean;
   onClickThumb: () => void;
   onClickEdit: () => void;
+  onToggleSelect: () => void;
 };
 
-export function Card({ folderPath, entry, onClickThumb, onClickEdit }: CardProps) {
+export function Card({
+  folderPath,
+  entry,
+  selected,
+  onClickThumb,
+  onClickEdit,
+  onToggleSelect,
+}: CardProps) {
   const fullPath = `${folderPath}/${entry.filename}`;
   const { ref, url, state } = useGridThumbnail(fullPath);
 
@@ -21,7 +30,7 @@ export function Card({ folderPath, entry, onClickThumb, onClickEdit }: CardProps
   const folderFg = readableTextColor(folderBg);
 
   return (
-    <div className="cls-card">
+    <div className={`cls-card ${selected ? "cls-card-selected" : ""}`}>
       <div
         ref={ref}
         className="cls-card-thumb"
@@ -40,6 +49,18 @@ export function Card({ folderPath, entry, onClickThumb, onClickEdit }: CardProps
             <ThumbErrorIcon />
           </span>
         ) : null}
+        <label
+          className="cls-card-select"
+          onClick={(e) => e.stopPropagation()}
+          title={selected ? "選択を解除" : "選択"}
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            aria-label={`${entry.filename} を選択`}
+          />
+        </label>
         <button
           type="button"
           className="cls-card-edit"

@@ -482,6 +482,37 @@ export function splitTabIntoEdge(
   };
 }
 
+// Split dstLeafId on the given edge and place a freshly-constructed tab in
+// the new sibling leaf. Used by bulk "open as split" flows where the tab
+// has not yet existed in any leaf. Returns ok:false if MAX_PANELS is hit.
+export function splitWithNewLeaf(
+  layout: Layout,
+  dstLeafId: string,
+  edge: Edge,
+  tab: Tab,
+): SplitResult {
+  if (countLeaves(layout.root) >= MAX_PANELS) {
+    return { layout, ok: false, reason: "panel limit reached" };
+  }
+  const dst = findLeaf(layout.root, dstLeafId);
+  if (!dst) return { layout, ok: false, reason: "leaf not found" };
+
+  const direction: SplitDirection =
+    edge === "top" || edge === "bottom" ? "row" : "col";
+  const newLeafFirst = edge === "top" || edge === "left";
+  const newLeaf = leafWithTab({ ...tab });
+  const newSplit: SplitNode = {
+    kind: "split",
+    id: newNodeId(),
+    direction,
+    ratio: 0.5,
+    a: newLeafFirst ? newLeaf : dst,
+    b: newLeafFirst ? dst : newLeaf,
+  };
+  const root = replaceNode(layout.root, dst.id, newSplit);
+  return { layout: { root, activeId: newLeaf.id }, ok: true };
+}
+
 // "右に分割" / "下に分割" context menu: split the leaf the tab came from.
 export function splitFromContextMenu(
   layout: Layout,
