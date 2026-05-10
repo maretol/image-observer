@@ -13,6 +13,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"image-observer/internal/logging"
+	"image-observer/internal/settings"
 	"image-observer/internal/state"
 )
 
@@ -39,6 +40,16 @@ func main() {
 	}()
 
 	logging.Info("app", "starting")
+
+	// Apply persisted user settings: e.g., the log level the user picked in
+	// the settings UI overrides the env-var-resolved level chosen at Init().
+	userSettings := settings.Load()
+	if lvl, ok := logging.ParseLevel(userSettings.LogLevel); ok {
+		logging.SetLevel(lvl)
+		logging.Info("app", "settings applied",
+			"logLevel", userSettings.LogLevel,
+			"multiSelectMode", userSettings.MultiSelectMode)
+	}
 
 	app := NewApp()
 

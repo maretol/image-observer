@@ -14,6 +14,10 @@ export function GetLogPath() {
   return window['go']['main']['App']['GetLogPath']();
 }
 
+export function GetSettings() {
+  return window['go']['main']['App']['GetSettings']();
+}
+
 export function GetState() {
   return window['go']['main']['App']['GetState']();
 }
@@ -46,6 +50,10 @@ export function ReadImage(arg1) {
   return window['go']['main']['App']['ReadImage'](arg1);
 }
 
+export function ResetSettings() {
+  return window['go']['main']['App']['ResetSettings']();
+}
+
 export function SaveClassification(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveClassification'](arg1, arg2, arg3);
 }
@@ -56,4 +64,8 @@ export function SaveState(arg1) {
 
 export function UpdateClassificationEntry(arg1, arg2, arg3) {
   return window['go']['main']['App']['UpdateClassificationEntry'](arg1, arg2, arg3);
+}
+
+export function UpdateSettings(arg1) {
+  return window['go']['main']['App']['UpdateSettings'](arg1);
 }

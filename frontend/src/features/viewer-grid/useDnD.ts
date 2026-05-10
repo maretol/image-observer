@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { logger } from "../../shared/utils/logger";
 import type { Edge } from "./layout";
 
 // Drop targets recognized while dragging a tab.
@@ -61,6 +62,11 @@ export function useDnD(actions: DnDActions) {
       // whole document while dragging. Restored in endDrag().
       document.body.style.userSelect = "none";
       document.body.style.cursor = "grabbing";
+      logger.info("dnd", "start", {
+        src: srcLeafId,
+        idx: srcTabIdx,
+        path: tabPath,
+      });
       setState({
         srcLeafId,
         srcTabIdx,
@@ -102,19 +108,40 @@ export function useDnD(actions: DnDActions) {
     const onUp = () => {
       const cur = stateRef.current;
       endDrag();
-      if (!cur || !cur.active || !cur.hit) return;
+      if (!cur) return;
+      if (!cur.active) {
+        // pointerdown without movement past the threshold = a normal click,
+        // not worth logging.
+        return;
+      }
+      if (!cur.hit) {
+        logger.info("dnd", "cancel", { reason: "no drop target" });
+        return;
+      }
       commitDrop(cur, actionsRef.current);
     };
     const onCancel = () => {
+      const cur = stateRef.current;
+      if (cur?.active) logger.info("dnd", "cancel", { reason: "pointercancel" });
       endDrag();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        const cur = stateRef.current;
+        if (cur?.active) logger.info("dnd", "cancel", { reason: "escape" });
+        endDrag();
+      }
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
     document.addEventListener("pointercancel", onCancel);
+    document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onCancel);
+      document.removeEventListener("keydown", onKey);
       // Best-effort restore in case the component unmounts mid-drag.
       restoreBodyStyles();
     };
@@ -209,8 +236,21 @@ function commitDrop(state: DnDState, actions: DnDActions) {
   switch (hit.kind) {
     case "tab-bar":
       if (hit.leafId === state.srcLeafId) {
+        logger.info("dnd", "commit", {
+          kind: "reorder",
+          leaf: hit.leafId,
+          from: state.srcTabIdx,
+          to: hit.insertIdx,
+        });
         actions.reorderTab(hit.leafId, state.srcTabIdx, hit.insertIdx);
       } else {
+        logger.info("dnd", "commit", {
+          kind: "move-tab-bar",
+          src: state.srcLeafId,
+          srcIdx: state.srcTabIdx,
+          dst: hit.leafId,
+          dstIdx: hit.insertIdx,
+        });
         actions.moveTab(
           state.srcLeafId,
           state.srcTabIdx,
@@ -220,10 +260,26 @@ function commitDrop(state: DnDState, actions: DnDActions) {
       }
       break;
     case "panel-center":
-      if (hit.leafId === state.srcLeafId) return;
+      if (hit.leafId === state.srcLeafId) {
+        logger.info("dnd", "no-op", { reason: "drop on same panel center" });
+        return;
+      }
+      logger.info("dnd", "commit", {
+        kind: "move-center",
+        src: state.srcLeafId,
+        srcIdx: state.srcTabIdx,
+        dst: hit.leafId,
+      });
       actions.moveTab(state.srcLeafId, state.srcTabIdx, hit.leafId);
       break;
     case "panel-edge":
+      logger.info("dnd", "commit", {
+        kind: "split",
+        src: state.srcLeafId,
+        srcIdx: state.srcTabIdx,
+        dst: hit.leafId,
+        edge: hit.edge,
+      });
       actions.splitTab(
         state.srcLeafId,
         state.srcTabIdx,

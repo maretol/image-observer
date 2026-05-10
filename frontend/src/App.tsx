@@ -14,10 +14,25 @@ import {
 } from "./features/viewer-grid/layout";
 import { useSessionLoad } from "./features/session/useSessionLoad";
 import { useSessionSave } from "./features/session/useSessionSave";
+import { SettingsDialog } from "./features/settings/SettingsDialog";
+import { useSettings } from "./features/settings/useSettings";
 import { useConfirm } from "./shared/components/ConfirmDialog";
 import { ToastProvider } from "./shared/components/Toast";
+import { SettingsIcon } from "./shared/icons/SettingsIcon";
+import { installGlobalErrorHandlers, logger } from "./shared/utils/logger";
+import {
+  isEditableTarget,
+  isPrimaryModifier,
+  zoomCommandBus,
+} from "./shared/utils/keybindings";
+import { findLeaf } from "./features/viewer-grid/layout";
+import { GetLogPath } from "../wailsjs/go/main/App";
 import { state } from "../wailsjs/go/models";
 import "./App.css";
+
+// Hook into uncaught errors and rejections once, before React mounts.
+installGlobalErrorHandlers();
+logger.info("app", "frontend mount");
 
 type TopTab = "list" | "viewer";
 
@@ -43,6 +58,15 @@ function AppInner({ initialState }: AppInnerProps) {
   const initTopTab: TopTab =
     initialState?.topTab === "viewer" ? "viewer" : "list";
   const [topTab, setTopTab] = useState<TopTab>(initTopTab);
+
+  const settings = useSettings();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [logPath, setLogPath] = useState("");
+  useEffect(() => {
+    GetLogPath()
+      .then(setLogPath)
+      .catch(() => setLogPath(""));
+  }, []);
 
   const { confirm, dialog: confirmDialog } = useConfirm();
   const viewer = useViewerGrid({ initialLayout: initLayout, confirm });
@@ -97,6 +121,67 @@ function AppInner({ initialState }: AppInnerProps) {
     topTab,
     list: classification.persistableState,
   });
+
+  // Global keybindings (Phase H4). Active only on the viewer tab and when
+  // the user is not typing in a form field / settings dialog.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      if (settingsOpen) return; // dialog has its own Esc handler
+      if (topTab !== "viewer") return;
+
+      const layout = viewer.layout;
+      const activeLeaf = findLeaf(layout.root, layout.activeId);
+      if (!activeLeaf) return;
+
+      if (!isPrimaryModifier(e)) return;
+
+      // Ctrl+W: close active tab
+      if ((e.key === "w" || e.key === "W") && !e.shiftKey) {
+        e.preventDefault();
+        if (activeLeaf.activeIndex >= 0) {
+          viewer.closeTab(activeLeaf.id, activeLeaf.activeIndex);
+        }
+        return;
+      }
+      // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs in active panel
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const n = activeLeaf.tabs.length;
+        if (n <= 1) return;
+        const dir = e.shiftKey ? -1 : 1;
+        const next = (((activeLeaf.activeIndex + dir) % n) + n) % n;
+        viewer.setActiveTab(activeLeaf.id, next);
+        return;
+      }
+      // Ctrl+0: fit to viewport
+      if (e.key === "0") {
+        e.preventDefault();
+        zoomCommandBus.emit("fit");
+        return;
+      }
+      // Ctrl+1: actual size (100%)
+      if (e.key === "1") {
+        e.preventDefault();
+        zoomCommandBus.emit("actualSize");
+        return;
+      }
+      // Ctrl+= / Ctrl++ : zoom in (also accept "+" shifted)
+      if (e.key === "=" || e.key === "+") {
+        e.preventDefault();
+        zoomCommandBus.emit("in");
+        return;
+      }
+      // Ctrl+- : zoom out
+      if (e.key === "-") {
+        e.preventDefault();
+        zoomCommandBus.emit("out");
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [topTab, settingsOpen, viewer]);
 
   const onSelectList = useCallback(() => setTopTab("list"), []);
   const onSelectViewer = useCallback(() => setTopTab("viewer"), []);
@@ -159,6 +244,15 @@ function AppInner({ initialState }: AppInnerProps) {
         >
           ビューア
         </button>
+        <button
+          type="button"
+          className="top-tab-settings"
+          onClick={() => setSettingsOpen(true)}
+          title="設定"
+          aria-label="設定を開く"
+        >
+          <SettingsIcon />
+        </button>
       </nav>
       <div className="top-tab-content">
         {topTab === "list" ? (
@@ -183,6 +277,16 @@ function AppInner({ initialState }: AppInnerProps) {
           />
         )}
       </div>
+      <SettingsDialog
+        open={settingsOpen}
+        data={settings.data}
+        loading={settings.loading}
+        error={settings.error}
+        logPath={logPath}
+        onChange={(patch) => void settings.update(patch)}
+        onReset={() => void settings.reset()}
+        onClose={() => setSettingsOpen(false)}
+      />
       {confirmDialog}
     </div>
   );

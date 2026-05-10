@@ -57,3 +57,38 @@ Hello World 完了 (`init.md` セクション 4 の DoD 達成):
 - 対応形式: JPEG / PNG / GIF / WebP
 
 詳細な要求 / 要件 / 仕様は [init.md](init.md) を参照。
+
+## ログ / トラブルシュート
+
+アプリは起動から終了までの主要イベント (DnD / 画像オープン / 状態保存 / 例外など) を 1 ファイルに追記し、自動でローテーション (1 ファイル 2MB、最大 3 世代) します。
+
+### ログファイルの場所
+
+| OS | パス |
+|----|------|
+| Windows | `%LOCALAPPDATA%\image-observer\logs\app.log` (+ `app.log.1`, `app.log.2`) |
+| Linux | `~/.cache/image-observer/logs/app.log` (+ `app.log.1`, `app.log.2`) |
+| macOS | `~/Library/Caches/image-observer/logs/app.log` (+ `app.log.1`, `app.log.2`) |
+
+不具合報告の際は最新の `app.log` (および直前の `.1` / `.2` があれば) を添付してください。
+
+### ログレベルの調整
+
+既定は `INFO`。詳細な `DEBUG` レベルを出したいときは、優先順 (上が強い) で次のいずれかを設定してください:
+
+1. **環境変数** `IMAGE_OBSERVER_LOG_LEVEL` を `debug` / `info` / `warn` / `error` に設定して起動
+   - Windows (PowerShell): `$env:IMAGE_OBSERVER_LOG_LEVEL="debug"; .\image-observer.exe`
+   - Linux: `IMAGE_OBSERVER_LOG_LEVEL=debug ./image-observer`
+2. **設定ファイル** (環境変数の代わり): 1 行のテキストファイルを置く
+   - Windows: `%APPDATA%\image-observer\log_level.txt`
+   - Linux: `~/.config/image-observer/log_level.txt`
+   - 内容: `debug` (または `info` / `warn` / `error`) のみ
+
+設定 UI は将来追加予定 (Phase H)。
+
+### ログに含まれるもの / 含まれないもの
+
+- 含まれる: 画像ファイルの絶対パス、操作のタイムスタンプ、例外スタックトレース
+- 含まれない: 画像のバイナリ、EXIF などのメタデータ、認証情報
+
+ログを共有する際はパスから個人情報が読み取れないか確認してください。

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { SaveState } from "../../../wailsjs/go/main/App";
 import { useDebounce } from "../../shared/utils/debounce";
+import { logger } from "../../shared/utils/logger";
 import { serializeLayout, type Layout } from "../viewer-grid/layout";
 
 export type ListPersist = {
@@ -51,7 +52,9 @@ export function useSessionSave(input: SessionInput) {
     }
     const data = buildStateData(parsed);
     SaveState(data as any).catch((e) => {
+      const msg = e instanceof Error ? e.message : String(e);
       console.warn("SaveState failed:", e);
+      logger.warn("state", "save failed", { err: msg });
     });
   }, [debouncedJson]);
 }

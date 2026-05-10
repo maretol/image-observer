@@ -69,6 +69,7 @@ export function Panel(props: Props) {
             key={activeTab.path}
             tab={activeTab}
             tabIndex={leaf.activeIndex}
+            isActivePanel={isActive}
             onUpdateTabState={(tabIndex, patch) =>
               props.onUpdateTabState(leaf.id, tabIndex, patch)
             }

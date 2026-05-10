@@ -10,6 +10,7 @@ import {
 import { classification } from "../../../wailsjs/go/models";
 import { state as wstate } from "../../../wailsjs/go/models";
 import { useToastFn } from "../../shared/components/Toast";
+import { logger } from "../../shared/utils/logger";
 import type { ConfirmFn } from "../viewer-grid/useViewerGrid";
 import { applyFilter, type Confidence, type ListTabFilter } from "./filters";
 import { useDirectoryGroups } from "./useDirectoryGroups";
@@ -300,8 +301,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         const msg = errorMessage(e);
         if (msg.startsWith(CONFLICT_PREFIX)) {
           setConflict({ filename: entry.filename, draft: entry });
+          logger.warn("classification", "save conflict", {
+            filename: entry.filename,
+          });
         } else {
           toast(`保存に失敗しました: ${msg}`, "error");
+          logger.error("classification", "save failed", {
+            filename: entry.filename,
+            err: msg,
+          });
         }
       }
     },
@@ -342,8 +350,11 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     setMergePrompt({ open: false, preview: null, folderPath: "" });
     try {
       await MergeChildSidecars(target);
+      logger.info("classification", "merged child sidecars", { folder: target });
     } catch (e) {
-      toast(`マージに失敗しました: ${errorMessage(e)}`, "error");
+      const msg = errorMessage(e);
+      toast(`マージに失敗しました: ${msg}`, "error");
+      logger.error("classification", "merge failed", { folder: target, err: msg });
       return;
     }
     await loadInternal(target);

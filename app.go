@@ -10,6 +10,7 @@ import (
 	"image-observer/internal/classification"
 	"image-observer/internal/imgread"
 	"image-observer/internal/logging"
+	"image-observer/internal/settings"
 	"image-observer/internal/state"
 	"image-observer/internal/thumb"
 )
@@ -154,4 +155,34 @@ func (a *App) LogEvent(level, category, message, data string) {
 // settings UI) can show / open it.
 func (a *App) GetLogPath() string {
 	return logging.LogPath()
+}
+
+// GetSettings returns the current persisted user settings.
+func (a *App) GetSettings() settings.SettingsData {
+	return settings.Load()
+}
+
+// UpdateSettings validates, saves, and applies the new settings. The
+// returned struct is the canonical post-save state (for the frontend to
+// rehydrate its store with). Side effects: log-level changes take effect
+// immediately on the Go side.
+func (a *App) UpdateSettings(s settings.SettingsData) (settings.SettingsData, error) {
+	if err := settings.Save(s); err != nil {
+		logging.Warn("settings", "save rejected", "err", err.Error())
+		return settings.SettingsData{}, err
+	}
+	saved := settings.Load()
+	if lvl, ok := logging.ParseLevel(saved.LogLevel); ok {
+		logging.SetLevel(lvl)
+	}
+	logging.Info("settings", "updated",
+		"logLevel", saved.LogLevel,
+		"multiSelectMode", saved.MultiSelectMode)
+	return saved, nil
+}
+
+// ResetSettings restores the in-memory defaults and persists them.
+// Convenience wrapper to keep the "Reset to defaults" UI button trivial.
+func (a *App) ResetSettings() (settings.SettingsData, error) {
+	return a.UpdateSettings(settings.DefaultSettings())
 }

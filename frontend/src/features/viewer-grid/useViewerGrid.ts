@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GetImageInfo } from "../../../wailsjs/go/main/App";
 import { useToastFn } from "../../shared/components/Toast";
+import { logger } from "../../shared/utils/logger";
 import {
   appendOrFocusInActive,
   closeTabInLeaf,
@@ -133,10 +134,22 @@ export function useViewerGrid(opts?: {
       setLayout((cur) => {
         if (countLeaves(cur.root) >= MAX_PANELS) {
           toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
+          logger.warn("dnd", "panel limit reached", {
+            panels: MAX_PANELS,
+            attempt: "split",
+          });
           return cur;
         }
         const r = splitTabIntoEdge(cur, srcLeafId, srcIdx, dstLeafId, edge);
         ok = r.ok;
+        if (!r.ok) {
+          logger.warn("dnd", "split refused", {
+            reason: r.reason,
+            src: srcLeafId,
+            dst: dstLeafId,
+            edge,
+          });
+        }
         return r.layout;
       });
       return ok;
@@ -150,10 +163,21 @@ export function useViewerGrid(opts?: {
       setLayout((cur) => {
         if (countLeaves(cur.root) >= MAX_PANELS) {
           toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
+          logger.warn("dnd", "panel limit reached", {
+            panels: MAX_PANELS,
+            attempt: "context-menu",
+          });
           return cur;
         }
         const r = splitFromContextMenu(cur, leafId, tabIdx, direction);
         ok = r.ok;
+        if (!r.ok) {
+          logger.warn("dnd", "split refused", {
+            reason: r.reason,
+            leaf: leafId,
+            direction,
+          });
+        }
         return r.layout;
       });
       return ok;
@@ -166,14 +190,17 @@ export function useViewerGrid(opts?: {
   }, []);
 
   // Pre-flight one image: returns true if the path is openable (size OK), false
-  // if it's oversized or unreadable. Side-effects: emits a toast on rejection.
+  // if it's oversized or unreadable. Side-effects: emits a toast + log line on
+  // rejection.
   const preflight = useCallback(
     async (path: string): Promise<boolean> => {
       let info: { width: number; height: number };
       try {
         info = await GetImageInfo(path);
       } catch (e) {
-        toast(`画像を開けません: ${basename(path)} — ${errorMessage(e)}`, "error");
+        const msg = errorMessage(e);
+        toast(`画像を開けません: ${basename(path)} — ${msg}`, "error");
+        logger.warn("image", "open failed", { path, err: msg });
         return false;
       }
       if (info.width * info.height > MAX_PIXELS) {
@@ -183,6 +210,13 @@ export function useViewerGrid(opts?: {
           `画像が大きすぎます: ${basename(path)} (${mp}MP > ${limit}MP)`,
           "warn",
         );
+        logger.warn("image", "oversized", {
+          path,
+          width: info.width,
+          height: info.height,
+          mp,
+          limitMp: limit,
+        });
         return false;
       }
       return true;
@@ -196,6 +230,7 @@ export function useViewerGrid(opts?: {
     async (paths: string[]): Promise<{ opened: number; skipped: number }> => {
       let opened = 0;
       let skipped = 0;
+      logger.info("viewer", "open-many-in-tabs start", { count: paths.length });
       for (const path of paths) {
         const ok = await preflight(path);
         if (!ok) {
@@ -205,6 +240,7 @@ export function useViewerGrid(opts?: {
         setLayout((l) => appendOrFocusInActive(l, path));
         opened++;
       }
+      logger.info("viewer", "open-many-in-tabs done", { opened, skipped });
       return { opened, skipped };
     },
     [preflight],
@@ -217,10 +253,18 @@ export function useViewerGrid(opts?: {
     async (paths: string[]): Promise<{ opened: number; skipped: number }> => {
       let opened = 0;
       let skipped = 0;
+      logger.info("viewer", "open-many-split start", { count: paths.length });
       for (const path of paths) {
         if (countLeaves(layoutRef.current.root) >= MAX_PANELS) {
           toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
-          skipped += paths.length - (opened + skipped);
+          const remaining = paths.length - (opened + skipped);
+          logger.warn("viewer", "open-many-split aborted", {
+            opened,
+            skippedSoFar: skipped,
+            remaining,
+            reason: "panel limit",
+          });
+          skipped += remaining;
           break;
         }
         const ok = await preflight(path);
@@ -239,6 +283,7 @@ export function useViewerGrid(opts?: {
         });
         opened++;
       }
+      logger.info("viewer", "open-many-split done", { opened, skipped });
       return { opened, skipped };
     },
     [preflight, toast],

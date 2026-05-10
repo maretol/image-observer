@@ -4,6 +4,7 @@ import { imgread } from "../../../wailsjs/go/models";
 import type { Tab } from "./useTabs";
 import { toDataURL } from "../../shared/utils/base64";
 import { useToastFn } from "../../shared/components/Toast";
+import { zoomCommandBus, type ZoomCommand } from "../../shared/utils/keybindings";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8.0;
@@ -12,10 +13,16 @@ const ZOOM_STEP = 1.2;
 type Props = {
   tab: Tab;
   tabIndex: number;
+  isActivePanel: boolean;
   onUpdateTabState: (index: number, patch: Partial<Tab>) => void;
 };
 
-export function ImageView({ tab, tabIndex, onUpdateTabState }: Props) {
+export function ImageView({
+  tab,
+  tabIndex,
+  isActivePanel,
+  onUpdateTabState,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [imageData, setImageData] = useState<imgread.Result | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -26,6 +33,16 @@ export function ImageView({ tab, tabIndex, onUpdateTabState }: Props) {
     startPanX: number;
     startPanY: number;
   } | null>(null);
+
+  // Mirror tab/tabIndex/onUpdateTabState into refs so the zoom-command
+  // listener stays stable across renders (we only re-bind on activation
+  // change, not on every pan/zoom).
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const tabIndexRef = useRef(tabIndex);
+  tabIndexRef.current = tabIndex;
+  const updateRef = useRef(onUpdateTabState);
+  updateRef.current = onUpdateTabState;
 
   // Fetch image when path changes
   useEffect(() => {
@@ -145,6 +162,60 @@ export function ImageView({ tab, tabIndex, onUpdateTabState }: Props) {
     tabIndex,
     onUpdateTabState,
   ]);
+
+  // Subscribe to zoom commands when this panel is active. Single-listener
+  // bus: when the active panel changes, the new ImageView replaces the
+  // previous one. Inactive panels don't react to keyboard commands.
+  useEffect(() => {
+    if (!isActivePanel) return;
+    const handle = (cmd: ZoomCommand) => {
+      const t = tabRef.current;
+      const c = containerRef.current;
+      if (!c) return;
+      if (t.imageWidth <= 0 || t.imageHeight <= 0) return;
+      const rect = c.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      if (cmd === "fit") {
+        const fit = computeInitialFit(
+          t.imageWidth,
+          t.imageHeight,
+          rect.width,
+          rect.height,
+        );
+        updateRef.current(tabIndexRef.current, { ...fit, initialized: true });
+        return;
+      }
+
+      // For "actualSize" / "in" / "out" we zoom around the viewport center
+      // so the user's gaze stays put.
+      let newZoom: number;
+      if (cmd === "actualSize") {
+        newZoom = 1.0;
+      } else if (cmd === "in") {
+        newZoom = clamp(t.zoom * ZOOM_STEP, MIN_ZOOM, MAX_ZOOM);
+      } else {
+        newZoom = clamp(t.zoom / ZOOM_STEP, MIN_ZOOM, MAX_ZOOM);
+      }
+      const cx = rect.width / 2;
+      const cy = rect.height / 2;
+      const px = (cx - t.panX) / t.zoom;
+      const py = (cy - t.panY) / t.zoom;
+      let nx = cx - px * newZoom;
+      let ny = cy - py * newZoom;
+      ({ panX: nx, panY: ny } = clampPan(
+        nx,
+        ny,
+        t.imageWidth * newZoom,
+        t.imageHeight * newZoom,
+        rect.width,
+        rect.height,
+      ));
+      updateRef.current(tabIndexRef.current, { zoom: newZoom, panX: nx, panY: ny });
+    };
+    zoomCommandBus.setListener(handle);
+    return () => zoomCommandBus.setListener(null);
+  }, [isActivePanel]);
 
   // Drag pan (left button only — leave right click for context menu)
   const onMouseDown = useCallback(

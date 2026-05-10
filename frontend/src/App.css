@@ -49,6 +49,23 @@ html, body, #root {
   outline-offset: -3px;
 }
 
+.top-tab-settings {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.top-tab-settings:hover {
+  color: #fff;
+  background: #252526;
+}
+
 .top-tab-content {
   flex: 1;
   position: relative;
@@ -1243,4 +1260,239 @@ html, body, #root {
 
 .conflict-dialog-buttons {
   flex-wrap: wrap;
+}
+
+/* ── Settings dialog (Phase H1/H2) ─────────────────────────────────── */
+
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+}
+
+.settings-dialog {
+  background: #1e1e1e;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  width: min(560px, 92vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  color: #ddd;
+  font-size: 13px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #2d2d30;
+}
+
+.settings-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.settings-close {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.settings-close:hover {
+  color: #fff;
+}
+
+.settings-body {
+  padding: 14px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.settings-loading,
+.settings-error {
+  padding: 18px;
+  color: #888;
+  text-align: center;
+}
+
+.settings-error {
+  color: #f48771;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-section-title {
+  margin: 0 0 6px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-field-label {
+  font-size: 13px;
+  color: #ddd;
+}
+
+.settings-field-hint {
+  font-size: 11px;
+  color: #888;
+  line-height: 1.4;
+}
+
+.settings-select {
+  background: #2d2d30;
+  color: #ddd;
+  border: 1px solid #3f3f46;
+  border-radius: 3px;
+  padding: 5px 8px;
+  font-size: 12px;
+  width: 100%;
+}
+
+.settings-segment {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.settings-segment-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #2d2d30;
+  border: 1px solid #3f3f46;
+  border-radius: 3px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.settings-segment-opt-active {
+  background: #04395e;
+  border-color: #007acc;
+  color: #fff;
+}
+
+.settings-segment-opt input[type="radio"] {
+  /* Hidden but accessible — selection is shown via the parent label state. */
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settings-code {
+  display: block;
+  background: #14141a;
+  border: 1px solid #2d2d30;
+  border-radius: 3px;
+  padding: 6px 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #cfe6f8;
+  word-break: break-all;
+}
+
+.settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid #2d2d30;
+}
+
+.settings-btn {
+  border: 1px solid #3f3f46;
+  border-radius: 3px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-btn-secondary {
+  background: transparent;
+  color: #ddd;
+}
+
+.settings-btn-secondary:hover:not(:disabled) {
+  background: #2d2d30;
+}
+
+.settings-btn-primary {
+  background: #007acc;
+  color: #fff;
+  border-color: #0090ee;
+}
+
+.settings-btn-primary:hover {
+  background: #0090ee;
+}
+
+.settings-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settings-kb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.settings-kb-table th,
+.settings-kb-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid #2d2d30;
+}
+
+.settings-kb-table th {
+  color: #888;
+  font-weight: 600;
+}
+
+.settings-kb-table kbd {
+  display: inline-block;
+  background: #14141a;
+  border: 1px solid #3f3f46;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #cfe6f8;
+  white-space: nowrap;
 }

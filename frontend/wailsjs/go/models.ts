@@ -168,6 +168,27 @@ export namespace imgread {
 
 }
 
+export namespace settings {
+	
+	export class SettingsData {
+	    version: number;
+	    logLevel: string;
+	    multiSelectMode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SettingsData(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.logLevel = source["logLevel"];
+	        this.multiSelectMode = source["multiSelectMode"];
+	    }
+	}
+
+}
+
 export namespace state {
 	
 	export class TabState {
