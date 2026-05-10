@@ -37,6 +37,15 @@ const MULTI_SELECT_MODES: Array<{
   },
 ];
 
+const WHEEL_MODES: Array<{ value: string; label: string; hint: string }> = [
+  { value: "zoom", label: "ホイールで拡大縮小", hint: "従来通り (推奨)" },
+  {
+    value: "shift-zoom",
+    label: "Shift / Ctrl + ホイールで拡大縮小",
+    hint: "通常のホイールは画像を上下にスクロール、横方向は trackpad 等の deltaX に追従",
+  },
+];
+
 export function SettingsDialog({
   open,
   data,
@@ -113,6 +122,36 @@ export function SettingsDialog({
                 </Field>
                 <Field label="ログファイル" hint="不具合報告時はこのファイルを共有してください">
                   <code className="settings-code">{logPath || "(未初期化)"}</code>
+                </Field>
+              </Section>
+              <Section title="ビューア">
+                <Field
+                  label="マウスホイールの動作"
+                  hint="Shift / Ctrl + ホイール モードでは通常スクロールが画像のパン (移動) になります。ドラッグでのパンは引き続き利用できます。"
+                >
+                  <div className="settings-segment">
+                    {WHEEL_MODES.map((opt) => (
+                      <label
+                        key={opt.value}
+                        className={`settings-segment-opt ${
+                          data.wheelMode === opt.value
+                            ? "settings-segment-opt-active"
+                            : ""
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="wheelMode"
+                          value={opt.value}
+                          checked={data.wheelMode === opt.value}
+                          onChange={(e) =>
+                            onChange({ wheelMode: e.target.value })
+                          }
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
                 </Field>
               </Section>
               <Section title="一覧タブ">
@@ -218,6 +257,11 @@ const KEYBINDINGS: Array<{ keys: string; action: string; scope: string }> = [
   { keys: "Ctrl+1", action: "画像を 100% 表示", scope: "ビューア" },
   { keys: "Ctrl++ / Ctrl+=", action: "ズームイン (中心基準)", scope: "ビューア" },
   { keys: "Ctrl+-", action: "ズームアウト (中心基準)", scope: "ビューア" },
+  {
+    keys: "Shift+ホイール / Ctrl+ホイール",
+    action: "ズームイン / アウト (Shift / Ctrl + ホイール モード時のみ)",
+    scope: "ビューア",
+  },
   {
     keys: "Ctrl+クリック",
     action: "Card の選択トグル (修飾キー / 両方モード)",

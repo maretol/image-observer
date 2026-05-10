@@ -17,35 +17,42 @@ html, body, #root {
 .top-tabs {
   display: flex;
   flex-direction: row;
+  align-items: flex-end;
   background: #1f1f1f;
   border-bottom: 1px solid #1a1a1a;
-  height: 36px;
+  height: 38px;
+  padding: 4px 6px 0;
+  gap: 2px;
   flex-shrink: 0;
 }
 
 .top-tab {
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: #aaa;
+  background: #2d2d30;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  color: #ccc;
   cursor: pointer;
   padding: 0 18px;
   font-size: 13px;
   height: 100%;
+  user-select: none;
 }
 
 .top-tab:hover {
   color: #ddd;
-  background: #252526;
+  background: #37373a;
 }
 
 .top-tab.active {
+  background: #1e1e1e;
   color: #fff;
-  border-bottom-color: #007acc;
+  /* Lift the active tab visually by aligning it with the panel below. */
+  border-color: #1a1a1a;
 }
 
 .top-tab:focus-visible {
-  outline: 1px solid #007acc;
+  outline: 1px solid #d97a3c;
   outline-offset: -3px;
 }
 
@@ -56,9 +63,12 @@ html, body, #root {
   color: #888;
   cursor: pointer;
   padding: 0 14px;
+  height: 100%;
+  align-self: stretch;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border-radius: 6px 6px 0 0;
 }
 
 .top-tab-settings:hover {
@@ -99,7 +109,9 @@ html, body, #root {
   overflow-x: auto;
   overflow-y: hidden;
   flex-shrink: 0;
-  height: 32px;
+  height: 34px;
+  padding: 4px 4px 0;
+  gap: 2px;
   /* Hide scrollbar to keep tab click area unblocked.
      Horizontal scroll still works via Shift+wheel or drag. */
   scrollbar-width: none;        /* Firefox */
@@ -116,7 +128,9 @@ html, body, #root {
   gap: 6px;
   padding: 0 6px 0 12px;
   background: #2d2d30;
-  border-right: 1px solid #1a1a1a;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
   font-size: 12px;
   cursor: pointer;
   user-select: none;
@@ -133,6 +147,8 @@ html, body, #root {
 .tab.active {
   background: #1e1e1e;
   color: #fff;
+  /* Lift the active tab visually by aligning it with the panel below. */
+  border-color: #1a1a1a;
 }
 
 .tab-name {
@@ -262,14 +278,10 @@ html, body, #root {
   overflow: hidden;
 }
 
-.panel.active::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  box-shadow: inset 0 0 0 2px #007acc;
-  z-index: 10;
-}
+/* Active panel no longer renders a focus ring. The "active panel" concept
+   is purely behavioral (where new tabs land); we don't need a visual marker
+   that competes with the image content. The user can infer it from the
+   tab bar styling and operations. */
 
 .panel-canvas {
   flex: 1;
@@ -294,7 +306,7 @@ html, body, #root {
 }
 
 .grid-splitter-col:hover {
-  background: #007acc;
+  background: #d97a3c;
 }
 
 .grid-splitter-row {
@@ -305,7 +317,7 @@ html, body, #root {
 }
 
 .grid-splitter-row:hover {
-  background: #007acc;
+  background: #d97a3c;
 }
 
 /* ── Tab DnD: drag ghost + drop zones (Phase 5) ───────────────────── */
@@ -336,7 +348,7 @@ html, body, #root {
   background: #2a2a2a;
   border: 1px solid #555;
   padding: 4px 8px;
-  border-radius: 3px;
+  border-radius: 6px;
   font-size: 12px;
   color: #ddd;
   opacity: 0.85;
@@ -355,15 +367,15 @@ html, body, #root {
 .drop-zone-center {
   position: absolute;
   inset: 20%;
-  background: rgba(0, 122, 204, 0.18);
-  border: 1px solid rgba(0, 122, 204, 0.7);
+  background: rgba(217, 122, 60, 0.18);
+  border: 1px solid rgba(217, 122, 60, 0.70);
   border-radius: 2px;
   transition: opacity 100ms;
 }
 
 .drop-zone-edge {
   position: absolute;
-  background: rgba(0, 122, 204, 0.45);
+  background: rgba(217, 122, 60, 0.45);
   transition: opacity 100ms;
 }
 
@@ -398,7 +410,7 @@ html, body, #root {
 .tab-insert-indicator {
   display: inline-block;
   width: 2px;
-  background: #007acc;
+  background: #d97a3c;
   align-self: stretch;
   margin: 4px 0;
 }
@@ -406,13 +418,14 @@ html, body, #root {
 .tab-context-menu {
   background: #2d2d30;
   border: 1px solid #3f3f46;
-  border-radius: 3px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  padding: 4px 0;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+  padding: 6px 0;
   min-width: 160px;
   z-index: 2000;
   font-size: 12px;
   color: #ddd;
+  overflow: hidden;
 }
 
 .ctx-item {
@@ -428,7 +441,7 @@ html, body, #root {
 }
 
 .ctx-item:hover {
-  background: #04395e;
+  background: #4a2a16;
   color: #fff;
 }
 
@@ -466,11 +479,11 @@ html, body, #root {
   background: #2d2d30;
   color: #ddd;
   border: 1px solid #3f3f46;
-  border-radius: 4px;
+  border-radius: 12px;
   padding: 20px 24px 16px;
   min-width: 320px;
   max-width: 480px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
 }
 
 .confirm-dialog-message {
@@ -492,7 +505,7 @@ html, body, #root {
   background: #3f3f46;
   color: #ddd;
   border: 1px solid #3f3f46;
-  border-radius: 3px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
@@ -501,18 +514,18 @@ html, body, #root {
 }
 
 .confirm-dialog-btn:focus-visible {
-  outline: 1px solid #007acc;
+  outline: 1px solid #d97a3c;
   outline-offset: 1px;
 }
 
 .confirm-dialog-btn-ok {
-  background: #007acc;
-  border-color: #007acc;
+  background: #d97a3c;
+  border-color: #d97a3c;
   color: #fff;
 }
 
 .confirm-dialog-btn-ok:hover {
-  background: #1a8ad6;
+  background: #e88f4d;
 }
 
 /* Toast */
@@ -540,8 +553,8 @@ html, body, #root {
   color: #ddd;
   border: 1px solid #3f3f46;
   border-left-width: 4px;
-  border-radius: 3px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   font-size: 13px;
   line-height: 1.4;
   opacity: 1;
@@ -554,7 +567,7 @@ html, body, #root {
 }
 
 .toast-info {
-  border-left-color: #007acc;
+  border-left-color: #d97a3c;
 }
 
 .toast-warn {
@@ -623,7 +636,7 @@ html, body, #root {
   background: #2d2d30;
   color: #ddd;
   border: 1px solid #3f3f46;
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 8px 18px;
   cursor: pointer;
   font-size: 13px;
@@ -663,7 +676,7 @@ html, body, #root {
   background: #2d2d30;
   color: #ddd;
   border: 1px solid #3f3f46;
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 5px 8px;
   cursor: pointer;
   display: inline-flex;
@@ -712,11 +725,11 @@ html, body, #root {
 }
 
 .cls-chip-all {
-  border-color: #007acc;
+  border-color: #d97a3c;
 }
 
 .cls-chip-all.active {
-  background: #007acc;
+  background: #d97a3c;
   color: #fff;
 }
 
@@ -744,9 +757,9 @@ html, body, #root {
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  background: #04395e;
-  color: #e6f1fb;
-  border-bottom: 1px solid #06283d;
+  background: #4a2a16;
+  color: #fbeadb;
+  border-bottom: 1px solid #2e1a0d;
   flex-shrink: 0;
   font-size: 12px;
 }
@@ -757,17 +770,17 @@ html, body, #root {
 }
 
 .cls-bulk-btn {
-  background: #007acc;
+  background: #d97a3c;
   color: #fff;
-  border: 1px solid #0090ee;
-  border-radius: 3px;
+  border: 1px solid #f0a363;
+  border-radius: 6px;
   padding: 3px 12px;
   font-size: 12px;
   cursor: pointer;
 }
 
 .cls-bulk-btn:hover:not(:disabled) {
-  background: #0090ee;
+  background: #f0a363;
 }
 
 .cls-bulk-btn:disabled {
@@ -778,16 +791,16 @@ html, body, #root {
 .cls-bulk-clear {
   margin-left: auto;
   background: transparent;
-  color: #cfe6f8;
-  border: 1px solid #3f6f93;
-  border-radius: 3px;
+  color: #f6dcc4;
+  border: 1px solid #7a5a40;
+  border-radius: 6px;
   padding: 3px 10px;
   font-size: 12px;
   cursor: pointer;
 }
 
 .cls-bulk-clear:hover {
-  background: #06283d;
+  background: #2e1a0d;
   color: #fff;
 }
 
@@ -806,7 +819,7 @@ html, body, #root {
   background: #2d2d30;
   color: #ddd;
   border: 1px solid #3f3f46;
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 3px 10px;
   font-size: 12px;
   cursor: pointer;
@@ -817,8 +830,8 @@ html, body, #root {
 }
 
 .cls-segment-btn.active {
-  background: #007acc;
-  border-color: #007acc;
+  background: #d97a3c;
+  border-color: #d97a3c;
   color: #fff;
 }
 
@@ -828,7 +841,7 @@ html, body, #root {
   gap: 6px;
   background: #2d2d30;
   border: 1px solid #3f3f46;
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 3px 8px;
   flex: 1;
   max-width: 320px;
@@ -966,7 +979,7 @@ html, body, #root {
   background: #2d2d30;
   color: #ddd;
   border: 1px solid #3f3f46;
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 3px 10px;
   font-size: 12px;
   cursor: pointer;
@@ -1032,11 +1045,12 @@ html, body, #root {
 .cls-card {
   background: #2a2a2a;
   border: 1px solid #1a1a1a;
-  border-radius: 6px;
+  border-radius: 10px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+  transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s,
+    background 0.12s;
 }
 
 .cls-card:hover {
@@ -1044,10 +1058,12 @@ html, body, #root {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
-/* Selected card: blue ring matching the active-panel highlight. */
+/* Selected card: gentle accent tint + soft border, no high-contrast ring.
+   The checkbox (in checkbox / both modes) and the tinted body together
+   carry the "selected" semantics — we don't need a saturated frame for it. */
 .cls-card-selected {
-  border-color: #007acc;
-  box-shadow: 0 0 0 1px #007acc inset;
+  border-color: rgba(217, 122, 60, 0.45);
+  background: rgba(217, 122, 60, 0.08);
 }
 
 .cls-card-select {
@@ -1061,7 +1077,7 @@ html, body, #root {
   height: 22px;
   background: rgba(0, 0, 0, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 3px;
+  border-radius: 6px;
   cursor: pointer;
   /* Always visible (per UI plan A); subtle by default and pops on hover. */
   opacity: 0.55;
@@ -1078,7 +1094,7 @@ html, body, #root {
   cursor: pointer;
   width: 14px;
   height: 14px;
-  accent-color: #007acc;
+  accent-color: #d97a3c;
 }
 
 .cls-card-thumb {
@@ -1110,7 +1126,7 @@ html, body, #root {
   background: rgba(0, 0, 0, 0.6);
   color: #ddd;
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 4px 5px;
   cursor: pointer;
   display: inline-flex;
@@ -1218,7 +1234,7 @@ html, body, #root {
 .cls-edit-textarea {
   background: #1e1e1e;
   border: 1px solid #3f3f46;
-  border-radius: 3px;
+  border-radius: 6px;
   color: #ddd;
   font-size: 13px;
   padding: 6px 8px;
@@ -1228,7 +1244,7 @@ html, body, #root {
 
 .cls-edit-input:focus,
 .cls-edit-textarea:focus {
-  outline: 1px solid #007acc;
+  outline: 1px solid #d97a3c;
   outline-offset: -1px;
 }
 
@@ -1277,14 +1293,14 @@ html, body, #root {
 .settings-dialog {
   background: #1e1e1e;
   border: 1px solid #3f3f46;
-  border-radius: 6px;
+  border-radius: 12px;
   width: min(560px, 92vw);
   max-height: 88vh;
   display: flex;
   flex-direction: column;
   color: #ddd;
   font-size: 13px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
 }
 
 .settings-header {
@@ -1377,7 +1393,7 @@ html, body, #root {
   background: #2d2d30;
   color: #ddd;
   border: 1px solid #3f3f46;
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 5px 8px;
   font-size: 12px;
   width: 100%;
@@ -1396,15 +1412,15 @@ html, body, #root {
   gap: 4px;
   background: #2d2d30;
   border: 1px solid #3f3f46;
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 4px 10px;
   cursor: pointer;
   font-size: 12px;
 }
 
 .settings-segment-opt-active {
-  background: #04395e;
-  border-color: #007acc;
+  background: #4a2a16;
+  border-color: #d97a3c;
   color: #fff;
 }
 
@@ -1419,11 +1435,11 @@ html, body, #root {
   display: block;
   background: #14141a;
   border: 1px solid #2d2d30;
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 6px 8px;
   font-family: ui-monospace, monospace;
   font-size: 11px;
-  color: #cfe6f8;
+  color: #f6dcc4;
   word-break: break-all;
 }
 
@@ -1437,7 +1453,7 @@ html, body, #root {
 
 .settings-btn {
   border: 1px solid #3f3f46;
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 6px 14px;
   font-size: 12px;
   cursor: pointer;
@@ -1453,13 +1469,13 @@ html, body, #root {
 }
 
 .settings-btn-primary {
-  background: #007acc;
+  background: #d97a3c;
   color: #fff;
-  border-color: #0090ee;
+  border-color: #f0a363;
 }
 
 .settings-btn-primary:hover {
-  background: #0090ee;
+  background: #f0a363;
 }
 
 .settings-btn:disabled {
@@ -1489,10 +1505,10 @@ html, body, #root {
   display: inline-block;
   background: #14141a;
   border: 1px solid #3f3f46;
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 1px 6px;
   font-family: ui-monospace, monospace;
   font-size: 11px;
-  color: #cfe6f8;
+  color: #f6dcc4;
   white-space: nowrap;
 }

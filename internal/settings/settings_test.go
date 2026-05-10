@@ -27,6 +27,9 @@ func TestLoad_Missing_ReturnsDefaults(t *testing.T) {
 	if s.MultiSelectMode != MultiSelectCheckbox {
 		t.Errorf("MultiSelectMode default: got %q, want checkbox", s.MultiSelectMode)
 	}
+	if s.WheelMode != WheelModeZoom {
+		t.Errorf("WheelMode default: got %q, want zoom", s.WheelMode)
+	}
 }
 
 func TestSaveLoad_RoundTrip(t *testing.T) {
@@ -34,6 +37,7 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	in := DefaultSettings()
 	in.LogLevel = "debug"
 	in.MultiSelectMode = MultiSelectBoth
+	in.WheelMode = WheelModeShiftZoom
 	if err := Save(in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -43,6 +47,9 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	}
 	if out.MultiSelectMode != MultiSelectBoth {
 		t.Errorf("MultiSelectMode: got %q", out.MultiSelectMode)
+	}
+	if out.WheelMode != WheelModeShiftZoom {
+		t.Errorf("WheelMode: got %q", out.WheelMode)
 	}
 }
 
@@ -57,6 +64,11 @@ func TestSave_RejectsInvalid(t *testing.T) {
 	bad.MultiSelectMode = "lasso"
 	if err := Save(bad); err == nil {
 		t.Errorf("Save should reject invalid MultiSelectMode")
+	}
+	bad = DefaultSettings()
+	bad.WheelMode = "spin"
+	if err := Save(bad); err == nil {
+		t.Errorf("Save should reject invalid WheelMode")
 	}
 }
 
@@ -76,11 +88,11 @@ func TestSave_StampsVersion(t *testing.T) {
 func TestLoad_VersionMismatch_FallsBackToDefaults(t *testing.T) {
 	p := setSettingsFile(t)
 	os.MkdirAll(filepath.Dir(p), 0o755)
-	if err := os.WriteFile(p, []byte(`{"version":99,"logLevel":"debug","multiSelectMode":"both"}`), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte(`{"version":99,"logLevel":"debug","multiSelectMode":"both","wheelMode":"shift-zoom"}`), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	s := Load()
-	if s.LogLevel != "info" || s.MultiSelectMode != MultiSelectCheckbox {
+	if s.LogLevel != "info" || s.MultiSelectMode != MultiSelectCheckbox || s.WheelMode != WheelModeZoom {
 		t.Errorf("expected defaults on version mismatch, got %+v", s)
 	}
 }
@@ -103,7 +115,8 @@ func TestLoad_PerFieldFallbackKeepsValidFields(t *testing.T) {
 	bad, _ := json.Marshal(map[string]any{
 		"version":         SettingsSchemaVersion,
 		"logLevel":        "garbage",
-		"multiSelectMode": MultiSelectModifier, // valid
+		"multiSelectMode": MultiSelectModifier,  // valid
+		"wheelMode":       WheelModeShiftZoom,   // valid
 	})
 	if err := os.WriteFile(p, bad, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -114,6 +127,9 @@ func TestLoad_PerFieldFallbackKeepsValidFields(t *testing.T) {
 	}
 	if s.MultiSelectMode != MultiSelectModifier {
 		t.Errorf("valid multiSelectMode should be preserved, got %q", s.MultiSelectMode)
+	}
+	if s.WheelMode != WheelModeShiftZoom {
+		t.Errorf("valid wheelMode should be preserved, got %q", s.WheelMode)
 	}
 }
 

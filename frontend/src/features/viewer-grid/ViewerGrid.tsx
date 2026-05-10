@@ -14,6 +14,7 @@ import type { Tab } from "./useTabs";
 
 type Props = {
   layout: Layout;
+  wheelMode?: string;
   onActivatePanel: (leafId: string) => void;
   onSelectTab: (leafId: string, tabIndex: number) => void;
   onCloseTab: (leafId: string, tabIndex: number) => void;
@@ -74,6 +75,7 @@ export function ViewerGrid(props: Props) {
         <RenderNode
           node={props.layout.root}
           activeId={props.layout.activeId}
+          wheelMode={props.wheelMode}
           containerRef={containerRef}
           dnd={dnd}
           onActivate={props.onActivatePanel}
@@ -110,6 +112,7 @@ export function ViewerGrid(props: Props) {
 type RenderNodeProps = {
   node: LayoutNode;
   activeId: string;
+  wheelMode?: string;
   containerRef: React.RefObject<HTMLDivElement | null>;
   dnd: DnDState | null;
   onActivate: (leafId: string) => void;
@@ -141,6 +144,7 @@ function RenderNode(props: RenderNodeProps) {
       <Panel
         leaf={node}
         isActive={activeId === node.id}
+        wheelMode={props.wheelMode}
         dnd={dnd}
         onActivate={props.onActivate}
         onSelectTab={props.onSelectTab}

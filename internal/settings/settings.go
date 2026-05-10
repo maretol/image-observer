@@ -32,6 +32,12 @@ const (
 	MultiSelectBoth     = "both"     // both modes wired up
 )
 
+// Allowed values for SettingsData.WheelMode.
+const (
+	WheelModeZoom      = "zoom"       // default: wheel zooms (current behavior)
+	WheelModeShiftZoom = "shift-zoom" // wheel pans, Shift+wheel zooms
+)
+
 // Allowed values for SettingsData.LogLevel.
 var validLogLevels = map[string]struct{}{
 	"debug": {}, "info": {}, "warn": {}, "error": {},
@@ -43,6 +49,11 @@ var validMultiSelectModes = map[string]struct{}{
 	MultiSelectBoth:     {},
 }
 
+var validWheelModes = map[string]struct{}{
+	WheelModeZoom:      {},
+	WheelModeShiftZoom: {},
+}
+
 // SettingsData is the persisted (and Wails-exposed) shape. Add new fields
 // here with sane defaults in `DefaultSettings`. Fields are JSON-serialized
 // in camelCase so the frontend can use them without renaming.
@@ -50,6 +61,7 @@ type SettingsData struct {
 	Version         int    `json:"version"`
 	LogLevel        string `json:"logLevel"`
 	MultiSelectMode string `json:"multiSelectMode"`
+	WheelMode       string `json:"wheelMode"`
 }
 
 // settingsFilePathOverride lets tests redirect away from the user config dir.
@@ -73,6 +85,7 @@ func DefaultSettings() SettingsData {
 		Version:         SettingsSchemaVersion,
 		LogLevel:        "info",
 		MultiSelectMode: MultiSelectCheckbox,
+		WheelMode:       WheelModeZoom,
 	}
 }
 
@@ -141,6 +154,9 @@ func Validate(s *SettingsData) error {
 	if _, ok := validMultiSelectModes[s.MultiSelectMode]; !ok {
 		return errors.New("invalid multiSelectMode: " + s.MultiSelectMode)
 	}
+	if _, ok := validWheelModes[s.WheelMode]; !ok {
+		return errors.New("invalid wheelMode: " + s.WheelMode)
+	}
 	return nil
 }
 
@@ -152,5 +168,8 @@ func applyFieldDefaults(s *SettingsData) {
 	}
 	if _, ok := validMultiSelectModes[s.MultiSelectMode]; !ok {
 		s.MultiSelectMode = MultiSelectCheckbox
+	}
+	if _, ok := validWheelModes[s.WheelMode]; !ok {
+		s.WheelMode = WheelModeZoom
 	}
 }

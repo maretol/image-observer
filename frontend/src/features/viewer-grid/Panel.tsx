@@ -8,6 +8,7 @@ import { DropOverlay } from "./DropOverlay";
 type Props = {
   leaf: LeafNode;
   isActive: boolean;
+  wheelMode?: string;
   dnd: DnDState | null;
   onActivate: (leafId: string) => void;
   onSelectTab: (leafId: string, tabIndex: number) => void;
@@ -70,6 +71,7 @@ export function Panel(props: Props) {
             tab={activeTab}
             tabIndex={leaf.activeIndex}
             isActivePanel={isActive}
+            wheelMode={props.wheelMode}
             onUpdateTabState={(tabIndex, patch) =>
               props.onUpdateTabState(leaf.id, tabIndex, patch)
             }

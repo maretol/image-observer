@@ -177,7 +177,8 @@ func (a *App) UpdateSettings(s settings.SettingsData) (settings.SettingsData, er
 	}
 	logging.Info("settings", "updated",
 		"logLevel", saved.LogLevel,
-		"multiSelectMode", saved.MultiSelectMode)
+		"multiSelectMode", saved.MultiSelectMode,
+		"wheelMode", saved.WheelMode)
 	return saved, nil
 }
 

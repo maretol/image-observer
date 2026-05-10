@@ -266,6 +266,7 @@ function AppInner({ initialState }: AppInnerProps) {
         ) : (
           <ViewerGrid
             layout={viewer.layout}
+            wheelMode={settings.data?.wheelMode}
             onActivatePanel={viewer.setActivePanel}
             onSelectTab={viewer.setActiveTab}
             onCloseTab={viewer.closeTab}

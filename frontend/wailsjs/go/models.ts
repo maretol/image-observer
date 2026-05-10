@@ -174,6 +174,7 @@ export namespace settings {
 	    version: number;
 	    logLevel: string;
 	    multiSelectMode: string;
+	    wheelMode: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsData(source);
@@ -184,6 +185,7 @@ export namespace settings {
 	        this.version = source["version"];
 	        this.logLevel = source["logLevel"];
 	        this.multiSelectMode = source["multiSelectMode"];
+	        this.wheelMode = source["wheelMode"];
 	    }
 	}
 

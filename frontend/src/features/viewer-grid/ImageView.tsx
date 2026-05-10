@@ -14,6 +14,8 @@ type Props = {
   tab: Tab;
   tabIndex: number;
   isActivePanel: boolean;
+  // "zoom" (default) → wheel zooms. "shift-zoom" → wheel pans, Shift+wheel zooms.
+  wheelMode?: string;
   onUpdateTabState: (index: number, patch: Partial<Tab>) => void;
 };
 
@@ -21,6 +23,7 @@ export function ImageView({
   tab,
   tabIndex,
   isActivePanel,
+  wheelMode,
   onUpdateTabState,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -168,38 +171,70 @@ export function ImageView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.initialized, tab.imageWidth, tab.imageHeight]);
 
-  // Wheel zoom (cursor anchored). Attach as non-passive to allow preventDefault.
+  // Wheel handler. Attach as non-passive to allow preventDefault.
+  //
+  // wheelMode === "shift-zoom":
+  //   - Shift+wheel / Ctrl+wheel → zoom (cursor-anchored, like the default)
+  //   - plain wheel              → pan (deltaY → vertical, deltaX → horizontal trackpads)
+  //
+  // wheelMode === "zoom" (default): wheel always zooms.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const onWheel = (e: WheelEvent) => {
       if (!tab.initialized) return;
-      e.preventDefault();
       const rect = container.getBoundingClientRect();
-      const cx = e.clientX - rect.left;
-      const cy = e.clientY - rect.top;
-      const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-      const newZoom = clamp(tab.zoom * factor, MIN_ZOOM, MAX_ZOOM);
-      // Image-space pixel under cursor (pre-zoom)
-      const px = (cx - tab.panX) / tab.zoom;
-      const py = (cy - tab.panY) / tab.zoom;
-      let newPanX = cx - px * newZoom;
-      let newPanY = cy - py * newZoom;
-      const renderedW = tab.imageWidth * newZoom;
-      const renderedH = tab.imageHeight * newZoom;
-      ({ panX: newPanX, panY: newPanY } = clampPan(
-        newPanX,
-        newPanY,
+      const shouldZoom =
+        wheelMode === "shift-zoom" ? e.shiftKey || e.ctrlKey || e.metaKey : true;
+      if (shouldZoom) {
+        e.preventDefault();
+        const cx = e.clientX - rect.left;
+        const cy = e.clientY - rect.top;
+        // Some browsers swap deltaY into deltaX when Shift is held; pick the
+        // non-zero one so the modifier+wheel zooms regardless.
+        const d = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+        if (d === 0) return;
+        const factor = d < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+        const newZoom = clamp(tab.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+        const px = (cx - tab.panX) / tab.zoom;
+        const py = (cy - tab.panY) / tab.zoom;
+        let newPanX = cx - px * newZoom;
+        let newPanY = cy - py * newZoom;
+        const renderedW = tab.imageWidth * newZoom;
+        const renderedH = tab.imageHeight * newZoom;
+        ({ panX: newPanX, panY: newPanY } = clampPan(
+          newPanX,
+          newPanY,
+          renderedW,
+          renderedH,
+          rect.width,
+          rect.height,
+        ));
+        onUpdateTabState(tabIndex, {
+          zoom: newZoom,
+          panX: newPanX,
+          panY: newPanY,
+        });
+        return;
+      }
+      // Pan mode: scroll the image. Subtract delta so deltaY > 0 (wheel down)
+      // moves the image upward — same direction sense as a scrollable view.
+      e.preventDefault();
+      const renderedW = tab.imageWidth * tab.zoom;
+      const renderedH = tab.imageHeight * tab.zoom;
+      let nx = tab.panX - e.deltaX;
+      let ny = tab.panY - e.deltaY;
+      ({ panX: nx, panY: ny } = clampPan(
+        nx,
+        ny,
         renderedW,
         renderedH,
         rect.width,
-        rect.height
+        rect.height,
       ));
-      onUpdateTabState(tabIndex, {
-        zoom: newZoom,
-        panX: newPanX,
-        panY: newPanY,
-      });
+      if (nx !== tab.panX || ny !== tab.panY) {
+        onUpdateTabState(tabIndex, { panX: nx, panY: ny });
+      }
     };
     container.addEventListener("wheel", onWheel, { passive: false });
     return () => container.removeEventListener("wheel", onWheel);
@@ -212,6 +247,7 @@ export function ImageView({
     tab.initialized,
     tabIndex,
     onUpdateTabState,
+    wheelMode,
   ]);
 
   // Subscribe to zoom commands when this panel is active. Single-listener
