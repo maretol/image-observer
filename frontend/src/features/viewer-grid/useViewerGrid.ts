@@ -1,154 +1,78 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GetImageInfo } from "../../../wailsjs/go/main/App";
 import { useToastFn } from "../../shared/components/Toast";
-import { newTab, type Tab } from "./useTabs";
+import {
+  appendOrFocusInActive,
+  closeTabInLeaf,
+  countLeaves,
+  findLeaf,
+  initialLayout,
+  MAX_PANELS,
+  moveTabIntoLeaf,
+  reorderTabInLeaf,
+  setActivePanel,
+  setActiveTabInLeaf,
+  setSplitRatio,
+  splitFromContextMenu,
+  splitTabIntoEdge,
+  updateTabInLeaf,
+  type Edge,
+  type Layout,
+  type SplitDirection,
+} from "./layout";
+import type { Tab } from "./useTabs";
 
 export type ConfirmFn = (message: string) => Promise<boolean>;
 
-// Future: replace with values from a Settings module (Phase H).
-// Keeping these as a single point of mutation lets us swap to user-configurable
-// values without touching the rest of the grid logic.
-export const MAX_ROWS = 2;
-export const MAX_COLS = 3;
 export const MAX_PIXELS = 200_000_000; // 200MP
 
-export type PanelCoord = { row: number; col: number };
-
-export type Panel = {
-  tabs: Tab[];
-  activeIndex: number; // -1 if no tabs
-};
-
-export type GridSize = { rows: number; cols: number };
-
-export type Grid = {
-  size: GridSize;
-  panels: Panel[]; // length = rows * cols, indexed by row * cols + col
-  rowSizes: number[]; // ratios summing to 1.0
-  colSizes: number[]; // ratios summing to 1.0
-  active: PanelCoord;
-};
-
-const emptyPanel = (): Panel => ({ tabs: [], activeIndex: -1 });
-const equalSizes = (n: number): number[] =>
-  Array.from({ length: n }, () => 1 / n);
-
-export const panelIndex = (size: GridSize, c: PanelCoord): number =>
-  c.row * size.cols + c.col;
-export const panelAt = (grid: Grid, c: PanelCoord): Panel =>
-  grid.panels[panelIndex(grid.size, c)];
-export const sameCoord = (a: PanelCoord, b: PanelCoord): boolean =>
-  a.row === b.row && a.col === b.col;
-
-const initialGrid: Grid = {
-  size: { rows: 1, cols: 1 },
-  panels: [emptyPanel()],
-  rowSizes: [1],
-  colSizes: [1],
-  active: { row: 0, col: 0 },
-};
-
-function recomputeActiveAfterClose(
-  curActive: number,
-  closedIndex: number,
-  newLen: number
-): number {
-  if (newLen === 0) return -1;
-  if (curActive === closedIndex) return Math.min(closedIndex, newLen - 1);
-  if (curActive > closedIndex) return curActive - 1;
-  return curActive;
-}
-
-function updatePanelInGrid(
-  g: Grid,
-  coord: PanelCoord,
-  fn: (p: Panel) => Panel
-): Grid {
-  const idx = panelIndex(g.size, coord);
-  return { ...g, panels: g.panels.map((p, i) => (i === idx ? fn(p) : p)) };
-}
-
-function countTabsInRow(g: Grid, row: number): number {
-  let n = 0;
-  for (let c = 0; c < g.size.cols; c++)
-    n += g.panels[row * g.size.cols + c].tabs.length;
-  return n;
-}
-
-function countTabsInCol(g: Grid, col: number): number {
-  let n = 0;
-  for (let r = 0; r < g.size.rows; r++)
-    n += g.panels[r * g.size.cols + col].tabs.length;
-  return n;
-}
+export { MAX_PANELS } from "./layout";
+export type { Edge, Layout, SplitDirection } from "./layout";
 
 export function useViewerGrid(opts?: {
-  initialGrid?: Grid;
+  initialLayout?: Layout;
   confirm?: ConfirmFn;
 }) {
-  const [grid, setGrid] = useState<Grid>(opts?.initialGrid ?? initialGrid);
+  const [layout, setLayout] = useState<Layout>(
+    opts?.initialLayout ?? initialLayout(),
+  );
 
-  // Mirror latest grid into a ref so async callbacks (removeRow/Col with
-  // confirm dialog) can read current state without re-creating callbacks
-  // on every grid change.
-  const gridRef = useRef(grid);
+  // Mirror latest layout into a ref so async callbacks (openInActive) can read
+  // current state without re-creating callbacks on every layout change.
+  const layoutRef = useRef(layout);
   useEffect(() => {
-    gridRef.current = grid;
-  }, [grid]);
+    layoutRef.current = layout;
+  }, [layout]);
 
-  const confirm = opts?.confirm;
   const toast = useToastFn();
 
-  const setActivePanel = useCallback((coord: PanelCoord) => {
-    setGrid((g) => (sameCoord(g.active, coord) ? g : { ...g, active: coord }));
+  const setActivePanelCb = useCallback((leafId: string) => {
+    setLayout((cur) => setActivePanel(cur, leafId));
   }, []);
 
-  const setActiveTab = useCallback((coord: PanelCoord, tabIndex: number) => {
-    setGrid((g) =>
-      updatePanelInGrid(g, coord, (p) => ({ ...p, activeIndex: tabIndex }))
-    );
+  const setActiveTab = useCallback((leafId: string, tabIndex: number) => {
+    setLayout((cur) => setActiveTabInLeaf(cur, leafId, tabIndex));
   }, []);
 
-  const closeTab = useCallback((coord: PanelCoord, tabIndex: number) => {
-    setGrid((g) =>
-      updatePanelInGrid(g, coord, (p) => {
-        const newTabs = p.tabs.filter((_, i) => i !== tabIndex);
-        return {
-          tabs: newTabs,
-          activeIndex: recomputeActiveAfterClose(
-            p.activeIndex,
-            tabIndex,
-            newTabs.length
-          ),
-        };
-      })
-    );
+  const closeTab = useCallback((leafId: string, tabIndex: number) => {
+    setLayout((cur) => closeTabInLeaf(cur, leafId, tabIndex));
   }, []);
 
   const updateTabState = useCallback(
-    (coord: PanelCoord, tabIndex: number, patch: Partial<Tab>) => {
-      setGrid((g) =>
-        updatePanelInGrid(g, coord, (p) => ({
-          ...p,
-          tabs: p.tabs.map((t, i) => (i === tabIndex ? { ...t, ...patch } : t)),
-        }))
-      );
+    (leafId: string, tabIndex: number, patch: Partial<Tab>) => {
+      setLayout((cur) => updateTabInLeaf(cur, leafId, tabIndex, patch));
     },
-    []
+    [],
   );
 
   const openInActive = useCallback(
     async (path: string) => {
       // Fast path: switch to existing tab without re-checking image info.
-      const cur = panelAt(gridRef.current, gridRef.current.active);
-      const existing = cur.tabs.findIndex((t) => t.path === path);
-      if (existing >= 0) {
-        setGrid((g) =>
-          updatePanelInGrid(g, g.active, (p) => ({
-            ...p,
-            activeIndex: existing,
-          }))
-        );
+      const cur = layoutRef.current;
+      const active = findLeaf(cur.root, cur.activeId);
+      const existing = active?.tabs.findIndex((t) => t.path === path) ?? -1;
+      if (active && existing >= 0) {
+        setLayout((l) => setActiveTabInLeaf(l, active.id, existing));
         return;
       }
 
@@ -165,192 +89,93 @@ export function useViewerGrid(opts?: {
         const limit = MAX_PIXELS / 1_000_000;
         toast(
           `画像が大きすぎます: ${basename(path)} (${mp}MP > ${limit}MP)`,
-          "warn"
+          "warn",
         );
         return;
       }
 
-      setGrid((g) => {
-        // Re-check existence in case state changed during await.
-        const c = panelAt(g, g.active);
-        const ex = c.tabs.findIndex((t) => t.path === path);
-        if (ex >= 0) {
-          return updatePanelInGrid(g, g.active, (p) => ({
-            ...p,
-            activeIndex: ex,
-          }));
-        }
-        return updatePanelInGrid(g, g.active, (p) => {
-          const newTabs = [...p.tabs, newTab(path)];
-          return { tabs: newTabs, activeIndex: newTabs.length - 1 };
-        });
-      });
+      setLayout((l) => appendOrFocusInActive(l, path));
     },
-    [toast]
+    [toast],
   );
 
   const moveTab = useCallback(
-    (srcCoord: PanelCoord, srcIndex: number, dstCoord: PanelCoord) => {
-      if (sameCoord(srcCoord, dstCoord)) return;
-      setGrid((g) => {
-        const src = panelAt(g, srcCoord);
-        const dst = panelAt(g, dstCoord);
-        const tab = src.tabs[srcIndex];
-        if (!tab) return g;
-
-        const existing = dst.tabs.findIndex((t) => t.path === tab.path);
-        let newDstTabs: Tab[];
-        let newDstActive: number;
-        if (existing >= 0) {
-          newDstTabs = dst.tabs;
-          newDstActive = existing;
-        } else {
-          newDstTabs = [...dst.tabs, tab];
-          newDstActive = newDstTabs.length - 1;
-        }
-
-        const newSrcTabs = src.tabs.filter((_, i) => i !== srcIndex);
-        const newSrcActive = recomputeActiveAfterClose(
-          src.activeIndex,
-          srcIndex,
-          newSrcTabs.length
-        );
-
-        const srcIdx = panelIndex(g.size, srcCoord);
-        const dstIdx = panelIndex(g.size, dstCoord);
-        const newPanels = g.panels.map((p, i) => {
-          if (i === srcIdx)
-            return { tabs: newSrcTabs, activeIndex: newSrcActive };
-          if (i === dstIdx)
-            return { tabs: newDstTabs, activeIndex: newDstActive };
-          return p;
-        });
-        return { ...g, panels: newPanels, active: dstCoord };
-      });
+    (
+      srcLeafId: string,
+      srcIdx: number,
+      dstLeafId: string,
+      dstIdx?: number,
+    ) => {
+      setLayout((cur) =>
+        moveTabIntoLeaf(cur, srcLeafId, srcIdx, dstLeafId, dstIdx),
+      );
     },
-    []
+    [],
   );
 
-  const addRow = useCallback(() => {
-    setGrid((g) => {
-      if (g.size.rows >= MAX_ROWS) return g;
-      const newRows = g.size.rows + 1;
-      const newPanels = [...g.panels];
-      for (let c = 0; c < g.size.cols; c++) newPanels.push(emptyPanel());
-      return {
-        size: { rows: newRows, cols: g.size.cols },
-        panels: newPanels,
-        rowSizes: equalSizes(newRows),
-        colSizes: g.colSizes,
-        active: g.active,
-      };
-    });
-  }, []);
+  const reorderTab = useCallback(
+    (leafId: string, srcIdx: number, dstIdx: number) => {
+      setLayout((cur) => reorderTabInLeaf(cur, leafId, srcIdx, dstIdx));
+    },
+    [],
+  );
 
-  const addCol = useCallback(() => {
-    setGrid((g) => {
-      if (g.size.cols >= MAX_COLS) return g;
-      const newCols = g.size.cols + 1;
-      const newPanels: Panel[] = [];
-      for (let r = 0; r < g.size.rows; r++) {
-        for (let c = 0; c < g.size.cols; c++) {
-          newPanels.push(g.panels[r * g.size.cols + c]);
+  // Returns true on success, false when the panel cap is reached.
+  const splitTab = useCallback(
+    (
+      srcLeafId: string,
+      srcIdx: number,
+      dstLeafId: string,
+      edge: Edge,
+    ): boolean => {
+      let ok = false;
+      setLayout((cur) => {
+        if (countLeaves(cur.root) >= MAX_PANELS) {
+          toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
+          return cur;
         }
-        newPanels.push(emptyPanel());
-      }
-      return {
-        size: { rows: g.size.rows, cols: newCols },
-        panels: newPanels,
-        rowSizes: g.rowSizes,
-        colSizes: equalSizes(newCols),
-        active: g.active,
-      };
-    });
-  }, []);
+        const r = splitTabIntoEdge(cur, srcLeafId, srcIdx, dstLeafId, edge);
+        ok = r.ok;
+        return r.layout;
+      });
+      return ok;
+    },
+    [toast],
+  );
 
-  const removeRow = useCallback(async () => {
-    const cur = gridRef.current;
-    if (cur.size.rows <= 1) return;
-    const lastRow = cur.size.rows - 1;
-    const tabCount = countTabsInRow(cur, lastRow);
-    if (tabCount > 0) {
-      if (!confirm) return;
-      const ok = await confirm(
-        `${tabCount} 個のタブが閉じられます。続行しますか?`
-      );
-      if (!ok) return;
-    }
-    setGrid((g) => {
-      if (g.size.rows <= 1) return g;
-      const newRows = g.size.rows - 1;
-      const newPanels = g.panels.slice(0, newRows * g.size.cols);
-      const newActive: PanelCoord =
-        g.active.row >= newRows ? { row: 0, col: 0 } : g.active;
-      return {
-        size: { rows: newRows, cols: g.size.cols },
-        panels: newPanels,
-        rowSizes: equalSizes(newRows),
-        colSizes: g.colSizes,
-        active: newActive,
-      };
-    });
-  }, [confirm]);
-
-  const removeCol = useCallback(async () => {
-    const cur = gridRef.current;
-    if (cur.size.cols <= 1) return;
-    const lastCol = cur.size.cols - 1;
-    const tabCount = countTabsInCol(cur, lastCol);
-    if (tabCount > 0) {
-      if (!confirm) return;
-      const ok = await confirm(
-        `${tabCount} 個のタブが閉じられます。続行しますか?`
-      );
-      if (!ok) return;
-    }
-    setGrid((g) => {
-      if (g.size.cols <= 1) return g;
-      const newCols = g.size.cols - 1;
-      const newPanels: Panel[] = [];
-      for (let r = 0; r < g.size.rows; r++) {
-        for (let c = 0; c < newCols; c++) {
-          newPanels.push(g.panels[r * g.size.cols + c]);
+  const splitFromContext = useCallback(
+    (leafId: string, tabIdx: number, direction: SplitDirection): boolean => {
+      let ok = false;
+      setLayout((cur) => {
+        if (countLeaves(cur.root) >= MAX_PANELS) {
+          toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
+          return cur;
         }
-      }
-      const newActive: PanelCoord =
-        g.active.col >= newCols ? { row: 0, col: 0 } : g.active;
-      return {
-        size: { rows: g.size.rows, cols: newCols },
-        panels: newPanels,
-        rowSizes: g.rowSizes,
-        colSizes: equalSizes(newCols),
-        active: newActive,
-      };
-    });
-  }, [confirm]);
+        const r = splitFromContextMenu(cur, leafId, tabIdx, direction);
+        ok = r.ok;
+        return r.layout;
+      });
+      return ok;
+    },
+    [toast],
+  );
 
-  const setRowSizes = useCallback((sizes: number[]) => {
-    setGrid((g) => ({ ...g, rowSizes: sizes }));
-  }, []);
-
-  const setColSizes = useCallback((sizes: number[]) => {
-    setGrid((g) => ({ ...g, colSizes: sizes }));
+  const setSplitRatioCb = useCallback((splitId: string, ratio: number) => {
+    setLayout((cur) => setSplitRatio(cur, splitId, ratio));
   }, []);
 
   return {
-    grid,
+    layout,
     openInActive,
-    setActivePanel,
+    setActivePanel: setActivePanelCb,
     setActiveTab,
     closeTab,
     updateTabState,
     moveTab,
-    addRow,
-    addCol,
-    removeRow,
-    removeCol,
-    setRowSizes,
-    setColSizes,
+    reorderTab,
+    splitTab,
+    splitFromContext,
+    setSplitRatio: setSplitRatioCb,
   };
 }
 

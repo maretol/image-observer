@@ -6,7 +6,12 @@ import {
 import { ClassificationView } from "./features/classification/ClassificationView";
 import { useClassification } from "./features/classification/useClassification";
 import { ViewerGrid } from "./features/viewer-grid/ViewerGrid";
-import { useViewerGrid, type Grid } from "./features/viewer-grid/useViewerGrid";
+import { useViewerGrid } from "./features/viewer-grid/useViewerGrid";
+import {
+  deserializeLayout,
+  type Layout,
+  type LayoutNodeState,
+} from "./features/viewer-grid/layout";
 import { useSessionLoad } from "./features/session/useSessionLoad";
 import { useSessionSave } from "./features/session/useSessionSave";
 import { useConfirm } from "./shared/components/ConfirmDialog";
@@ -31,8 +36,8 @@ type AppInnerProps = {
 };
 
 function AppInner({ initialState }: AppInnerProps) {
-  const initGrid = initialState?.grid
-    ? gridFromGridState(initialState.grid)
+  const initLayout = initialState?.layout
+    ? layoutFromState(initialState.layout)
     : undefined;
 
   const initTopTab: TopTab =
@@ -40,7 +45,7 @@ function AppInner({ initialState }: AppInnerProps) {
   const [topTab, setTopTab] = useState<TopTab>(initTopTab);
 
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const viewer = useViewerGrid({ initialGrid: initGrid, confirm });
+  const viewer = useViewerGrid({ initialLayout: initLayout, confirm });
   const classification = useClassification({
     initialList: initialState?.list ?? null,
     confirm,
@@ -88,7 +93,7 @@ function AppInner({ initialState }: AppInnerProps) {
 
   useSessionSave({
     window: windowState,
-    grid: viewer.grid,
+    layout: viewer.layout,
     topTab,
     list: classification.persistableState,
   });
@@ -138,18 +143,16 @@ function AppInner({ initialState }: AppInnerProps) {
           />
         ) : (
           <ViewerGrid
-            grid={viewer.grid}
+            layout={viewer.layout}
             onActivatePanel={viewer.setActivePanel}
             onSelectTab={viewer.setActiveTab}
             onCloseTab={viewer.closeTab}
             onUpdateTabState={viewer.updateTabState}
             onMoveTab={viewer.moveTab}
-            onAddRow={viewer.addRow}
-            onAddCol={viewer.addCol}
-            onRemoveRow={viewer.removeRow}
-            onRemoveCol={viewer.removeCol}
-            onSetRowSizes={viewer.setRowSizes}
-            onSetColSizes={viewer.setColSizes}
+            onReorderTab={viewer.reorderTab}
+            onSplitTab={viewer.splitTab}
+            onSplitFromContext={viewer.splitFromContext}
+            onSetSplitRatio={viewer.setSplitRatio}
           />
         )}
       </div>
@@ -158,26 +161,14 @@ function AppInner({ initialState }: AppInnerProps) {
   );
 }
 
-// Convert Wails-generated GridState (persisted shape) to the runtime Grid type.
-function gridFromGridState(gs: state.GridState): Grid {
-  return {
-    size: { rows: gs.rows, cols: gs.cols },
-    rowSizes: gs.rowSizes,
-    colSizes: gs.colSizes,
-    active: { row: gs.active.row, col: gs.active.col },
-    panels: gs.panels.map((p: state.PanelState) => ({
-      tabs: p.tabs.map((t: state.TabState) => ({
-        path: t.path,
-        zoom: t.zoom,
-        panX: t.panX,
-        panY: t.panY,
-        initialized: t.zoom > 0,
-        imageWidth: 0,
-        imageHeight: 0,
-      })),
-      activeIndex: p.activeIndex,
-    })),
-  };
+// Convert Wails-generated LayoutState (persisted shape) to the runtime Layout.
+// The Wails `state.LayoutState` shape matches our `LayoutNodeState`, so we
+// can hand it straight to `deserializeLayout`.
+function layoutFromState(ls: state.LayoutState): Layout {
+  return deserializeLayout({
+    root: ls.root as unknown as LayoutNodeState,
+    activeId: ls.activeId,
+  });
 }
 
 export default App;

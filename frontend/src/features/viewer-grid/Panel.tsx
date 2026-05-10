@@ -1,33 +1,40 @@
 import { TabBar } from "./TabBar";
 import { ImageView } from "./ImageView";
-import type { Panel as PanelData, PanelCoord } from "./useViewerGrid";
+import type { LeafNode } from "./layout";
 import type { Tab } from "./useTabs";
+import { DATA_LEAF, type DnDState } from "./useDnD";
+import { DropOverlay } from "./DropOverlay";
 
 type Props = {
-  coord: PanelCoord;
-  panel: PanelData;
+  leaf: LeafNode;
   isActive: boolean;
-  style?: React.CSSProperties;
-  onActivate: (coord: PanelCoord) => void;
-  onSelectTab: (coord: PanelCoord, tabIndex: number) => void;
-  onCloseTab: (coord: PanelCoord, tabIndex: number) => void;
+  dnd: DnDState | null;
+  onActivate: (leafId: string) => void;
+  onSelectTab: (leafId: string, tabIndex: number) => void;
+  onCloseTab: (leafId: string, tabIndex: number) => void;
   onUpdateTabState: (
-    coord: PanelCoord,
+    leafId: string,
     tabIndex: number,
-    patch: Partial<Tab>
+    patch: Partial<Tab>,
   ) => void;
   onTabContextMenu: (
-    coord: PanelCoord,
+    leafId: string,
     tabIndex: number,
-    e: React.MouseEvent
+    e: React.MouseEvent,
+  ) => void;
+  onStartDrag: (
+    leafId: string,
+    tabIdx: number,
+    tabPath: string,
+    e: React.PointerEvent,
   ) => void;
 };
 
 export function Panel(props: Props) {
-  const { coord, panel, isActive, style } = props;
+  const { leaf, isActive, dnd } = props;
   const activeTab =
-    panel.activeIndex >= 0 && panel.activeIndex < panel.tabs.length
-      ? panel.tabs[panel.activeIndex]
+    leaf.activeIndex >= 0 && leaf.activeIndex < leaf.tabs.length
+      ? leaf.tabs[leaf.activeIndex]
       : null;
 
   // Right-click on the image area opens the same menu as right-click on the tab,
@@ -35,22 +42,25 @@ export function Panel(props: Props) {
   const onCanvasContextMenu = (e: React.MouseEvent) => {
     if (!activeTab) return;
     e.preventDefault();
-    props.onTabContextMenu(coord, panel.activeIndex, e);
+    props.onTabContextMenu(leaf.id, leaf.activeIndex, e);
   };
 
   return (
     <div
       className={`panel ${isActive ? "active" : ""}`}
-      style={style}
-      onMouseDown={() => props.onActivate(coord)}
+      onMouseDown={() => props.onActivate(leaf.id)}
+      {...{ [DATA_LEAF]: leaf.id }}
     >
-      {panel.tabs.length > 0 && (
+      {leaf.tabs.length > 0 && (
         <TabBar
-          tabs={panel.tabs}
-          activeIndex={panel.activeIndex}
-          onSelect={(i) => props.onSelectTab(coord, i)}
-          onClose={(i) => props.onCloseTab(coord, i)}
-          onContextMenu={(i, e) => props.onTabContextMenu(coord, i, e)}
+          leafId={leaf.id}
+          tabs={leaf.tabs}
+          activeIndex={leaf.activeIndex}
+          dnd={dnd}
+          onSelect={(i) => props.onSelectTab(leaf.id, i)}
+          onClose={(i) => props.onCloseTab(leaf.id, i)}
+          onContextMenu={(i, e) => props.onTabContextMenu(leaf.id, i, e)}
+          onStartDrag={props.onStartDrag}
         />
       )}
       <div className="panel-canvas" onContextMenu={onCanvasContextMenu}>
@@ -58,14 +68,15 @@ export function Panel(props: Props) {
           <ImageView
             key={activeTab.path}
             tab={activeTab}
-            tabIndex={panel.activeIndex}
+            tabIndex={leaf.activeIndex}
             onUpdateTabState={(tabIndex, patch) =>
-              props.onUpdateTabState(coord, tabIndex, patch)
+              props.onUpdateTabState(leaf.id, tabIndex, patch)
             }
           />
         ) : (
           <div className="panel-empty">画像を選択してください</div>
         )}
+        <DropOverlay leafId={leaf.id} dnd={dnd} />
       </div>
     </div>
   );

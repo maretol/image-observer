@@ -9,6 +9,7 @@ import (
 
 	"image-observer/internal/classification"
 	"image-observer/internal/imgread"
+	"image-observer/internal/logging"
 	"image-observer/internal/state"
 	"image-observer/internal/thumb"
 )
@@ -131,4 +132,26 @@ func classificationError(err error) error {
 		return fmt.Errorf("CONFLICT: %w", err)
 	}
 	return err
+}
+
+// LogEvent receives a single log line from the frontend and records it in the
+// shared app log. `level` is "debug"|"info"|"warn"|"error"; unknown values
+// fall back to INFO. `data` is a free-form string (typically JSON) that the
+// frontend wants attached as a single key=value field; empty means none.
+//
+// This is the only Wails-side hook for frontend logging. The frontend wraps
+// it in `shared/utils/logger.ts` to add a ring buffer + window.onerror hook.
+func (a *App) LogEvent(level, category, message, data string) {
+	l, _ := logging.ParseLevel(level)
+	if data == "" {
+		logging.Log(l, category, message)
+		return
+	}
+	logging.Log(l, category, message, "data", data)
+}
+
+// GetLogPath exposes the active log file path so the frontend (or a future
+// settings UI) can show / open it.
+func (a *App) GetLogPath() string {
+	return logging.LogPath()
 }

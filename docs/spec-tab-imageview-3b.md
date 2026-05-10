@@ -1,5 +1,7 @@
 # Tab + ImageView 実装仕様書 (Phase 3b)
 
+> ⚠️ **本仕様は Phase 5 で全面改定された。** 現行の正本は [spec-viewer-flexlayout.md](spec-viewer-flexlayout.md)。本ファイルは履歴として残置。データモデル (rows×cols Grid) / UI (GridToolbar) / TabContextMenu の「別パネルへ移動」はすべて Phase 5 で置換 (BSP ツリー + DnD + 縮小コンテキストメニュー)。
+
 Phase 3 の **第 2 段階**。ビューア領域 (右ペイン) を最大 2 行 × 3 列 = 6 パネルのグリッドに分割し、各パネルが独立した TabBar / ImageView を持つようにする。アクティブパネル概念を導入し、パネル間でタブを移動できるコンテキストメニューを実装する。Phase 3a の単一パネル実装をベースにリファクタする形で進める。セッション復元は Phase 3c に分離。
 
 ## 1. ゴール (DoD)

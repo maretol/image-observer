@@ -1,5 +1,7 @@
 # Tab + ImageView 実装仕様書 (Phase 3c)
 
+> ⚠️ **state スキーマは Phase 5 で v3 → v4 に更新された。** 本仕様の `GridState` (rows × cols + panels[]) は廃止され、BSP ツリーの `LayoutState` に置換された。現行の正本は [spec-viewer-flexlayout.md](spec-viewer-flexlayout.md) §7。Phase 3c の他の永続化方針 (アトミック書き込み / debounce 500ms / version mismatch → default fallback) は引き継がれている。
+
 Phase 3 の **第 3 段階**。前回終了時の状態を JSON ファイルに永続化し、起動時に復元する。todo.md F (永続化) の方針を本フェーズで部分確定する。
 
 ## 1. ゴール (DoD)

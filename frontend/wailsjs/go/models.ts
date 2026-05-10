@@ -188,16 +188,28 @@ export namespace state {
 	        this.panY = source["panY"];
 	    }
 	}
-	export class PanelState {
-	    tabs: TabState[];
+	export class LayoutNodeState {
+	    kind: string;
+	    id: string;
+	    direction?: string;
+	    ratio?: number;
+	    a?: LayoutNodeState;
+	    b?: LayoutNodeState;
+	    tabs?: TabState[];
 	    activeIndex: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new PanelState(source);
+	        return new LayoutNodeState(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.id = source["id"];
+	        this.direction = source["direction"];
+	        this.ratio = source["ratio"];
+	        this.a = this.convertValues(source["a"], LayoutNodeState);
+	        this.b = this.convertValues(source["b"], LayoutNodeState);
 	        this.tabs = this.convertValues(source["tabs"], TabState);
 	        this.activeIndex = source["activeIndex"];
 	    }
@@ -220,40 +232,18 @@ export namespace state {
 		    return a;
 		}
 	}
-	export class PanelCoordSt {
-	    row: number;
-	    col: number;
+	export class LayoutState {
+	    root: LayoutNodeState;
+	    activeId: string;
 	
 	    static createFrom(source: any = {}) {
-	        return new PanelCoordSt(source);
+	        return new LayoutState(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.row = source["row"];
-	        this.col = source["col"];
-	    }
-	}
-	export class GridState {
-	    rows: number;
-	    cols: number;
-	    rowSizes: number[];
-	    colSizes: number[];
-	    active: PanelCoordSt;
-	    panels: PanelState[];
-	
-	    static createFrom(source: any = {}) {
-	        return new GridState(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.rows = source["rows"];
-	        this.cols = source["cols"];
-	        this.rowSizes = source["rowSizes"];
-	        this.colSizes = source["colSizes"];
-	        this.active = this.convertValues(source["active"], PanelCoordSt);
-	        this.panels = this.convertValues(source["panels"], PanelState);
+	        this.root = this.convertValues(source["root"], LayoutNodeState);
+	        this.activeId = source["activeId"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -324,8 +314,6 @@ export namespace state {
 		    return a;
 		}
 	}
-	
-	
 	export class WindowState {
 	    width: number;
 	    height: number;
@@ -349,7 +337,7 @@ export namespace state {
 	    rootPath: string;
 	    leftPaneWidth: number;
 	    window: WindowState;
-	    grid: GridState;
+	    layout: LayoutState;
 	    topTab: string;
 	    list: ListTabState;
 	
@@ -363,7 +351,7 @@ export namespace state {
 	        this.rootPath = source["rootPath"];
 	        this.leftPaneWidth = source["leftPaneWidth"];
 	        this.window = this.convertValues(source["window"], WindowState);
-	        this.grid = this.convertValues(source["grid"], GridState);
+	        this.layout = this.convertValues(source["layout"], LayoutState);
 	        this.topTab = source["topTab"];
 	        this.list = this.convertValues(source["list"], ListTabState);
 	    }

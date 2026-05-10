@@ -10,6 +10,10 @@ export function GetImageInfo(arg1) {
   return window['go']['main']['App']['GetImageInfo'](arg1);
 }
 
+export function GetLogPath() {
+  return window['go']['main']['App']['GetLogPath']();
+}
+
 export function GetState() {
   return window['go']['main']['App']['GetState']();
 }
@@ -20,6 +24,10 @@ export function GetThumbnail(arg1, arg2, arg3) {
 
 export function LoadClassification(arg1) {
   return window['go']['main']['App']['LoadClassification'](arg1);
+}
+
+export function LogEvent(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['LogEvent'](arg1, arg2, arg3, arg4);
 }
 
 export function MergeChildSidecars(arg1) {

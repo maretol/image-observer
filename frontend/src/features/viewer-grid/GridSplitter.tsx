@@ -1,26 +1,26 @@
 import { useEffect, useRef } from "react";
+import type { SplitDirection } from "./layout";
+import { MIN_RATIO } from "./layout";
 
 type Props = {
-  direction: "row" | "col";
-  index: number; // splits between sizes[index] and sizes[index+1]
-  sizes: number[];
-  setSizes: (sizes: number[]) => void;
+  splitId: string;
+  direction: SplitDirection;
+  ratio: number; // current ratio (a's share)
   containerRef: React.RefObject<HTMLDivElement | null>;
-  style?: React.CSSProperties;
+  onChangeRatio: (splitId: string, ratio: number) => void;
 };
 
 const MIN_PX = 100;
 
 export function GridSplitter({
+  splitId,
   direction,
-  index,
-  sizes,
-  setSizes,
+  ratio,
   containerRef,
-  style,
+  onChangeRatio,
 }: Props) {
-  const dragRef = useRef<{ startMouse: number; startSizes: number[] } | null>(
-    null
+  const dragRef = useRef<{ startMouse: number; startRatio: number } | null>(
+    null,
   );
 
   const onMouseDown = (e: React.MouseEvent) => {
@@ -28,7 +28,7 @@ export function GridSplitter({
     e.stopPropagation();
     dragRef.current = {
       startMouse: direction === "col" ? e.clientX : e.clientY,
-      startSizes: [...sizes],
+      startRatio: ratio,
     };
     document.body.style.cursor =
       direction === "col" ? "col-resize" : "row-resize";
@@ -44,25 +44,13 @@ export function GridSplitter({
       const currentMouse = direction === "col" ? e.clientX : e.clientY;
       const deltaPx = currentMouse - dragRef.current.startMouse;
       const deltaRatio = deltaPx / containerSize;
-      const minRatio = MIN_PX / containerSize;
-
-      const start = dragRef.current.startSizes;
-      const sum = start[index] + start[index + 1];
-      let a = start[index] + deltaRatio;
-      let b = start[index + 1] - deltaRatio;
-      if (a < minRatio) {
-        a = minRatio;
-        b = sum - minRatio;
-      }
-      if (b < minRatio) {
-        b = minRatio;
-        a = sum - minRatio;
-      }
-
-      const newSizes = [...start];
-      newSizes[index] = a;
-      newSizes[index + 1] = b;
-      setSizes(newSizes);
+      // Clamp by both 100px minimum and the absolute MIN_RATIO floor.
+      const minRatioByPx = MIN_PX / containerSize;
+      const minR = Math.max(MIN_RATIO, minRatioByPx);
+      let r = dragRef.current.startRatio + deltaRatio;
+      if (r < minR) r = minR;
+      if (r > 1 - minR) r = 1 - minR;
+      onChangeRatio(splitId, r);
     };
     const onUp = () => {
       if (dragRef.current) {
@@ -77,9 +65,9 @@ export function GridSplitter({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [direction, index, setSizes, containerRef]);
+  }, [direction, splitId, onChangeRatio, containerRef]);
 
   const className =
     direction === "col" ? "grid-splitter-col" : "grid-splitter-row";
-  return <div className={className} style={style} onMouseDown={onMouseDown} />;
+  return <div className={className} onMouseDown={onMouseDown} />;
 }

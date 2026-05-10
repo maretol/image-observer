@@ -9,11 +9,15 @@ export function CreateEmptyClassification(arg1:string):Promise<classification.Sa
 
 export function GetImageInfo(arg1:string):Promise<imgread.Info>;
 
+export function GetLogPath():Promise<string>;
+
 export function GetState():Promise<state.StateData>;
 
 export function GetThumbnail(arg1:string,arg2:number,arg3:string):Promise<thumb.Result>;
 
 export function LoadClassification(arg1:string):Promise<classification.LoadResult>;
+
+export function LogEvent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function MergeChildSidecars(arg1:string):Promise<classification.SaveOutput>;
 

@@ -1,21 +1,33 @@
 import { useEffect, useRef } from "react";
 import { CloseIcon } from "../../shared/icons/CloseIcon";
 import type { Tab } from "./useTabs";
+import { DATA_TAB, DATA_TAB_BAR, type DnDState } from "./useDnD";
 
 type Props = {
+  leafId: string;
   tabs: Tab[];
   activeIndex: number;
+  dnd: DnDState | null;
   onSelect: (index: number) => void;
   onClose: (index: number) => void;
   onContextMenu?: (index: number, e: React.MouseEvent) => void;
+  onStartDrag: (
+    leafId: string,
+    tabIdx: number,
+    tabPath: string,
+    e: React.PointerEvent,
+  ) => void;
 };
 
 export function TabBar({
+  leafId,
   tabs,
   activeIndex,
+  dnd,
   onSelect,
   onClose,
   onContextMenu,
+  onStartDrag,
 }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -42,35 +54,57 @@ export function TabBar({
     }
   };
 
+  const onTabPointerDown = (e: React.PointerEvent, index: number, path: string) => {
+    if (e.button !== 0) return; // only primary
+    // Suppress the browser's default text-selection-on-drag.
+    e.preventDefault();
+    onStartDrag(leafId, index, path, e);
+  };
+
+  const isInsertHere =
+    dnd?.active && dnd.hit?.kind === "tab-bar" && dnd.hit.leafId === leafId;
+  const insertIdx = isInsertHere
+    ? (dnd!.hit as { insertIdx: number }).insertIdx
+    : -1;
+
   return (
-    <div className="tab-bar" ref={barRef}>
+    <div
+      className="tab-bar"
+      ref={barRef}
+      {...{ [DATA_TAB_BAR]: leafId }}
+    >
       {tabs.map((tab, i) => (
-        <div
-          key={tab.path}
-          className={`tab ${i === activeIndex ? "active" : ""}`}
-          onClick={() => onSelect(i)}
-          onMouseDown={(e) => onTabMouseDown(e, i)}
-          onContextMenu={(e) => {
-            if (onContextMenu) {
-              e.preventDefault();
-              onContextMenu(i, e);
-            }
-          }}
-          title={tab.path}
-        >
-          <span className="tab-name">{basename(tab.path)}</span>
-          <button
-            className="tab-close"
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose(i);
+        <div key={tab.path} style={{ display: "contents" }}>
+          {insertIdx === i && <span className="tab-insert-indicator" />}
+          <div
+            className={`tab ${i === activeIndex ? "active" : ""}`}
+            onClick={() => onSelect(i)}
+            onMouseDown={(e) => onTabMouseDown(e, i)}
+            onPointerDown={(e) => onTabPointerDown(e, i, tab.path)}
+            onContextMenu={(e) => {
+              if (onContextMenu) {
+                e.preventDefault();
+                onContextMenu(i, e);
+              }
             }}
-            aria-label="閉じる"
+            title={tab.path}
+            {...{ [DATA_TAB]: i }}
           >
-            <CloseIcon />
-          </button>
+            <span className="tab-name">{basename(tab.path)}</span>
+            <button
+              className="tab-close"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose(i);
+              }}
+              aria-label="閉じる"
+            >
+              <CloseIcon />
+            </button>
+          </div>
         </div>
       ))}
+      {insertIdx === tabs.length && <span className="tab-insert-indicator" />}
     </div>
   );
 }

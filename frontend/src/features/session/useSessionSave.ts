@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { SaveState } from "../../../wailsjs/go/main/App";
 import { useDebounce } from "../../shared/utils/debounce";
-import type { Grid } from "../viewer-grid/useViewerGrid";
+import { serializeLayout, type Layout } from "../viewer-grid/layout";
 
 export type ListPersist = {
   folderPath: string;
@@ -15,16 +15,21 @@ export type ListPersist = {
 
 export type SessionInput = {
   window: { width: number; height: number; x: number; y: number };
-  grid: Grid;
+  layout: Layout;
   topTab: "list" | "viewer";
   list: ListPersist;
 };
 
 const SAVE_DEBOUNCE_MS = 500;
-const STATE_SCHEMA_VERSION = 3;
+const STATE_SCHEMA_VERSION = 4;
 
 export function useSessionSave(input: SessionInput) {
-  const serialized = JSON.stringify(input);
+  const serialized = JSON.stringify({
+    window: input.window,
+    layout: serializeLayout(input.layout),
+    topTab: input.topTab,
+    list: input.list,
+  });
   const debouncedJson = useDebounce(serialized, SAVE_DEBOUNCE_MS);
   const skipFirstRef = useRef(true);
 
@@ -33,7 +38,12 @@ export function useSessionSave(input: SessionInput) {
       skipFirstRef.current = false;
       return;
     }
-    let parsed: SessionInput;
+    let parsed: {
+      window: SessionInput["window"];
+      layout: ReturnType<typeof serializeLayout>;
+      topTab: SessionInput["topTab"];
+      list: ListPersist;
+    };
     try {
       parsed = JSON.parse(debouncedJson);
     } catch {
@@ -46,29 +56,19 @@ export function useSessionSave(input: SessionInput) {
   }, [debouncedJson]);
 }
 
-function buildStateData(input: SessionInput) {
+function buildStateData(input: {
+  window: SessionInput["window"];
+  layout: ReturnType<typeof serializeLayout>;
+  topTab: SessionInput["topTab"];
+  list: ListPersist;
+}) {
   return {
     version: STATE_SCHEMA_VERSION,
     // v1 leftovers; kept in payload to satisfy the Go struct shape but unused.
     rootPath: "",
     leftPaneWidth: 280,
     window: input.window,
-    grid: {
-      rows: input.grid.size.rows,
-      cols: input.grid.size.cols,
-      rowSizes: input.grid.rowSizes,
-      colSizes: input.grid.colSizes,
-      active: input.grid.active,
-      panels: input.grid.panels.map((p) => ({
-        tabs: p.tabs.map((t) => ({
-          path: t.path,
-          zoom: t.zoom,
-          panX: t.panX,
-          panY: t.panY,
-        })),
-        activeIndex: p.activeIndex,
-      })),
-    },
+    layout: input.layout,
     topTab: input.topTab,
     list: {
       folderPath: input.list.folderPath,
