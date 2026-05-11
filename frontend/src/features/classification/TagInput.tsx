@@ -40,6 +40,11 @@ export function TagInput({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // IME 変換中は確定/削除どちらもスキップ。日本語変換のスペース・Enter を
+    // 横取りすると変換確定そのものが効かなくなるため、composition が終わるまで
+    // チップ化ロジックは走らせない。React の SyntheticEvent では isComposing が
+    // nativeEvent 側にしか乗らないことがあるので両方見る。
+    if (e.nativeEvent.isComposing || e.key === "Process") return;
     if (
       e.key === "Enter" ||
       e.key === "," ||
@@ -75,6 +80,11 @@ export function TagInput({
             <button
               type="button"
               className="cls-tag-input-chip-x"
+              // mousedown で preventDefault することで、クリック時に input の
+              // blur が走らないようにする。これがないと draft が残っている状態で
+              // × を押すと onBlur → commit(draft) が発火し、削除と同時に意図せず
+              // タグが追加される。
+              onMouseDown={(e) => e.preventDefault()}
               onClick={(e) => {
                 e.stopPropagation();
                 removeAt(i);
