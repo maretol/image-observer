@@ -2,7 +2,7 @@ import type { classification } from "../../../wailsjs/go/models";
 import { EditIcon } from "../../shared/icons/EditIcon";
 import { ThumbErrorIcon } from "../../shared/icons/ThumbErrorIcon";
 import { extractTags } from "./filters";
-import { folderClass, readableTextColor, tagColor } from "./colors";
+import { readableTextColor, tagBadgeClass, tagColor } from "./colors";
 import { useGridThumbnail } from "./useGridThumbnail";
 
 export type CardProps = {
@@ -39,9 +39,7 @@ export function Card({
   const fullPath = `${folderPath}/${entry.filename}`;
   const { ref, url, state } = useGridThumbnail(fullPath);
 
-  const primaryTag = extractTags(entry.folder)[0] ?? "";
-  const folderBg = entry.folder ? tagColor(primaryTag) : "#444";
-  const folderFg = readableTextColor(folderBg);
+  const tags = extractTags(entry.folder);
 
   return (
     <div className={`cls-card ${selected ? "cls-card-selected" : ""}`}>
@@ -114,12 +112,29 @@ export function Card({
           {entry.filename}
         </div>
         <div className="cls-card-badges">
-          <span
-            className={`cls-badge cls-badge-folder cls-badge-${folderClass(entry.folder)}`}
-            style={{ background: folderBg, color: folderFg }}
-          >
-            {entry.folder || "(未分類)"}
-          </span>
+          {tags.length === 0 ? (
+            <span
+              className="cls-badge cls-badge-tag cls-badge-unclassified"
+              style={{ background: "#444", color: "#ddd" }}
+            >
+              (未分類)
+            </span>
+          ) : (
+            tags.map((t) => {
+              const bg = tagColor(t);
+              const fg = readableTextColor(bg);
+              return (
+                <span
+                  key={t}
+                  className={`cls-badge cls-badge-tag cls-badge-${tagBadgeClass(t)}`}
+                  style={{ background: bg, color: fg }}
+                  title={t}
+                >
+                  {t}
+                </span>
+              );
+            })
+          )}
           {entry.confidence ? (
             <span
               className={`cls-badge cls-badge-conf cls-badge-${entry.confidence}`}

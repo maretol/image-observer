@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PALETTE } from "./defaultPalette";
-import { folderClass, readableTextColor, tagColor } from "./colors";
+import { readableTextColor, tagBadgeClass, tagColor } from "./colors";
 
 describe("tagColor", () => {
   it("returns the unclassified grey for empty tag", () => {
@@ -58,19 +58,18 @@ describe("readableTextColor", () => {
   });
 });
 
-describe("folderClass", () => {
-  it("returns 'unclassified' for empty folder", () => {
-    expect(folderClass("")).toBe("unclassified");
+describe("tagBadgeClass", () => {
+  it("returns 'unclassified' for empty tag", () => {
+    expect(tagBadgeClass("")).toBe("unclassified");
   });
 
-  it("returns the head tag lowercased and stripped", () => {
-    expect(folderClass("iroha")).toBe("iroha");
-    expect(folderClass("Iroha")).toBe("iroha");
-    expect(folderClass("shugo (iroha + kaguya)")).toBe("shugo");
+  it("lowercases and keeps alphanumerics", () => {
+    expect(tagBadgeClass("iroha")).toBe("iroha");
+    expect(tagBadgeClass("Iroha")).toBe("iroha");
   });
 
   it("strips non-alphanumeric characters from the class fragment", () => {
-    expect(folderClass("hello-world")).toBe("helloworld");
-    expect(folderClass("グループ (花)")).toBe("unclassified");
+    expect(tagBadgeClass("hello-world")).toBe("helloworld");
+    expect(tagBadgeClass("グループ")).toBe("unclassified");
   });
 });

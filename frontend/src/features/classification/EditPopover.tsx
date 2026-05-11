@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { classification } from "../../../wailsjs/go/models";
+import { extractTags, serializeTags } from "./filters";
+import { TagInput } from "./TagInput";
 
 export type EditPopoverProps = {
   open: boolean;
@@ -16,9 +18,13 @@ const CONF_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "low", label: "low" },
 ];
 
-// EditPopover edits a single Entry's folder / confidence / note. The save
-// flow does NOT optimistically update the parent state; the parent updates
-// its loadResult only after the backend acknowledges, per spec §5.7.
+// EditPopover edits a single Entry's tags / confidence / note. The save flow
+// does NOT optimistically update the parent state; the parent updates its
+// loadResult only after the backend acknowledges, per spec §5.7.
+//
+// Tags are presented as a chip-style multi-input (#8). The on-disk JSON key
+// stays "folder" (Entry.folder) for backward compatibility — we serialize the
+// chip list to a comma-separated string on save and parse it on load.
 export function EditPopover({
   open,
   entry,
@@ -26,14 +32,14 @@ export function EditPopover({
   onSave,
   onCancel,
 }: EditPopoverProps) {
-  const [folder, setFolder] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [confidence, setConfidence] = useState<string>("");
   const [note, setNote] = useState("");
 
   // Reset local form whenever a new entry comes in.
   useEffect(() => {
     if (entry) {
-      setFolder(entry.folder);
+      setTags(extractTags(entry.folder));
       setConfidence(entry.confidence);
       setNote(entry.note);
     }
@@ -52,7 +58,7 @@ export function EditPopover({
           onSave(
             classification.Entry.createFrom({
               filename: entry.filename,
-              folder,
+              folder: serializeTags(tags),
               confidence,
               note,
             }),
@@ -62,7 +68,7 @@ export function EditPopover({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, entry, folder, confidence, note, onSave, onCancel]);
+  }, [open, entry, tags, confidence, note, onSave, onCancel]);
 
   if (!open || !entry) return null;
 
@@ -70,7 +76,7 @@ export function EditPopover({
     onSave(
       classification.Entry.createFrom({
         filename: entry.filename,
-        folder,
+        folder: serializeTags(tags),
         confidence,
         note,
       }),
@@ -85,20 +91,14 @@ export function EditPopover({
       >
         <div className="cls-edit-title">編集: {entry.filename}</div>
         <div className="cls-edit-row">
-          <label className="cls-edit-label">folder</label>
-          <input
-            type="text"
-            className="cls-edit-input"
-            list="cls-known-tags"
-            value={folder}
-            onChange={(e) => setFolder(e.target.value)}
+          <label className="cls-edit-label">タグ</label>
+          <TagInput
+            tags={tags}
+            knownTags={knownTags}
+            onChange={setTags}
             autoFocus
+            ariaLabel="タグ"
           />
-          <datalist id="cls-known-tags">
-            {knownTags.map((t) => (
-              <option key={t} value={t} />
-            ))}
-          </datalist>
         </div>
         <div className="cls-edit-row">
           <label className="cls-edit-label">confidence</label>
