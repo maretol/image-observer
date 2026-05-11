@@ -171,7 +171,9 @@ export function ImageView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.initialized, tab.imageWidth, tab.imageHeight]);
 
-  // Wheel handler. Attach as non-passive to allow preventDefault.
+  // Wheel handler. Attach as non-passive to allow preventDefault. Reads tab
+  // state via tabRef so the listener is attached once per wheelMode change
+  // rather than rebound on every pan/zoom.
   //
   // wheelMode === "shift-zoom":
   //   - Shift+wheel / Ctrl+wheel → zoom (cursor-anchored, like the default)
@@ -182,7 +184,8 @@ export function ImageView({
     const container = containerRef.current;
     if (!container) return;
     const onWheel = (e: WheelEvent) => {
-      if (!tab.initialized) return;
+      const t = tabRef.current;
+      if (!t.initialized) return;
       const rect = container.getBoundingClientRect();
       const shouldZoom =
         wheelMode === "shift-zoom" ? e.shiftKey || e.ctrlKey || e.metaKey : true;
@@ -195,13 +198,13 @@ export function ImageView({
         const d = e.deltaY !== 0 ? e.deltaY : e.deltaX;
         if (d === 0) return;
         const factor = d < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-        const newZoom = clamp(tab.zoom * factor, MIN_ZOOM, MAX_ZOOM);
-        const px = (cx - tab.panX) / tab.zoom;
-        const py = (cy - tab.panY) / tab.zoom;
+        const newZoom = clamp(t.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+        const px = (cx - t.panX) / t.zoom;
+        const py = (cy - t.panY) / t.zoom;
         let newPanX = cx - px * newZoom;
         let newPanY = cy - py * newZoom;
-        const renderedW = tab.imageWidth * newZoom;
-        const renderedH = tab.imageHeight * newZoom;
+        const renderedW = t.imageWidth * newZoom;
+        const renderedH = t.imageHeight * newZoom;
         ({ panX: newPanX, panY: newPanY } = clampPan(
           newPanX,
           newPanY,
@@ -210,7 +213,7 @@ export function ImageView({
           rect.width,
           rect.height,
         ));
-        onUpdateTabState(tabIndex, {
+        updateRef.current(tabIndexRef.current, {
           zoom: newZoom,
           panX: newPanX,
           panY: newPanY,
@@ -220,10 +223,10 @@ export function ImageView({
       // Pan mode: scroll the image. Subtract delta so deltaY > 0 (wheel down)
       // moves the image upward — same direction sense as a scrollable view.
       e.preventDefault();
-      const renderedW = tab.imageWidth * tab.zoom;
-      const renderedH = tab.imageHeight * tab.zoom;
-      let nx = tab.panX - e.deltaX;
-      let ny = tab.panY - e.deltaY;
+      const renderedW = t.imageWidth * t.zoom;
+      const renderedH = t.imageHeight * t.zoom;
+      let nx = t.panX - e.deltaX;
+      let ny = t.panY - e.deltaY;
       ({ panX: nx, panY: ny } = clampPan(
         nx,
         ny,
@@ -232,23 +235,13 @@ export function ImageView({
         rect.width,
         rect.height,
       ));
-      if (nx !== tab.panX || ny !== tab.panY) {
-        onUpdateTabState(tabIndex, { panX: nx, panY: ny });
+      if (nx !== t.panX || ny !== t.panY) {
+        updateRef.current(tabIndexRef.current, { panX: nx, panY: ny });
       }
     };
     container.addEventListener("wheel", onWheel, { passive: false });
     return () => container.removeEventListener("wheel", onWheel);
-  }, [
-    tab.zoom,
-    tab.panX,
-    tab.panY,
-    tab.imageWidth,
-    tab.imageHeight,
-    tab.initialized,
-    tabIndex,
-    onUpdateTabState,
-    wheelMode,
-  ]);
+  }, [wheelMode]);
 
   // Subscribe to zoom commands when this panel is active. Single-listener
   // bus: when the active panel changes, the new ImageView replaces the
@@ -322,14 +315,17 @@ export function ImageView({
     [tab.panX, tab.panY, tab.initialized]
   );
 
+  // Drag-pan move/up listeners. Refs let us attach once on mount instead of
+  // re-binding on every pan update.
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!dragRef.current || !containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
+      const t = tabRef.current;
       let nx = dragRef.current.startPanX + (e.clientX - dragRef.current.startX);
       let ny = dragRef.current.startPanY + (e.clientY - dragRef.current.startY);
-      const renderedW = tab.imageWidth * tab.zoom;
-      const renderedH = tab.imageHeight * tab.zoom;
+      const renderedW = t.imageWidth * t.zoom;
+      const renderedH = t.imageHeight * t.zoom;
       ({ panX: nx, panY: ny } = clampPan(
         nx,
         ny,
@@ -338,7 +334,7 @@ export function ImageView({
         rect.width,
         rect.height
       ));
-      onUpdateTabState(tabIndex, { panX: nx, panY: ny });
+      updateRef.current(tabIndexRef.current, { panX: nx, panY: ny });
     };
     const onUp = () => {
       if (dragRef.current) {
@@ -353,7 +349,7 @@ export function ImageView({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [tab.zoom, tab.imageWidth, tab.imageHeight, tabIndex, onUpdateTabState]);
+  }, []);
 
   const src = useMemo(
     () =>
