@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { classification } from "../../../wailsjs/go/models";
-import { applyFilter, extractTags, tagSummary } from "./filters";
+import { applyFilter, extractTags, serializeTags, tagSummary } from "./filters";
 
 const entry = (
   filename: string,
@@ -16,7 +16,7 @@ describe("extractTags", () => {
     expect(extractTags("fumei")).toEqual(["fumei"]);
   });
 
-  it("extracts head tag plus inner tags split by '+'", () => {
+  it("extracts head tag plus inner tags split by '+' (legacy parens form)", () => {
     expect(extractTags("shugo (iroha + kaguya)")).toEqual([
       "shugo",
       "iroha",
@@ -30,7 +30,7 @@ describe("extractTags", () => {
     ]);
   });
 
-  it("trims whitespace around tokens", () => {
+  it("trims whitespace around tokens (legacy parens form)", () => {
     expect(extractTags("  shugo  (  iroha  +  kaguya  )  ")).toEqual([
       "shugo",
       "iroha",
@@ -69,6 +69,63 @@ describe("extractTags", () => {
       "月",
     ]);
   });
+
+  // #8: direct multi-tag input. Comma-separated is the new canonical save
+  // format; we also accept the Japanese full-width comma for free.
+  it("accepts comma-separated list form", () => {
+    expect(extractTags("shugo, iroha, kaguya")).toEqual([
+      "shugo",
+      "iroha",
+      "kaguya",
+    ]);
+    expect(extractTags("a,b,c")).toEqual(["a", "b", "c"]);
+  });
+
+  it("accepts full-width comma (、) as a separator", () => {
+    expect(extractTags("shugo、iroha、kaguya")).toEqual([
+      "shugo",
+      "iroha",
+      "kaguya",
+    ]);
+  });
+
+  it("dedups + trims in list form", () => {
+    expect(extractTags("shugo,  iroha , shugo ")).toEqual(["shugo", "iroha"]);
+  });
+
+  it("ignores empty tokens in list form", () => {
+    expect(extractTags(", a,, b,")).toEqual(["a", "b"]);
+  });
+});
+
+describe("serializeTags", () => {
+  it("joins tags with comma+space", () => {
+    expect(serializeTags(["shugo", "iroha"])).toBe("shugo, iroha");
+  });
+
+  it("returns empty string for empty list", () => {
+    expect(serializeTags([])).toBe("");
+  });
+
+  it("trims and drops blanks", () => {
+    expect(serializeTags(["  a  ", "", "b"])).toBe("a, b");
+  });
+
+  it("round-trips with extractTags for the new list form", () => {
+    const tags = ["shugo", "iroha", "kaguya"];
+    expect(extractTags(serializeTags(tags))).toEqual(tags);
+  });
+
+  it("legacy parens form round-trips through extractTags → serializeTags into the canonical list form", () => {
+    // The new canonical save format is comma-separated, so editing a legacy
+    // entry and saving silently migrates the on-disk string. Reading it back
+    // still yields the same tag list, which is the contract that matters.
+    const legacy = "shugo (iroha + kaguya)";
+    const tags = extractTags(legacy);
+    const next = serializeTags(tags);
+    expect(next).toBe("shugo, iroha, kaguya");
+    expect(extractTags(next)).toEqual(tags);
+  });
 });
 
 describe("tagSummary", () => {
@@ -88,6 +145,16 @@ describe("tagSummary", () => {
     const summary = tagSummary([entry("a.jpg", "")]);
     expect(summary.size).toBe(0);
   });
+
+  it("counts tags from the list form too", () => {
+    const summary = tagSummary([
+      entry("a.jpg", "shugo, iroha"),
+      entry("b.jpg", "iroha, kaguya"),
+    ]);
+    expect(summary.get("shugo")).toBe(1);
+    expect(summary.get("iroha")).toBe(2);
+    expect(summary.get("kaguya")).toBe(1);
+  });
 });
 
 describe("applyFilter", () => {
@@ -96,6 +163,7 @@ describe("applyFilter", () => {
     entry("beta.jpg", "shugo (iroha + kaguya)", "mid", "second"),
     entry("gamma.jpg", "kaguya", "low", "third"),
     entry("delta.jpg", "", "", "uncategorized"),
+    entry("epsilon.jpg", "shugo, kaguya", "mid", "list-form"),
   ];
 
   it("returns all entries when filter is empty", () => {
@@ -104,20 +172,20 @@ describe("applyFilter", () => {
       confidence: "all",
       query: "",
     });
-    expect(out).toHaveLength(4);
+    expect(out).toHaveLength(5);
   });
 
-  it("OR-combines selected tags", () => {
+  it("OR-combines selected tags (both forms recognized)", () => {
     const out = applyFilter(entries, {
       tags: ["iroha", "kaguya"],
       confidence: "all",
       query: "",
     });
-    // alpha (iroha), beta (iroha+kaguya), gamma (kaguya)
     expect(out.map((e) => e.filename)).toEqual([
       "alpha.jpg",
       "beta.jpg",
       "gamma.jpg",
+      "epsilon.jpg",
     ]);
   });
 
@@ -160,6 +228,6 @@ describe("applyFilter", () => {
       confidence: "all",
       query: "   ",
     });
-    expect(out).toHaveLength(4);
+    expect(out).toHaveLength(5);
   });
 });

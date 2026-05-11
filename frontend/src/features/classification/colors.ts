@@ -63,11 +63,9 @@ export function readableTextColor(bgHex: string): "#fff" | "#222" {
   return lum > 0.6 ? "#222" : "#fff";
 }
 
-// folderClass returns a CSS-friendly class fragment for a folder string —
-// just the first extracted tag, lowercased and stripped to alphanumerics.
-// Used only for opt-in CSS targeting; tagColor is the canonical source.
-export function folderClass(folder: string): string {
-  const tags = folder.match(/^([^(]+)/);
-  if (!tags) return "unclassified";
-  return tags[1].trim().toLowerCase().replace(/[^a-z0-9]/g, "") || "unclassified";
+// tagBadgeClass returns a CSS-friendly class fragment for a single tag —
+// lowercased and stripped to alphanumerics. Used only for opt-in CSS
+// targeting; tagColor is the canonical source for badge background.
+export function tagBadgeClass(tag: string): string {
+  return tag.trim().toLowerCase().replace(/[^a-z0-9]/g, "") || "unclassified";
 }

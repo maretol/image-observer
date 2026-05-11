@@ -8,27 +8,44 @@ export type ListTabFilter = {
   query: string;
 };
 
-// extractTags parses a folder string of the form "main (sub + sub + ...)"
-// into a deduplicated tag list. Empty input → empty array.
+// extractTags parses the on-disk `folder` field into a deduplicated tag list.
+// Two formats are accepted:
+//   - Legacy parens form: "head (sub + sub + ...)"  (Phase 4 v1.0 〜)
+//   - Direct list form  : "tag1, tag2, tag3"        (Phase 4 v1.5 〜, #8)
+// Comma and Japanese full-width comma "、" both work as separators in the
+// list form. Single-token input is naturally handled by the list form path.
 //
-// Examples (from spec §4.4):
+// Examples:
 //   "iroha"                            → ["iroha"]
 //   "shugo (iroha + kaguya)"           → ["shugo", "iroha", "kaguya"]
-//   "shugo (iroha + kaguya + yachiyo)" → ["shugo", "iroha", "kaguya", "yachiyo"]
-//   "fumei"                            → ["fumei"]
+//   "tag1, tag2"                       → ["tag1", "tag2"]
 //   ""                                 → []
-//   "cat (kuro + shiro)"               → ["cat", "kuro", "shiro"]
 export function extractTags(folder: string): string[] {
   if (!folder) return [];
-  const m = folder.match(/^([^(]+?)\s*(?:\(([^)]*)\))?\s*$/);
-  if (!m) return [];
-  const head = m[1].trim();
-  const inner = (m[2] ?? "")
-    .split("+")
+  const parens = folder.match(/^([^(]+?)\s*\(([^)]*)\)\s*$/);
+  if (parens) {
+    const head = parens[1].trim();
+    const inner = parens[2]
+      .split("+")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return Array.from(new Set([head, ...inner].filter(Boolean)));
+  }
+  const list = folder
+    .split(/[,、]/)
     .map((s) => s.trim())
     .filter(Boolean);
-  const all = [head, ...inner].filter(Boolean);
-  return Array.from(new Set(all));
+  return Array.from(new Set(list));
+}
+
+// serializeTags joins a tag list back into the on-disk `folder` field.
+// Uses comma+space separator (the canonical save format from Phase 4 v1.5).
+// Empty input → "" (so unclassified entries round-trip correctly).
+export function serializeTags(tags: string[]): string {
+  return tags
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .join(", ");
 }
 
 // tagSummary aggregates tag counts across an entry list. Used to render the
