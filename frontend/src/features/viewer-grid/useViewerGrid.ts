@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GetImageInfo } from "../../../wailsjs/go/main/App";
 import { useToastFn } from "../../shared/components/Toast";
 import { logger } from "../../shared/utils/logger";
@@ -289,21 +289,40 @@ export function useViewerGrid(opts?: {
     [preflight, toast],
   );
 
-  return {
-    layout,
-    openInActive,
-    openManyInActive,
-    openManyAsSplit,
-    setActivePanel: setActivePanelCb,
-    setActiveTab,
-    closeTab,
-    updateTabState,
-    moveTab,
-    reorderTab,
-    splitTab,
-    splitFromContext,
-    setSplitRatio: setSplitRatioCb,
-  };
+  // Stabilize the return object so downstream effects (e.g. App.tsx keydown)
+  // only re-run when something actually changed — not on every parent render.
+  return useMemo(
+    () => ({
+      layout,
+      openInActive,
+      openManyInActive,
+      openManyAsSplit,
+      setActivePanel: setActivePanelCb,
+      setActiveTab,
+      closeTab,
+      updateTabState,
+      moveTab,
+      reorderTab,
+      splitTab,
+      splitFromContext,
+      setSplitRatio: setSplitRatioCb,
+    }),
+    [
+      layout,
+      openInActive,
+      openManyInActive,
+      openManyAsSplit,
+      setActivePanelCb,
+      setActiveTab,
+      closeTab,
+      updateTabState,
+      moveTab,
+      reorderTab,
+      splitTab,
+      splitFromContext,
+      setSplitRatioCb,
+    ],
+  );
 }
 
 function basename(p: string): string {

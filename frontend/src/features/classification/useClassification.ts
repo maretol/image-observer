@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CreateEmptyClassification,
   LoadClassification,
@@ -246,9 +246,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     setFilterState((cur) => ({ ...cur, tags: [] }));
   }, []);
 
-  const filteredEntries = loadResult
-    ? applyFilter(loadResult.entries, filter)
-    : [];
+  const filteredEntries = useMemo(
+    () => (loadResult ? applyFilter(loadResult.entries, filter) : []),
+    [loadResult, filter],
+  );
 
   // Selection actions. The displayed selection list is sorted DFS-style by
   // sticking close to the on-disk filename order (= POSIX relative path).
@@ -302,7 +303,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   useEffect(() => {
     selectAnchorRef.current = selectAnchor;
   }, [selectAnchor]);
-  const selectedFilenames = Array.from(selected).sort();
+  const selectedFilenames = useMemo(
+    () => Array.from(selected).sort(),
+    [selected],
+  );
 
   const openEdit = useCallback((filename: string) => {
     setEditing({ open: true, filename });
@@ -423,51 +427,93 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     // Folder selection persists; the user can hit "再読み込み" or pick again.
   }, []);
 
-  const persistableState = {
-    folderPath,
-    filter: {
-      tags: filter.tags,
-      confidence: filter.confidence,
-      query: filter.query,
-    },
-    collapsedGroups: groups.collapsedList,
-  };
+  const persistableState = useMemo(
+    () => ({
+      folderPath,
+      filter: {
+        tags: filter.tags,
+        confidence: filter.confidence,
+        query: filter.query,
+      },
+      collapsedGroups: groups.collapsedList,
+    }),
+    [folderPath, filter, groups.collapsedList],
+  );
 
-  return {
-    folderPath,
-    loadResult,
-    loading,
-    error,
-    filter,
-    filteredEntries,
-    editing,
-    conflict,
-    mergePrompt,
-    collapsedGroups: groups.collapsedList,
-    isCollapsed: groups.isCollapsed,
-    toggleGroup: groups.toggle,
-    expandAllGroups: groups.expandAll,
-    selectedFilenames,
-    isSelected,
-    toggleSelected,
-    extendSelectionTo,
-    clearSelected,
-    openFolder,
-    reload,
-    setFilter,
-    toggleTag,
-    clearTags,
-    openEdit,
-    closeEdit,
-    saveEdit,
-    resolveConflictReload,
-    resolveConflictForce,
-    resolveConflictCancel,
-    resolveMergeMerge,
-    resolveMergeSkip,
-    resolveMergeCancel,
-    persistableState,
-  };
+  // Stabilize the return so consumers (App.tsx, ClassificationView) see a
+  // constant identity unless something inside actually changed.
+  return useMemo(
+    () => ({
+      folderPath,
+      loadResult,
+      loading,
+      error,
+      filter,
+      filteredEntries,
+      editing,
+      conflict,
+      mergePrompt,
+      collapsedGroups: groups.collapsedList,
+      isCollapsed: groups.isCollapsed,
+      toggleGroup: groups.toggle,
+      expandAllGroups: groups.expandAll,
+      selectedFilenames,
+      isSelected,
+      toggleSelected,
+      extendSelectionTo,
+      clearSelected,
+      openFolder,
+      reload,
+      setFilter,
+      toggleTag,
+      clearTags,
+      openEdit,
+      closeEdit,
+      saveEdit,
+      resolveConflictReload,
+      resolveConflictForce,
+      resolveConflictCancel,
+      resolveMergeMerge,
+      resolveMergeSkip,
+      resolveMergeCancel,
+      persistableState,
+    }),
+    [
+      folderPath,
+      loadResult,
+      loading,
+      error,
+      filter,
+      filteredEntries,
+      editing,
+      conflict,
+      mergePrompt,
+      groups.collapsedList,
+      groups.isCollapsed,
+      groups.toggle,
+      groups.expandAll,
+      selectedFilenames,
+      isSelected,
+      toggleSelected,
+      extendSelectionTo,
+      clearSelected,
+      openFolder,
+      reload,
+      setFilter,
+      toggleTag,
+      clearTags,
+      openEdit,
+      closeEdit,
+      saveEdit,
+      resolveConflictReload,
+      resolveConflictForce,
+      resolveConflictCancel,
+      resolveMergeMerge,
+      resolveMergeSkip,
+      resolveMergeCancel,
+      persistableState,
+    ],
+  );
 }
 
 function normalizeConfidence(c: string): Confidence | "all" {
