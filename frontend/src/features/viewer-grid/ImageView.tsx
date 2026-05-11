@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReadImage } from "../../../wailsjs/go/main/App";
 import { imgread } from "../../../wailsjs/go/models";
 import type { Tab } from "./useTabs";
@@ -355,6 +355,17 @@ export function ImageView({
     };
   }, [tab.zoom, tab.imageWidth, tab.imageHeight, tabIndex, onUpdateTabState]);
 
+  const src = useMemo(
+    () =>
+      imageData
+        ? toDataURL(
+            imageData.data as unknown as number[] | string,
+            imageData.mimeType
+          )
+        : "",
+    [imageData]
+  );
+
   if (loadError) {
     return (
       <div className="image-view" ref={containerRef}>
@@ -369,11 +380,6 @@ export function ImageView({
       </div>
     );
   }
-
-  const src = toDataURL(
-    imageData.data as unknown as number[] | string,
-    imageData.mimeType
-  );
 
   return (
     <div className="image-view" ref={containerRef} onMouseDown={onMouseDown}>
