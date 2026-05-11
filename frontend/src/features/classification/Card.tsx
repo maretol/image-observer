@@ -76,7 +76,6 @@ export function Card({
             className="cls-card-thumb-img"
             src={url}
             alt={entry.filename}
-            loading="lazy"
           />
         ) : state === "error" ? (
           <span className="cls-card-thumb-error">

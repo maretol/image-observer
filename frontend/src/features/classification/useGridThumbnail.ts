@@ -14,7 +14,15 @@ const THUMB_MODE = "letterbox";
 // after eviction is cheap.
 const CACHE_MAX = 500;
 
-const cache = createThumbCache(CACHE_MAX);
+// Defer revoke so a freshly-evicted URL whose <img> hasn't finished fetching
+// yet still has time to resolve. With IO triggering the load and no other
+// lazy delay on the <img>, the browser starts fetching immediately on commit;
+// 5s is generous head room before the underlying Blob is dropped.
+const REVOKE_DELAY_MS = 5000;
+
+const cache = createThumbCache(CACHE_MAX, (url) => {
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
+});
 const inflight = new Map<string, Promise<ThumbCacheValue>>();
 
 function load(path: string): Promise<ThumbCacheValue> {
