@@ -1,23 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { GetThumbnail } from "../../../wailsjs/go/main/App";
-import { toDataURL } from "../../shared/utils/base64";
+import { toBytes } from "../../shared/utils/base64";
+import { createThumbCache, type ThumbCacheValue } from "./thumbnailCache";
 
 const THUMB_SIZE = 256;
 const THUMB_MODE = "letterbox";
 
-type CacheValue = {
-  url: string;        // data: URL
-  state: "ok" | "error";
-};
+// Maximum thumbnail entries held in memory. Each entry stores a Blob (raw
+// bytes) referenced by an object URL; with 256px JPG/PNG thumbs that runs
+// ~30-150KB per entry, so 500 caps roughly at 15-75MB. Overflow evicts the
+// least-recently-used entry and revokes its object URL so the underlying
+// Blob can be reclaimed. The Go side keeps its own disk cache so re-fetching
+// after eviction is cheap.
+const CACHE_MAX = 500;
 
-// Module-scoped cache: key is the absolute image path. Held for the lifetime
-// of the renderer process so navigating between folders does not refetch
-// already-seen thumbnails. Bounded loosely by the LRU strategy noted in
-// spec §4.5; v1 has no eviction (Phase H follow-up).
-const cache = new Map<string, CacheValue>();
-const inflight = new Map<string, Promise<CacheValue>>();
+const cache = createThumbCache(CACHE_MAX);
+const inflight = new Map<string, Promise<ThumbCacheValue>>();
 
-function load(path: string): Promise<CacheValue> {
+function load(path: string): Promise<ThumbCacheValue> {
   const cached = cache.get(path);
   if (cached) return Promise.resolve(cached);
   const existing = inflight.get(path);
@@ -26,12 +26,14 @@ function load(path: string): Promise<CacheValue> {
   const p = (async () => {
     try {
       const res = await GetThumbnail(path, THUMB_SIZE, THUMB_MODE);
-      const url = toDataURL(res.data as unknown as string, res.mimeType);
-      const value: CacheValue = { url, state: "ok" };
+      const bytes = toBytes(res.data as unknown as string | number[]);
+      const blob = new Blob([bytes], { type: res.mimeType });
+      const url = URL.createObjectURL(blob);
+      const value: ThumbCacheValue = { url, state: "ok" };
       cache.set(path, value);
       return value;
     } catch {
-      const value: CacheValue = { url: "", state: "error" };
+      const value: ThumbCacheValue = { url: "", state: "error" };
       cache.set(path, value);
       return value;
     } finally {
@@ -42,7 +44,7 @@ function load(path: string): Promise<CacheValue> {
   return p;
 }
 
-// useGridThumbnail returns the thumbnail data URL for a path once an
+// useGridThumbnail returns the thumbnail object URL for a path once an
 // IntersectionObserver reports the element as visible.
 //
 // Intended use: render the wrapper div with the returned ref, and an <img>
