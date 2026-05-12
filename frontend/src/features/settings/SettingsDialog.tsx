@@ -57,11 +57,12 @@ export function SettingsDialog({
   onClose,
 }: SettingsDialogProps) {
   // Esc to close — registered only when open to avoid stealing keys otherwise.
+  // App.tsx's global keydown listener already short-circuits on `settingsOpen`,
+  // so no extra propagation guard is needed here.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        e.stopPropagation();
         onClose();
       }
     };

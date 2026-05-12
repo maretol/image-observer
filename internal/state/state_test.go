@@ -21,9 +21,6 @@ func TestLoadState_Missing_ReturnsDefaults(t *testing.T) {
 	if s.Version != StateSchemaVersion {
 		t.Errorf("version: got %d, want %d", s.Version, StateSchemaVersion)
 	}
-	if s.LeftPaneWidth != 280 {
-		t.Errorf("leftPaneWidth: got %d", s.LeftPaneWidth)
-	}
 	if s.Layout.Root.Kind != "leaf" {
 		t.Errorf("default root kind: got %q, want leaf", s.Layout.Root.Kind)
 	}
@@ -35,8 +32,6 @@ func TestLoadState_Missing_ReturnsDefaults(t *testing.T) {
 func TestSaveLoadState_RoundTripLeafRoot(t *testing.T) {
 	setStateFile(t)
 	in := DefaultData()
-	in.RootPath = "/some/path"
-	in.LeftPaneWidth = 350
 	in.Window = WindowState{Width: 1600, Height: 900, X: 100, Y: 50}
 	in.Layout = LayoutState{
 		Root: LayoutNodeState{
@@ -54,12 +49,6 @@ func TestSaveLoadState_RoundTripLeafRoot(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 	out := Load()
-	if out.RootPath != in.RootPath {
-		t.Errorf("RootPath mismatch")
-	}
-	if out.LeftPaneWidth != 350 {
-		t.Errorf("LeftPaneWidth mismatch")
-	}
 	if out.Window.Width != 1600 || out.Window.Height != 900 {
 		t.Errorf("Window size mismatch")
 	}
@@ -128,7 +117,7 @@ func TestLoadState_CorruptJSON_FallsBackToDefault(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	s := Load()
-	if s.Version != StateSchemaVersion || s.LeftPaneWidth != 280 {
+	if s.Version != StateSchemaVersion || s.Layout.Root.Kind != "leaf" {
 		t.Errorf("expected defaults on corrupt JSON, got %+v", s)
 	}
 }
@@ -140,7 +129,7 @@ func TestLoadState_VersionMismatch_FallsBackToDefault(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	s := Load()
-	if s.Version != StateSchemaVersion || s.LeftPaneWidth != 280 {
+	if s.Version != StateSchemaVersion || s.Layout.Root.Kind != "leaf" {
 		t.Errorf("expected defaults on version mismatch, got %+v", s)
 	}
 }
@@ -315,15 +304,38 @@ func TestLoadState_V1FallsBackToDefault(t *testing.T) {
 	if s.Version != StateSchemaVersion {
 		t.Errorf("expected schema v%d, got %d", StateSchemaVersion, s.Version)
 	}
-	if s.RootPath != "" {
-		t.Errorf("v1 rootPath should not survive fallback, got %q", s.RootPath)
+	if s.Layout.Root.Kind != "leaf" {
+		t.Errorf("v1 fallback should produce default leaf root, got kind %q", s.Layout.Root.Kind)
 	}
 }
 
-func TestDefaultData_V4Fields(t *testing.T) {
+func TestLoadState_V4FallsBackToDefault(t *testing.T) {
+	// v4 had RootPath / LeftPaneWidth fields. v5 dropped them, so v4 payloads
+	// must fall back to defaults.
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	v4 := []byte(`{
+		"version": 4,
+		"rootPath": "/old",
+		"leftPaneWidth": 300,
+		"window": {"width":1024,"height":768,"x":-1,"y":-1},
+		"layout": {"root":{"kind":"leaf","id":"L","tabs":[],"activeIndex":-1},"activeId":"L"},
+		"topTab": "list",
+		"list": {"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}
+	}`)
+	if err := os.WriteFile(p, v4, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.Version != StateSchemaVersion {
+		t.Errorf("expected schema v%d, got %d", StateSchemaVersion, s.Version)
+	}
+}
+
+func TestDefaultData_V5Fields(t *testing.T) {
 	d := DefaultData()
-	if d.Version != 4 {
-		t.Errorf("Version = %d, want 4", d.Version)
+	if d.Version != 5 {
+		t.Errorf("Version = %d, want 5", d.Version)
 	}
 	if d.TopTab != "list" {
 		t.Errorf("TopTab = %q, want list", d.TopTab)

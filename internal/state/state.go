@@ -9,21 +9,17 @@ import (
 	"slices"
 )
 
-// StateSchemaVersion is bumped to 4 in Phase 5 (viewer flex-layout). The
-// fixed rows×cols `Grid` is replaced by a BSP tree `Layout`. Earlier
-// versions fall back to DefaultData() — no migration is performed.
-const StateSchemaVersion = 4
+// StateSchemaVersion is bumped to 5: drops the v1 leftovers (rootPath /
+// leftPaneWidth) that v2+ frontends never read. Earlier versions fall back to
+// DefaultData() — no migration is performed.
+const StateSchemaVersion = 5
 
 type StateData struct {
-	Version int `json:"version"`
-	// RootPath / LeftPaneWidth are v1 leftovers kept for JSON-compatibility.
-	// v2+ frontends do not read them (left pane was removed in Phase 4).
-	RootPath      string       `json:"rootPath"`
-	LeftPaneWidth int          `json:"leftPaneWidth"`
-	Window        WindowState  `json:"window"`
-	Layout        LayoutState  `json:"layout"`
-	TopTab        string       `json:"topTab"` // "list" | "viewer"
-	List          ListTabState `json:"list"`
+	Version int          `json:"version"`
+	Window  WindowState  `json:"window"`
+	Layout  LayoutState  `json:"layout"`
+	TopTab  string       `json:"topTab"` // "list" | "viewer"
+	List    ListTabState `json:"list"`
 }
 
 // ListTabState holds per-folder UI state for the list (classification) tab.
@@ -108,13 +104,11 @@ func stateFilePath() (string, error) {
 // or invalid. Exposed so callers (main.go, tests) can construct fresh state.
 func DefaultData() StateData {
 	return StateData{
-		Version:       StateSchemaVersion,
-		RootPath:      "",
-		LeftPaneWidth: 280,
-		Window:        WindowState{Width: 1024, Height: 768, X: -1, Y: -1},
-		Layout:        defaultLayoutState(),
-		TopTab:        "list",
-		List:          defaultListTabState(),
+		Version: StateSchemaVersion,
+		Window:  WindowState{Width: 1024, Height: 768, X: -1, Y: -1},
+		Layout:  defaultLayoutState(),
+		TopTab:  "list",
+		List:    defaultListTabState(),
 	}
 }
 
@@ -176,9 +170,6 @@ func Load() StateData {
 func validateState(s *StateData) error {
 	if err := validateLayoutTree(&s.Layout); err != nil {
 		return err
-	}
-	if s.LeftPaneWidth < 100 {
-		s.LeftPaneWidth = 280
 	}
 	if s.Window.Width < 200 {
 		s.Window.Width = 1024

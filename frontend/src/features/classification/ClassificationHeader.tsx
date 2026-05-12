@@ -1,9 +1,10 @@
+import type { classification } from "../../../wailsjs/go/models";
 import { ReloadIcon } from "../../shared/icons/ReloadIcon";
 
 export type ClassificationHeaderProps = {
   folderPath: string;
-  totalCount: number;
-  filteredCount: number;
+  allEntries: classification.Entry[];
+  filteredEntries: classification.Entry[];
   loading: boolean;
   onOpenFolder: () => void;
   onReload: () => void;
@@ -11,8 +12,8 @@ export type ClassificationHeaderProps = {
 
 export function ClassificationHeader({
   folderPath,
-  totalCount,
-  filteredCount,
+  allEntries,
+  filteredEntries,
   loading,
   onOpenFolder,
   onReload,
@@ -31,7 +32,7 @@ export function ClassificationHeader({
         {folderPath || "(未選択)"}
       </div>
       <div className="cls-header-count">
-        {folderPath ? `${filteredCount} / ${totalCount}` : ""}
+        {folderPath ? `${filteredEntries.length} / ${allEntries.length}` : ""}
       </div>
       <button
         type="button"

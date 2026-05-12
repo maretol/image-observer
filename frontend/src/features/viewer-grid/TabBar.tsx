@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { CloseIcon } from "../../shared/icons/CloseIcon";
+import { basename } from "../../shared/utils/path";
 import type { Tab } from "./useTabs";
 import { DATA_TAB, DATA_TAB_BAR, type DnDState } from "./useDnD";
 
@@ -74,7 +75,7 @@ export function TabBar({
       {...{ [DATA_TAB_BAR]: leafId }}
     >
       {tabs.map((tab, i) => (
-        <div key={tab.path} style={{ display: "contents" }}>
+        <Fragment key={tab.path}>
           {insertIdx === i && <span className="tab-insert-indicator" />}
           <div
             className={`tab ${i === activeIndex ? "active" : ""}`}
@@ -102,15 +103,9 @@ export function TabBar({
               <CloseIcon />
             </button>
           </div>
-        </div>
+        </Fragment>
       ))}
       {insertIdx === tabs.length && <span className="tab-insert-indicator" />}
     </div>
   );
-}
-
-function basename(p: string): string {
-  const norm = p.replace(/[\\/]+$/, "");
-  const idx = Math.max(norm.lastIndexOf("/"), norm.lastIndexOf("\\"));
-  return idx >= 0 ? norm.slice(idx + 1) : norm;
 }

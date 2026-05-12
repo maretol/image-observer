@@ -44,6 +44,7 @@ export function ClassificationView({
     isCollapsed,
     toggleGroup,
     expandAllGroups,
+    collapseAllGroups,
     collapsedGroups,
     selectedFilenames,
     isSelected,
@@ -79,13 +80,17 @@ export function ClassificationView({
 
   // Total counts per group (before filtering) — needed so collapsed group
   // headers can show e.g. "5 / 12" even when filter has hidden some entries.
-  const totalCountByGroup = useMemo(() => {
-    const out = new Map<string, number>();
+  // allGroupKeys derives the full ordered list of directory keys from the
+  // unfiltered entries, used by the "すべて折りたたむ" button.
+  const { totalCountByGroup, allGroupKeys } = useMemo(() => {
+    const counts = new Map<string, number>();
+    const keys: string[] = [];
     for (const e of allEntries) {
       const k = groupKeyOf(e.filename);
-      out.set(k, (out.get(k) ?? 0) + 1);
+      if (!counts.has(k)) keys.push(k);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
     }
-    return out;
+    return { totalCountByGroup: counts, allGroupKeys: keys };
   }, [allEntries]);
 
   const filteredGroups = useMemo(
@@ -128,8 +133,8 @@ export function ClassificationView({
     <div className="cls-view">
       <ClassificationHeader
         folderPath={folderPath}
-        totalCount={allEntries.length}
-        filteredCount={filteredEntries.length}
+        allEntries={allEntries}
+        filteredEntries={filteredEntries}
         loading={loading}
         onOpenFolder={openFolder}
         onReload={reload}
@@ -157,6 +162,17 @@ export function ClassificationView({
             title="折りたたまれているグループをすべて展開"
           >
             すべて展開
+          </button>
+        ) : null}
+        {allGroupKeys.length > collapsedGroups.length &&
+        allGroupKeys.length > 0 ? (
+          <button
+            type="button"
+            className="cls-expand-all-btn"
+            onClick={() => collapseAllGroups(allGroupKeys)}
+            title="すべてのグループを折りたたむ"
+          >
+            すべて折りたたむ
           </button>
         ) : null}
       </div>

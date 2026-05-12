@@ -5,6 +5,7 @@ import {
   UpdateSettings,
 } from "../../../wailsjs/go/main/App";
 import { settings } from "../../../wailsjs/go/models";
+import { errorMessage } from "../../shared/utils/error";
 import { logger } from "../../shared/utils/logger";
 
 export type Settings = settings.SettingsData;
@@ -80,10 +81,4 @@ export function useSettings(): UseSettingsReturn {
   }, []);
 
   return { data, loading, error, update, reset };
-}
-
-function errorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === "string") return e;
-  return String(e);
 }

@@ -10,6 +10,7 @@ import {
 import { classification } from "../../../wailsjs/go/models";
 import { state as wstate } from "../../../wailsjs/go/models";
 import { useToastFn } from "../../shared/components/Toast";
+import { errorMessage } from "../../shared/utils/error";
 import { logger } from "../../shared/utils/logger";
 import type { ConfirmFn } from "../viewer-grid/useViewerGrid";
 import { applyFilter, type Confidence, type ListTabFilter } from "./filters";
@@ -49,6 +50,7 @@ export type UseClassificationReturn = {
   isCollapsed: (key: string) => boolean;
   toggleGroup: (key: string) => void;
   expandAllGroups: () => void;
+  collapseAllGroups: (keys: string[]) => void;
   // Multi-select state. Selection is keyed by filename (POSIX-relative inside
   // the current folder) and is cleared automatically when folderPath changes.
   // It survives filter / collapse changes so the user can refine and then
@@ -188,8 +190,13 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // Auto-load on mount if a folderPath was restored from session. Also runs
   // the same merge / create-empty decision tree so the user does not need to
   // re-pick the folder to see the migration prompt after an app restart.
+  // The ref guard prevents StrictMode's intentional double-mount in dev from
+  // queueing the merge confirm() prompt twice.
+  const autoLoadStartedRef = useRef(false);
   useEffect(() => {
     if (!initFolderPath) return;
+    if (autoLoadStartedRef.current) return;
+    autoLoadStartedRef.current = true;
     let cancelled = false;
     (async () => {
       const res = await loadInternal(initFolderPath);
@@ -251,6 +258,13 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     [loadResult, filter],
   );
 
+  // Mirror anchor into a ref so extendSelectionTo's identity stays stable.
+  // Declared above the callbacks that read it to avoid a TDZ-shaped pitfall.
+  const selectAnchorRef = useRef<string | null>(selectAnchor);
+  useEffect(() => {
+    selectAnchorRef.current = selectAnchor;
+  }, [selectAnchor]);
+
   // Selection actions. The displayed selection list is sorted DFS-style by
   // sticking close to the on-disk filename order (= POSIX relative path).
   const isSelected = useCallback(
@@ -298,11 +312,6 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     setSelected((cur) => (cur.size === 0 ? cur : new Set()));
     setSelectAnchor(null);
   }, []);
-  // Mirror anchor into a ref so extendSelectionTo's identity stays stable.
-  const selectAnchorRef = useRef<string | null>(selectAnchor);
-  useEffect(() => {
-    selectAnchorRef.current = selectAnchor;
-  }, [selectAnchor]);
   const selectedFilenames = useMemo(
     () => Array.from(selected).sort(),
     [selected],
@@ -457,6 +466,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       isCollapsed: groups.isCollapsed,
       toggleGroup: groups.toggle,
       expandAllGroups: groups.expandAll,
+      collapseAllGroups: groups.collapseAll,
       selectedFilenames,
       isSelected,
       toggleSelected,
@@ -492,6 +502,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       groups.isCollapsed,
       groups.toggle,
       groups.expandAll,
+      groups.collapseAll,
       selectedFilenames,
       isSelected,
       toggleSelected,
@@ -527,10 +538,4 @@ function normalizeConfidence(c: string): Confidence | "all" {
     default:
       return "all";
   }
-}
-
-function errorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === "string") return e;
-  return String(e);
 }
