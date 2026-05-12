@@ -509,48 +509,61 @@ function NumberInput({
 
 // --- tag colors view (read-only) -------------------------------------------
 
-// TagColorsView is read-only in v1: the bundled defaults are shown alongside
-// any custom entries from settings.json. The intent is "see what's active
-// without cracking the JSON open"; full table editing is a follow-up issue.
-// Editing today happens by editing settings.json directly and restarting the
-// app (useSettings calls GetSettings only on mount).
+// TagColorsView is read-only in v1. It always displays the effective merged
+// palette (DEFAULT_PALETTE + settings.tagColors overrides) via
+// getKnownTagColors(), so "what's shown here" matches "what tagColor()
+// actually renders" — including for tags the user has not overridden. Each
+// row carries an "上書き" pill when its color came from settings.json so the
+// user can see which entries are active overrides versus seed defaults.
 //
-// `colors` is the raw settings payload. When it's empty, colors.ts's
-// setKnownTagColors falls back to DEFAULT_PALETTE, so we display the live
-// palette via getKnownTagColors() to keep "what's shown here" in sync with
-// "what tagColor() actually renders" — anything else would mislead the user
-// into thinking no badge colors are active.
+// `colors` is the raw settings payload, used here only to decide which rows
+// to badge as overrides and to show the "no overrides yet" hint.
+//
+// Editing today happens by editing settings.json directly and restarting the
+// app (useSettings calls GetSettings only on mount). Full in-app editing is
+// a follow-up issue.
 function TagColorsView({ colors }: { colors: Record<string, string> }) {
-  const isCustom = Object.keys(colors).length > 0;
-  const effective = isCustom ? colors : getKnownTagColors();
+  const hasOverrides = Object.keys(colors).length > 0;
+  const effective = getKnownTagColors();
   const entries = Object.entries(effective).sort(([a], [b]) =>
     a.localeCompare(b),
   );
   return (
     <div className="settings-tag-colors">
-      {!isCustom ? (
-        <div className="settings-field-hint">
-          <code>settings.json</code> に <code>tagColors</code> 指定がないため既定パレットを使用中。
-        </div>
-      ) : null}
+      <div className="settings-field-hint">
+        {hasOverrides
+          ? `現在のパレット (${Object.keys(colors).length} 件の上書きを適用済み)。`
+          : "settings.json に tagColors 指定がないため既定パレットを使用中。"}
+      </div>
       {entries.length > 0 ? (
         <ul className="settings-tag-colors-list">
-          {entries.map(([name, hex]) => (
-            <li key={name} className="settings-tag-colors-item">
-              <span
-                className="settings-tag-swatch"
-                style={{ backgroundColor: hex }}
-                title={hex}
-              />
-              <span className="settings-tag-name">{name}</span>
-              <code className="settings-tag-hex">{hex}</code>
-            </li>
-          ))}
+          {entries.map(([name, hex]) => {
+            const isOverride = Object.prototype.hasOwnProperty.call(colors, name);
+            return (
+              <li key={name} className="settings-tag-colors-item">
+                <span
+                  className="settings-tag-swatch"
+                  style={{ backgroundColor: hex }}
+                  title={hex}
+                />
+                <span className="settings-tag-name">{name}</span>
+                <code className="settings-tag-hex">{hex}</code>
+                {isOverride ? (
+                  <span
+                    className="settings-tag-override-pill"
+                    title="settings.json の tagColors で上書きされています"
+                  >
+                    上書き
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
       <div className="settings-field-hint">
         編集は <code>settings.json</code> の <code>tagColors</code> を直接書き換えてください
-        (アプリ再起動後に反映 / 不正な値は読み込み時に除外されます)。「既定値に戻す」で初期パレットに戻ります。
+        (アプリ再起動後に反映 / 不正な値は読み込み時に除外されます)。指定したタグだけが既定パレットに重ね書きされ、未指定のタグは既定色のまま残ります。「既定値に戻す」で全上書きをクリアします。
       </div>
     </div>
   );

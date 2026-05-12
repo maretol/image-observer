@@ -98,6 +98,16 @@ describe("setKnownTagColors", () => {
     expect(after).toBe(before);
     expect(after).toMatch(/^#[0-9a-f]{6}$/i);
   });
+
+  it("merges overrides with DEFAULT_PALETTE (un-overridden defaults survive)", () => {
+    // Specifying only one tag must NOT push every other known tag onto the
+    // HASH_PALETTE fallback — that would break long-standing badge colors
+    // for users who only want to tweak one entry.
+    setKnownTagColors({ iroha: "#abcdef" });
+    expect(tagColor("iroha")).toBe("#abcdef"); // override wins
+    expect(tagColor("kaguya")).toBe(DEFAULT_PALETTE.kaguya); // default preserved
+    expect(tagColor("yachiyo")).toBe(DEFAULT_PALETTE.yachiyo);
+  });
 });
 
 describe("getKnownTagColors", () => {

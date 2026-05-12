@@ -1,20 +1,28 @@
 import { DEFAULT_PALETTE } from "./defaultPalette";
 
 // activeTagColors holds the live tag→color map. Initial value is the seeded
-// DEFAULT_PALETTE; App.tsx overwrites this from settings.tagColors as soon as
-// settings finish loading (so the first paint may show a card-edit badge in
-// the seed color and then snap to the user's preference — fine for v1).
+// DEFAULT_PALETTE; App.tsx merges in settings.tagColors as soon as settings
+// finish loading (so the first paint may show a card-edit badge in the seed
+// color and then snap to the user's preference — fine for v1).
 //
 // Kept as a module-level mutable map (vs a React context) because tagColor()
 // is called from many leaf components and adding a context provider only to
 // thread one map through would be more noise than insight.
 let activeTagColors: Record<string, string> = { ...DEFAULT_PALETTE };
 
-// setKnownTagColors replaces the active mapping. Pass an empty object to
-// reset to the bundled default. Settings round-trip is the only intended
-// caller.
+// setKnownTagColors merges the given overrides onto the bundled defaults
+// (override semantics, matching the Go-side `tagColors` field doc which says
+// "tag-name → CSS color override"). A user that specifies only `{"foo":
+// "#ff0000"}` keeps every other known tag's seed color — the alternative
+// (full replace) would silently degrade well-known tags to the HASH_PALETTE
+// fallback, which is almost never what the user wants.
+//
+// Pass null / undefined / empty {} to clear all overrides and revert to the
+// bundled default. Settings round-trip is the only intended caller.
 export function setKnownTagColors(map: Record<string, string> | null | undefined) {
-  activeTagColors = { ...(map && Object.keys(map).length > 0 ? map : DEFAULT_PALETTE) };
+  activeTagColors = map && Object.keys(map).length > 0
+    ? { ...DEFAULT_PALETTE, ...map }
+    : { ...DEFAULT_PALETTE };
 }
 
 // getKnownTagColors returns a snapshot of the active mapping. A shallow copy

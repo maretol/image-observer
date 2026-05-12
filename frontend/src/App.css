@@ -1625,6 +1625,16 @@ html, body, #root {
   color: #888;
 }
 
+.settings-tag-override-pill {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #4a2a16;
+  color: #f0a363;
+  border: 1px solid #6b3a20;
+  white-space: nowrap;
+}
+
 .settings-segment {
   display: flex;
   flex-direction: row;
