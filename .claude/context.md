@@ -59,10 +59,10 @@ Wails v2 (Go バックエンド + React/TS フロント) で実装する **Windo
    - **ImageView 改修**: `isActivePanel` prop を Panel から渡し、active 時のみ zoomCommandBus に listener を登録。`tabRef` / `updateRef` で listener が render 毎に再生成されないよう refs 経由で参照。
    - **設定ダイアログ**: キーバインド一覧を read-only テーブル (`<kbd>` タグ) で表示。Phase H で再バインド機構を追加するときの土台に。
 - **#13 + #7 + #10/#12 (実装完了)**: settings 周りの再編 + トップタブ切替ショートカット + UI スケール。
-   - **#13 設定ダイアログ 2 階層化**: ヘッダに「設定 / ショートカット」のカテゴリタブ (`Category = "settings" | "shortcuts"`) を追加。`shortcuts` カテゴリは side nav を出さずに `KeybindingsTable` をフル幅で描画 (`.settings-content-full`)。`SECTIONS` から `keybindings` を除外し、代わりに新規 `appearance` を追加。category-bar は `aria-pressed` ベースの toggle button (WAI-ARIA tabs パターンは未実装なので tablist role を主張しない)。
+   - **#13 設定ダイアログ 2 階層化**: ヘッダに「設定 / ショートカット」のカテゴリタブ (`Category = "settings" | "shortcuts"`) を追加。`shortcuts` カテゴリは side nav の DOM を出さない分岐になっていて、コンテンツペインは既存 `.settings-content` の `flex: 1` で自然にフル幅になる (専用クラスは設けない)。`SECTIONS` から `keybindings` を除外し、代わりに新規 `appearance` を追加。category-bar は `aria-pressed` ベースの toggle button (WAI-ARIA tabs パターンは未実装なので tablist role を主張しない)。
    - **#7 トップタブ切替ショートカット**: `App.tsx` のグローバル keydown に `Ctrl+Shift+1` → 一覧 / `Ctrl+Shift+2` → ビューアを追加。`viewer-only` ガードより前に判定するため topTab に関係なく動作。マッチは `e.code === "Digit1/2"` のみ (`e.key` は Shift で shifted character になるため不可)。`KEYBINDINGS` テーブルに同 SC を追加 (scope "全体")。
    - **#10/#12 UI スケール**: `internal/settings.SettingsData` に `UIScalePercent` を additive 追加 (schema v1 のまま、per-field fallback で旧 settings.json も無痛 upgrade。具体的なレンジ / デフォルトは `internal/settings/settings.go` の定数を参照)。フロントは `.app-toplevel` に `style={{ zoom: percent/100 }}` を inline で適用 (`CSSProperties` 経由)。`zoom` は非標準だが WebView2 / WebKitGTK 双方サポート。`zoom` は子孫全てに cascade するため画像も均一にスケールする (chrome 限定スケールが必要になったら ViewerGrid を外す)。設定 UI は新規「外観」セクションに segment タイル (具体的なタイル値は `SettingsDialog.tsx` の `UI_SCALES` を参照)、settings.json で範囲内の任意 percent を直書きすれば segment は un-highlighted で hint に現在値を表示。
-   - **設定ダイアログ CSS**: `.settings-category-bar` / `.settings-category-tab` / `.settings-category-tab-active` / `.settings-content-full` を追加。`.settings-header` に gap を入れてタイトル / カテゴリタブ / 閉じるの 3 要素を整列。
+   - **設定ダイアログ CSS**: `.settings-category-bar` / `.settings-category-tab` / `.settings-category-tab-active` を追加。`.settings-header` に gap を入れてタイトル / カテゴリタブ / 閉じるの 3 要素を整列。
    - **Go テスト**: settings_test の各経路 (round-trip / reject / per-field fallback / new field missing) に `UIScalePercent` 検証を追加。
 
 ## 3. 重要ドキュメント (このディレクトリの兄弟ファイル)
