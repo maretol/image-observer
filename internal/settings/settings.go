@@ -80,11 +80,16 @@ var validThumbnailModes = map[string]struct{}{
 	ThumbnailModeCrop:      {},
 }
 
-// DefaultTagColors is the seed palette used when settings.json has no
+// defaultTagColors is the seed palette used when settings.json has no
 // `tagColors` field. The frontend ships an identical literal so that
 // uninstalled / clean-config users see consistent badge colors before
 // touching settings. Lowercase hex with leading "#".
-var DefaultTagColors = map[string]string{
+//
+// Unexported because Go maps are reference types — exporting would let any
+// importer mutate the seed palette at runtime and silently corrupt every
+// future DefaultSettings() call. Same-package callers (DefaultSettings /
+// applyFieldDefaults) clone via cloneTagColors before exposing.
+var defaultTagColors = map[string]string{
 	"iroha":   "#1976d2",
 	"kaguya":  "#f9a825",
 	"yachiyo": "#c2185b",
@@ -143,7 +148,7 @@ func DefaultSettings() SettingsData {
 		ThumbnailSize:        defaultThumbnailSize,
 		ThumbnailMode:        ThumbnailModeLetterbox,
 		ThumbnailWorkerCount: 0, // auto
-		TagColors:            cloneTagColors(DefaultTagColors),
+		TagColors:            cloneTagColors(defaultTagColors),
 	}
 }
 
@@ -260,8 +265,13 @@ func applyFieldDefaults(s *SettingsData) {
 	if s.ThumbnailWorkerCount < 0 || s.ThumbnailWorkerCount > maxThumbnailWorkerCount {
 		s.ThumbnailWorkerCount = 0
 	}
+	// nil (field absent in JSON, e.g. upgrading from a build before this
+	// field existed) seeds the defaults so the user starts with badge colors.
+	// An explicit empty `{}` is preserved verbatim — that is the user's stored
+	// "I want no overrides" value, and the frontend's setKnownTagColors falls
+	// back to its own DEFAULT_PALETTE for the live render either way.
 	if s.TagColors == nil {
-		s.TagColors = cloneTagColors(DefaultTagColors)
+		s.TagColors = cloneTagColors(defaultTagColors)
 	} else {
 		// Drop entries with malformed colors but preserve the rest. This
 		// matches the per-field-fallback intent of the rest of Load.

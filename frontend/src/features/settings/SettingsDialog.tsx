@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getKnownTagColors } from "../classification/colors";
 import type { Settings } from "./useSettings";
 
@@ -455,12 +455,22 @@ function NumberInput({
   onChange: (n: number) => void;
 }) {
   const [text, setText] = useState(String(value));
+  // Esc sets this immediately before triggering blur so the resulting onBlur
+  // skips its commit. Without it, setText() is asynchronous (React schedules
+  // the re-render) but blur() fires synchronously, so onBlur reads the
+  // unreverted DOM value and commits the user's edit instead of reverting.
+  const skipNextBlurRef = useRef(false);
   // Sync external value changes (e.g. "既定値に戻す") into the local buffer.
   useEffect(() => {
     setText(String(value));
   }, [value]);
 
   const commit = (raw: string) => {
+    if (skipNextBlurRef.current) {
+      skipNextBlurRef.current = false;
+      setText(String(value));
+      return;
+    }
     const n = Number(raw);
     if (!Number.isFinite(n) || raw.trim() === "") {
       // Bad / empty — revert the visible text but leave value untouched.
@@ -487,8 +497,8 @@ function NumberInput({
           if (e.key === "Enter") {
             (e.target as HTMLInputElement).blur(); // triggers commit via onBlur
           } else if (e.key === "Escape") {
-            setText(String(value)); // revert without committing
-            (e.target as HTMLInputElement).blur();
+            skipNextBlurRef.current = true;
+            (e.target as HTMLInputElement).blur(); // commit() sees the flag and reverts
           }
         }}
       />

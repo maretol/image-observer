@@ -43,9 +43,9 @@ func TestLoad_Missing_ReturnsDefaults(t *testing.T) {
 		t.Errorf("ThumbnailWorkerCount default: got %d, want 0 (auto)", s.ThumbnailWorkerCount)
 	}
 	if len(s.TagColors) == 0 {
-		t.Errorf("TagColors default should be a non-empty map (DefaultTagColors)")
+		t.Errorf("TagColors default should be a non-empty map (defaultTagColors)")
 	}
-	for k, v := range DefaultTagColors {
+	for k, v := range defaultTagColors {
 		if s.TagColors[k] != v {
 			t.Errorf("TagColors[%q] = %q, want %q", k, s.TagColors[k], v)
 		}
@@ -258,7 +258,7 @@ func TestLoad_NewFieldsMissing_GetDefaults(t *testing.T) {
 		t.Errorf("missing ThumbnailMode should default, got %q", s.ThumbnailMode)
 	}
 	if len(s.TagColors) == 0 {
-		t.Errorf("missing TagColors should default to DefaultTagColors")
+		t.Errorf("missing TagColors should default to defaultTagColors")
 	}
 }
 
