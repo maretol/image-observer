@@ -1,9 +1,37 @@
 import { DEFAULT_PALETTE } from "./defaultPalette";
 
-// KNOWN_TAG_COLORS is the active mapping consulted first. Phase H plans to
-// replace this with a settings-driven map; we keep the indirection so the
-// rest of the code does not need to change later.
-export const KNOWN_TAG_COLORS: Readonly<Record<string, string>> = DEFAULT_PALETTE;
+// activeTagColors holds the live tag→color map. Initial value is the seeded
+// DEFAULT_PALETTE; App.tsx merges in settings.tagColors as soon as settings
+// finish loading (so the first paint may show a card-edit badge in the seed
+// color and then snap to the user's preference — fine for v1).
+//
+// Kept as a module-level mutable map (vs a React context) because tagColor()
+// is called from many leaf components and adding a context provider only to
+// thread one map through would be more noise than insight.
+let activeTagColors: Record<string, string> = { ...DEFAULT_PALETTE };
+
+// setKnownTagColors merges the given overrides onto the bundled defaults
+// (override semantics, matching the Go-side `tagColors` field doc which says
+// "tag-name → CSS color override"). A user that specifies only `{"foo":
+// "#ff0000"}` keeps every other known tag's seed color — the alternative
+// (full replace) would silently degrade well-known tags to the HASH_PALETTE
+// fallback, which is almost never what the user wants.
+//
+// Pass null / undefined / empty {} to clear all overrides and revert to the
+// bundled default. Settings round-trip is the only intended caller.
+export function setKnownTagColors(map: Record<string, string> | null | undefined) {
+  activeTagColors = map && Object.keys(map).length > 0
+    ? { ...DEFAULT_PALETTE, ...map }
+    : { ...DEFAULT_PALETTE };
+}
+
+// getKnownTagColors returns a snapshot of the active mapping. A shallow copy
+// is returned so callers cannot mutate the live palette through the result —
+// the Readonly type marker only enforces this at compile time, and we want a
+// runtime guarantee since this map is read by every badge render.
+export function getKnownTagColors(): Readonly<Record<string, string>> {
+  return { ...activeTagColors };
+}
 
 // Fallback palette for unknown tags. 16 visually-distinct colors at a similar
 // saturation/lightness so adjacent badges remain readable.
@@ -42,11 +70,11 @@ function hashString(s: string): number {
 
 // tagColor returns a deterministic CSS color string for a tag.
 // - Empty string → grey (unclassified).
-// - Known tag (in KNOWN_TAG_COLORS) → that color.
+// - Known tag (in the active palette) → that color.
 // - Otherwise → hash-derived pick from HASH_PALETTE.
 export function tagColor(tag: string): string {
   if (tag === "") return UNCLASSIFIED_COLOR;
-  const known = KNOWN_TAG_COLORS[tag];
+  const known = activeTagColors[tag];
   if (known) return known;
   return HASH_PALETTE[hashString(tag) % HASH_PALETTE.length];
 }

@@ -14,7 +14,39 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"image-observer/internal/settings"
 )
+
+// TestThumbDefaultsMatchSettings guards against the defensive defaults in
+// internal/thumb (used when callers pass 0/empty) drifting away from the
+// user-facing defaults exposed by internal/settings. The values are
+// duplicated rather than imported because making thumb depend on settings
+// would invert today's "settings depends on nothing" posture; a single
+// equality assertion is cheaper than that refactor.
+func TestThumbDefaultsMatchSettings(t *testing.T) {
+	d := settings.DefaultSettings()
+	if d.ThumbnailSize != defaultDisplaySize {
+		t.Errorf("settings.DefaultSettings().ThumbnailSize (%d) and internal/thumb.defaultDisplaySize (%d) drifted",
+			d.ThumbnailSize, defaultDisplaySize)
+	}
+	if d.ThumbnailMode != defaultMode {
+		t.Errorf("settings.DefaultSettings().ThumbnailMode (%q) and internal/thumb.defaultMode (%q) drifted",
+			d.ThumbnailMode, defaultMode)
+	}
+	// maxAutoWorkers (auto-pool ceiling) must not exceed the explicit user
+	// setting cap — otherwise on a 256-CPU host the auto branch could spin
+	// up more workers than any explicit setting could ever request.
+	if maxAutoWorkers > settings.MaxThumbnailWorkerCount {
+		t.Errorf("internal/thumb.maxAutoWorkers (%d) exceeds settings.MaxThumbnailWorkerCount (%d) — auto branch could outpace explicit ceiling",
+			maxAutoWorkers, settings.MaxThumbnailWorkerCount)
+	}
+	// defaultWorkerCount itself must respect the cap on every host.
+	if got := defaultWorkerCount(); got > settings.MaxThumbnailWorkerCount {
+		t.Errorf("defaultWorkerCount() = %d exceeds settings.MaxThumbnailWorkerCount (%d)",
+			got, settings.MaxThumbnailWorkerCount)
+	}
+}
 
 func TestCacheKey_Determinism(t *testing.T) {
 	a := cacheKey("/x/y.png", 100, 1024)

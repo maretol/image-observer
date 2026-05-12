@@ -4,9 +4,14 @@ import {
   WindowGetPosition,
 } from "../wailsjs/runtime/runtime";
 import { ClassificationView } from "./features/classification/ClassificationView";
+import { setKnownTagColors } from "./features/classification/colors";
 import { useClassification } from "./features/classification/useClassification";
+import { setThumbnailParams } from "./features/classification/useGridThumbnail";
 import { ViewerGrid } from "./features/viewer-grid/ViewerGrid";
-import { useViewerGrid } from "./features/viewer-grid/useViewerGrid";
+import {
+  DEFAULT_MAX_PIXELS,
+  useViewerGrid,
+} from "./features/viewer-grid/useViewerGrid";
 import {
   deserializeLayout,
   type Layout,
@@ -69,7 +74,33 @@ function AppInner({ initialState }: AppInnerProps) {
   }, []);
 
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const viewer = useViewerGrid({ initialLayout: initLayout, confirm });
+  // Apply tag-color and thumbnail params from settings as soon as they load.
+  // These are module-level setters (not hook state) because the underlying
+  // helpers — tagColor() / GetThumbnail() in useGridThumbnail's load() — are
+  // called from leaf components and a context provider just to thread one
+  // map / two scalars would be more noise than insight.
+  useEffect(() => {
+    if (!settings.data) return;
+    setKnownTagColors(settings.data.tagColors);
+    setThumbnailParams(settings.data.thumbnailSize, settings.data.thumbnailMode);
+  }, [settings.data]);
+
+  // maxImagePixelsMP is stored as MP (200 = 200_000_000 px). Convert once and
+  // hand the raw pixel count to useViewerGrid, which clamps via a ref so
+  // settings updates take effect on the next image open. Falls back to
+  // DEFAULT_MAX_PIXELS (the canonical constant) during the brief settings-
+  // loading window — keeping the fallback wired to a single source avoids
+  // drift against useViewerGrid / Go's defaultMaxImagePixelsMP.
+  const maxImagePixels =
+    settings.data?.maxImagePixelsMP != null
+      ? settings.data.maxImagePixelsMP * 1_000_000
+      : DEFAULT_MAX_PIXELS;
+
+  const viewer = useViewerGrid({
+    initialLayout: initLayout,
+    confirm,
+    maxImagePixels,
+  });
   const classification = useClassification({
     initialList: initialState?.list ?? null,
     confirm,

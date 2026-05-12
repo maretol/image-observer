@@ -3,8 +3,21 @@ import { GetThumbnail } from "../../../wailsjs/go/main/App";
 import { toBytes } from "../../shared/utils/base64";
 import { createThumbCache, type ThumbCacheValue } from "./thumbnailCache";
 
-const THUMB_SIZE = 256;
-const THUMB_MODE = "letterbox";
+// Module-level live thumbnail params, seeded with the historical defaults so
+// the first GetThumbnail call before settings load still works. App.tsx calls
+// setThumbnailParams() once settings finish loading and on every update.
+//
+// Caveat: changing these does NOT invalidate already-cached entries (cards
+// already loaded keep their previous-size object URL until eviction). New
+// IntersectionObserver hits use the new params. This is acceptable for v1
+// since size changes are rare; revisit if a "rebuild thumbnails" UX is added.
+let thumbSize = 256;
+let thumbMode = "letterbox";
+
+export function setThumbnailParams(size: number, mode: string) {
+  if (Number.isFinite(size) && size > 0) thumbSize = Math.floor(size);
+  if (mode === "letterbox" || mode === "crop") thumbMode = mode;
+}
 
 // Maximum thumbnail entries held in memory. Each entry stores a Blob (raw
 // bytes) referenced by an object URL; with 256px JPG/PNG thumbs that runs
@@ -33,7 +46,7 @@ function load(path: string): Promise<ThumbCacheValue> {
 
   const p = (async () => {
     try {
-      const res = await GetThumbnail(path, THUMB_SIZE, THUMB_MODE);
+      const res = await GetThumbnail(path, thumbSize, thumbMode);
       const bytes = toBytes(res.data as unknown as string | number[]);
       const blob = new Blob([bytes], { type: res.mimeType });
       const url = URL.createObjectURL(blob);
