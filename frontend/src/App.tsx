@@ -171,13 +171,18 @@ function AppInner({ initialState }: AppInnerProps) {
       // Works regardless of which tab is active so the user can return to either.
       // Picked Ctrl+Shift+<digit> to avoid colliding with Ctrl+0/1 (zoom) and
       // browser-instinct Ctrl+Tab (in-viewer tab cycling).
+      //
+      // We match on `e.code` (layout-independent physical key) rather than
+      // `e.key` because Shift modifies the latter to the shifted character
+      // ("!" / "@" on US, "!" / "\"" on JIS), so `e.key === "1"` would never
+      // fire here.
       if (isPrimaryModifier(e) && e.shiftKey) {
-        if (e.key === "1" || e.code === "Digit1") {
+        if (e.code === "Digit1") {
           e.preventDefault();
           setTopTab("list");
           return;
         }
-        if (e.key === "2" || e.code === "Digit2") {
+        if (e.code === "Digit2") {
           e.preventDefault();
           setTopTab("viewer");
           return;
@@ -281,10 +286,18 @@ function AppInner({ initialState }: AppInnerProps) {
 
   // UI scale (#10 + #12): apply as CSS `zoom` on the app root so font, button,
   // and input sizes scale uniformly. `zoom` is non-standard but supported in
-  // both WebView2 (Windows release target) and WebKitGTK (dev). Image rendering
-  // inside ImageView uses its own intrinsic pixel size and is unaffected.
-  // During the brief settings-loading window the zoom stays at 1.0 (rather than
-  // flickering) — once settings.data resolves the value snaps to user choice.
+  // both WebView2 (Windows release target) and WebKitGTK (dev).
+  //
+  // Note: `zoom` cascades to ALL descendants, including the <img> inside
+  // ImageView — viewer zoom and UI scale multiply. That is intentional for
+  // v1 (a uniform "make everything larger" knob); if we ever want UI-only
+  // scaling we'd need to move the zoom down to chrome-only containers
+  // (top-tabs / settings dialog / classification view) and leave ViewerGrid
+  // at zoom: 1.
+  //
+  // During the brief settings-loading window the zoom stays at 1.0 (rather
+  // than flickering) — once settings.data resolves the value snaps to user
+  // choice.
   const uiZoom =
     settings.data?.uiScalePercent != null
       ? settings.data.uiScalePercent / 100

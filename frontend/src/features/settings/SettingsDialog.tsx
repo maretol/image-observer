@@ -174,15 +174,15 @@ export function SettingsDialog({
           <h2 id="settings-title" className="settings-title">
             設定
           </h2>
-          <div
-            className="settings-category-bar"
-            role="tablist"
-            aria-label="カテゴリ"
-          >
+          {/* Plain toggle-buttons rather than role="tablist" — we don't ship
+            * the full WAI-ARIA tabs contract (arrow-key nav, roving tabindex,
+            * aria-controls → tabpanel). aria-pressed conveys the same
+            * "currently selected category" signal without making assistive
+            * tech expect tab semantics that aren't implemented. */}
+          <div className="settings-category-bar" aria-label="カテゴリ">
             <button
               type="button"
-              role="tab"
-              aria-selected={category === "settings"}
+              aria-pressed={category === "settings"}
               className={`settings-category-tab ${
                 category === "settings" ? "settings-category-tab-active" : ""
               }`}
@@ -192,8 +192,7 @@ export function SettingsDialog({
             </button>
             <button
               type="button"
-              role="tab"
-              aria-selected={category === "shortcuts"}
+              aria-pressed={category === "shortcuts"}
               className={`settings-category-tab ${
                 category === "shortcuts" ? "settings-category-tab-active" : ""
               }`}
@@ -347,17 +346,19 @@ function LoggingSection({
 
 function AppearanceSection({ data, onChange }: SectionProps) {
   // The segment shows 4 standard tiers but uiScalePercent is a free integer
-  // in [75, 150]. If settings.json holds a non-standard value (e.g. 105),
-  // the segment falls back to highlighting nothing and a hint shows the live
-  // value so the user can see what's active.
+  // (Go-side validated range). If settings.json holds a non-standard value
+  // (e.g. 105), the segment falls back to highlighting nothing and a hint
+  // shows the live value. The allowed range itself is intentionally not
+  // duplicated here — the Go validator is the single source of truth so the
+  // two can't drift.
   const matchedStandard = UI_SCALES.some((o) => o.value === data.uiScalePercent);
   return (
     <Field
       label="UI スケール"
       hint={
         matchedStandard
-          ? "文字 / ボタン / 入力欄をまとめて拡大縮小します (画像表示は対象外)。"
-          : `現在 ${data.uiScalePercent}% (settings.json で個別指定中)。標準のタイル以外を選びたい場合は settings.json の uiScalePercent を 75〜150 の範囲で編集してください。`
+          ? "文字 / ボタン / 入力欄 / 画像表示を含むアプリ全体を均一に拡大縮小します。"
+          : `現在 ${data.uiScalePercent}% (settings.json で個別指定中)。標準のタイル以外を使いたい場合は settings.json の uiScalePercent を編集してください (範囲外は読み込み時に既定値へ戻ります)。`
       }
     >
       <Segment
