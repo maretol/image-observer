@@ -15,6 +15,7 @@ import (
 	"image-observer/internal/logging"
 	"image-observer/internal/settings"
 	"image-observer/internal/state"
+	"image-observer/internal/thumb"
 )
 
 //go:embed all:frontend/dist
@@ -56,6 +57,13 @@ func main() {
 			"logLevel", userSettings.LogLevel,
 			"multiSelectMode", userSettings.MultiSelectMode)
 	}
+
+	// Worker pool sizing happens once at startup; settings UI marks worker-count
+	// changes as restart-required (see thumb.InitWorkerPool's safety note).
+	thumb.InitWorkerPool(userSettings.ThumbnailWorkerCount)
+	logging.Info("app", "thumb worker pool sized",
+		"workerCount", thumb.CurrentWorkerCount(),
+		"setting", userSettings.ThumbnailWorkerCount)
 
 	app := NewApp()
 

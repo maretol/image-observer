@@ -46,6 +46,19 @@ const WHEEL_MODES: Array<{ value: string; label: string; hint: string }> = [
   },
 ];
 
+const THUMBNAIL_MODES: Array<{ value: string; label: string; hint: string }> = [
+  { value: "letterbox", label: "レターボックス", hint: "縦横比を保ち余白を入れる (推奨)" },
+  { value: "crop", label: "クロップ", hint: "枠いっぱいに切り出す (はみ出し部分は捨てる)" },
+];
+
+const THUMBNAIL_SIZES: Array<{ value: number; label: string }> = [
+  { value: 128, label: "128px" },
+  { value: 192, label: "192px" },
+  { value: 256, label: "256px (既定)" },
+  { value: 384, label: "384px" },
+  { value: 512, label: "512px" },
+];
+
 export function SettingsDialog({
   open,
   data,
@@ -154,6 +167,93 @@ export function SettingsDialog({
                     ))}
                   </div>
                 </Field>
+                <Field
+                  label="開ける画像サイズの上限 (MP)"
+                  hint="画像のピクセル数が上限を超える場合は警告して開きません。次回画像を開く操作から有効。"
+                >
+                  <input
+                    type="number"
+                    className="settings-number"
+                    min={1}
+                    max={4000}
+                    step={50}
+                    value={data.maxImagePixelsMP}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      if (Number.isFinite(n))
+                        onChange({ maxImagePixelsMP: Math.floor(n) });
+                    }}
+                  />
+                </Field>
+              </Section>
+              <Section title="サムネイル">
+                <Field
+                  label="表示サイズ"
+                  hint="新しく読み込むサムネイルから反映されます。既に読み込まれた画像はキャッシュ生存中は旧サイズのままです。"
+                >
+                  <select
+                    className="settings-select"
+                    value={data.thumbnailSize}
+                    onChange={(e) =>
+                      onChange({ thumbnailSize: Number(e.target.value) })
+                    }
+                  >
+                    {THUMBNAIL_SIZES.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
+                  label="アスペクト処理"
+                  hint="新しく読み込むサムネイルから反映されます。"
+                >
+                  <div className="settings-segment">
+                    {THUMBNAIL_MODES.map((opt) => (
+                      <label
+                        key={opt.value}
+                        className={`settings-segment-opt ${
+                          data.thumbnailMode === opt.value
+                            ? "settings-segment-opt-active"
+                            : ""
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="thumbnailMode"
+                          value={opt.value}
+                          checked={data.thumbnailMode === opt.value}
+                          onChange={(e) =>
+                            onChange({ thumbnailMode: e.target.value })
+                          }
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+                <Field
+                  label="生成ワーカー数"
+                  hint="0 で自動 (CPU 数 / 2、最低 1)。変更はアプリ再起動後に反映されます。"
+                >
+                  <input
+                    type="number"
+                    className="settings-number"
+                    min={0}
+                    max={64}
+                    step={1}
+                    value={data.thumbnailWorkerCount}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      if (Number.isFinite(n))
+                        onChange({ thumbnailWorkerCount: Math.floor(n) });
+                    }}
+                  />
+                </Field>
+              </Section>
+              <Section title="タグ色">
+                <TagColorsView colors={data.tagColors ?? {}} />
               </Section>
               <Section title="一覧タブ">
                 <Field
@@ -297,5 +397,39 @@ function KeybindingsTable() {
         ))}
       </tbody>
     </table>
+  );
+}
+
+// TagColorsView is read-only in v1: the bundled defaults are shown alongside
+// any custom entries from settings.json. The intent is "see what's active
+// without cracking the JSON open"; full table editing is a follow-up issue.
+// Editing today happens by editing settings.json directly and restarting (or
+// pressing 既定値に戻す to clear).
+function TagColorsView({ colors }: { colors: Record<string, string> }) {
+  const entries = Object.entries(colors).sort(([a], [b]) => a.localeCompare(b));
+  return (
+    <div className="settings-tag-colors">
+      {entries.length === 0 ? (
+        <div className="settings-field-hint">(タグ色マップが空です)</div>
+      ) : (
+        <ul className="settings-tag-colors-list">
+          {entries.map(([name, hex]) => (
+            <li key={name} className="settings-tag-colors-item">
+              <span
+                className="settings-tag-swatch"
+                style={{ backgroundColor: hex }}
+                title={hex}
+              />
+              <span className="settings-tag-name">{name}</span>
+              <code className="settings-tag-hex">{hex}</code>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="settings-field-hint">
+        編集は <code>settings.json</code> の <code>tagColors</code> を直接書き換えてください
+        (再起動不要 / 不正な値は読み込み時に除外されます)。「既定値に戻す」で初期パレットに戻ります。
+      </div>
+    </div>
   );
 }

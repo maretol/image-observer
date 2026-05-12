@@ -175,6 +175,11 @@ export namespace settings {
 	    logLevel: string;
 	    multiSelectMode: string;
 	    wheelMode: string;
+	    maxImagePixelsMP: number;
+	    thumbnailSize: number;
+	    thumbnailMode: string;
+	    thumbnailWorkerCount: number;
+	    tagColors: Record<string, string>;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsData(source);
@@ -186,6 +191,11 @@ export namespace settings {
 	        this.logLevel = source["logLevel"];
 	        this.multiSelectMode = source["multiSelectMode"];
 	        this.wheelMode = source["wheelMode"];
+	        this.maxImagePixelsMP = source["maxImagePixelsMP"];
+	        this.thumbnailSize = source["thumbnailSize"];
+	        this.thumbnailMode = source["thumbnailMode"];
+	        this.thumbnailWorkerCount = source["thumbnailWorkerCount"];
+	        this.tagColors = source["tagColors"];
 	    }
 	}
 

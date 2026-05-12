@@ -22,6 +22,28 @@ func newPool(maxConcurrent int) *pool {
 	return &pool{sem: make(chan struct{}, maxConcurrent)}
 }
 
+// InitWorkerPool replaces the package-level worker pool. Intended to be
+// called once at startup from main.go after settings have loaded — passing
+// 0 (or any value <1) keeps the default `runtime.NumCPU()/2` heuristic.
+//
+// A note on safety: this is NOT safe to call after thumbnails have started
+// being served (it would orphan in-flight callers waiting on the previous
+// pool's semaphore). The caller (main.go) only invokes it during startup
+// before the Wails runtime exposes GetThumbnail to the frontend, so the
+// settings UI flags worker-count changes as restart-required.
+func InitWorkerPool(maxConcurrent int) {
+	if maxConcurrent < 1 {
+		maxConcurrent = defaultWorkerCount()
+	}
+	defaultPool = newPool(maxConcurrent)
+}
+
+// CurrentWorkerCount reports the active pool's concurrency cap. Tests use
+// this to verify InitWorkerPool took effect.
+func CurrentWorkerCount() int {
+	return cap(defaultPool.sem)
+}
+
 // Generate runs fn, deduplicating concurrent calls with the same key.
 // The first caller for a key executes fn under the semaphore; followers wait
 // on the same job and receive the shared result.

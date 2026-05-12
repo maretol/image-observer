@@ -4,8 +4,8 @@
 // values via Wails bindings (`GetSettings` / `UpdateSettings`).
 //
 // Schema v1 starts intentionally small (LogLevel, MultiSelectMode). Future
-// fields (theme, max_pixels, known tag palette, key bindings, …) are added
-// as Phase H sub-stages move them out of hardcoded constants.
+// fields (theme, key bindings, …) are added here additively with per-field
+// fallback so the schema version need not bump for cosmetic additions.
 //
 // On load, unknown / invalid values fall back to the field default rather
 // than the entire file — this keeps a single bad value from blowing away
@@ -16,9 +16,12 @@ package settings
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // SettingsSchemaVersion is bumped when the JSON shape changes incompatibly.
@@ -38,6 +41,24 @@ const (
 	WheelModeShiftZoom = "shift-zoom" // wheel pans, Shift+wheel zooms
 )
 
+// Allowed values for SettingsData.ThumbnailMode.
+const (
+	ThumbnailModeLetterbox = "letterbox"
+	ThumbnailModeCrop      = "crop"
+)
+
+// Defaults / bounds for the numeric fields. Bounds are intentionally generous
+// — the goal is to catch garbage (negative / absurdly huge) without preventing
+// legitimate tuning.
+const (
+	defaultMaxImagePixelsMP = 200 // 200 MP ~ a 14000×14000 px image
+	maxMaxImagePixelsMP     = 4000
+	defaultThumbnailSize    = 256
+	minThumbnailSize        = 32
+	maxThumbnailSize        = 1024
+	maxThumbnailWorkerCount = 64
+)
+
 // Allowed values for SettingsData.LogLevel.
 var validLogLevels = map[string]struct{}{
 	"debug": {}, "info": {}, "warn": {}, "error": {},
@@ -54,14 +75,46 @@ var validWheelModes = map[string]struct{}{
 	WheelModeShiftZoom: {},
 }
 
+var validThumbnailModes = map[string]struct{}{
+	ThumbnailModeLetterbox: {},
+	ThumbnailModeCrop:      {},
+}
+
+// DefaultTagColors is the seed palette used when settings.json has no
+// `tagColors` field. The frontend ships an identical literal so that
+// uninstalled / clean-config users see consistent badge colors before
+// touching settings. Lowercase hex with leading "#".
+var DefaultTagColors = map[string]string{
+	"iroha":   "#1976d2",
+	"kaguya":  "#f9a825",
+	"yachiyo": "#c2185b",
+	"roka":    "#388e3c",
+	"mami":    "#fb8c00",
+	"mikado":  "#d32f2f",
+	"shugo":   "#7b1fa2",
+	"fumei":   "#757575",
+}
+
 // SettingsData is the persisted (and Wails-exposed) shape. Add new fields
 // here with sane defaults in `DefaultSettings`. Fields are JSON-serialized
 // in camelCase so the frontend can use them without renaming.
+//
+// New fields (kept on schema v1 via per-field fallback):
+//   - MaxImagePixelsMP: pre-flight pixel-count limit for the viewer (in MP)
+//   - ThumbnailSize / ThumbnailMode: defaults for thumbnail generation
+//   - ThumbnailWorkerCount: 0 = auto (NumCPU/2), positive = explicit cap;
+//     restart-required (the worker pool is initialized once at startup)
+//   - TagColors: tag-name → CSS color override for the classification badges
 type SettingsData struct {
-	Version         int    `json:"version"`
-	LogLevel        string `json:"logLevel"`
-	MultiSelectMode string `json:"multiSelectMode"`
-	WheelMode       string `json:"wheelMode"`
+	Version              int               `json:"version"`
+	LogLevel             string            `json:"logLevel"`
+	MultiSelectMode      string            `json:"multiSelectMode"`
+	WheelMode            string            `json:"wheelMode"`
+	MaxImagePixelsMP     int               `json:"maxImagePixelsMP"`
+	ThumbnailSize        int               `json:"thumbnailSize"`
+	ThumbnailMode        string            `json:"thumbnailMode"`
+	ThumbnailWorkerCount int               `json:"thumbnailWorkerCount"`
+	TagColors            map[string]string `json:"tagColors"`
 }
 
 // settingsFilePathOverride lets tests redirect away from the user config dir.
@@ -82,10 +135,15 @@ func settingsFilePath() (string, error) {
 // the "reset to defaults" UI button) construct fresh settings from here.
 func DefaultSettings() SettingsData {
 	return SettingsData{
-		Version:         SettingsSchemaVersion,
-		LogLevel:        "info",
-		MultiSelectMode: MultiSelectCheckbox,
-		WheelMode:       WheelModeZoom,
+		Version:              SettingsSchemaVersion,
+		LogLevel:             "info",
+		MultiSelectMode:      MultiSelectCheckbox,
+		WheelMode:            WheelModeZoom,
+		MaxImagePixelsMP:     defaultMaxImagePixelsMP,
+		ThumbnailSize:        defaultThumbnailSize,
+		ThumbnailMode:        ThumbnailModeLetterbox,
+		ThumbnailWorkerCount: 0, // auto
+		TagColors:            cloneTagColors(DefaultTagColors),
 	}
 }
 
@@ -157,6 +215,24 @@ func Validate(s *SettingsData) error {
 	if _, ok := validWheelModes[s.WheelMode]; !ok {
 		return errors.New("invalid wheelMode: " + s.WheelMode)
 	}
+	if s.MaxImagePixelsMP < 1 || s.MaxImagePixelsMP > maxMaxImagePixelsMP {
+		return fmt.Errorf("maxImagePixelsMP out of range (1..%d)", maxMaxImagePixelsMP)
+	}
+	if s.ThumbnailSize < minThumbnailSize || s.ThumbnailSize > maxThumbnailSize {
+		return fmt.Errorf("thumbnailSize out of range (%d..%d)",
+			minThumbnailSize, maxThumbnailSize)
+	}
+	if _, ok := validThumbnailModes[s.ThumbnailMode]; !ok {
+		return errors.New("invalid thumbnailMode: " + s.ThumbnailMode)
+	}
+	if s.ThumbnailWorkerCount < 0 || s.ThumbnailWorkerCount > maxThumbnailWorkerCount {
+		return fmt.Errorf("thumbnailWorkerCount out of range (0..%d)", maxThumbnailWorkerCount)
+	}
+	for k, v := range s.TagColors {
+		if !isValidHexColor(v) {
+			return fmt.Errorf("tagColors[%q] is not a valid #rrggbb color: %q", k, v)
+		}
+	}
 	return nil
 }
 
@@ -172,4 +248,48 @@ func applyFieldDefaults(s *SettingsData) {
 	if _, ok := validWheelModes[s.WheelMode]; !ok {
 		s.WheelMode = WheelModeZoom
 	}
+	if s.MaxImagePixelsMP < 1 || s.MaxImagePixelsMP > maxMaxImagePixelsMP {
+		s.MaxImagePixelsMP = defaultMaxImagePixelsMP
+	}
+	if s.ThumbnailSize < minThumbnailSize || s.ThumbnailSize > maxThumbnailSize {
+		s.ThumbnailSize = defaultThumbnailSize
+	}
+	if _, ok := validThumbnailModes[s.ThumbnailMode]; !ok {
+		s.ThumbnailMode = ThumbnailModeLetterbox
+	}
+	if s.ThumbnailWorkerCount < 0 || s.ThumbnailWorkerCount > maxThumbnailWorkerCount {
+		s.ThumbnailWorkerCount = 0
+	}
+	if s.TagColors == nil {
+		s.TagColors = cloneTagColors(DefaultTagColors)
+	} else {
+		// Drop entries with malformed colors but preserve the rest. This
+		// matches the per-field-fallback intent of the rest of Load.
+		for k, v := range s.TagColors {
+			if !isValidHexColor(v) {
+				delete(s.TagColors, k)
+			}
+		}
+	}
+}
+
+func cloneTagColors(src map[string]string) map[string]string {
+	out := make(map[string]string, len(src))
+	maps.Copy(out, src)
+	return out
+}
+
+// isValidHexColor accepts "#rrggbb" with lowercase or uppercase hex digits.
+// Shorthand "#rgb" is intentionally rejected: the frontend's readableTextColor
+// helper only handles 7-char form, so allowing "#rgb" would silently break it.
+func isValidHexColor(s string) bool {
+	if len(s) != 7 || s[0] != '#' {
+		return false
+	}
+	for _, c := range strings.ToLower(s[1:]) {
+		if !(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }

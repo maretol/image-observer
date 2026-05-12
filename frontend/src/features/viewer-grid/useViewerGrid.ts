@@ -28,7 +28,11 @@ import { newTab, type Tab } from "./useTabs";
 
 export type ConfirmFn = (message: string) => Promise<boolean>;
 
-export const MAX_PIXELS = 200_000_000; // 200MP
+// DEFAULT_MAX_PIXELS is the historical hardcoded ceiling (200 MP). Callers
+// (App.tsx) compute the live limit from settings.maxImagePixelsMP and pass
+// it via `opts.maxImagePixels`; this constant only acts as a fallback when
+// the hook is constructed before settings finish loading.
+export const DEFAULT_MAX_PIXELS = 200_000_000;
 
 export { MAX_PANELS } from "./layout";
 export type { Edge, Layout, SplitDirection } from "./layout";
@@ -36,10 +40,20 @@ export type { Edge, Layout, SplitDirection } from "./layout";
 export function useViewerGrid(opts?: {
   initialLayout?: Layout;
   confirm?: ConfirmFn;
+  // Pixel-count threshold for the pre-flight "too big to open" toast. Falls
+  // back to DEFAULT_MAX_PIXELS while settings load. Read fresh inside each
+  // open / preflight call (via ref) so settings updates take effect on the
+  // next attempt without re-creating the callback.
+  maxImagePixels?: number;
 }) {
   const [layout, setLayout] = useState<Layout>(
     opts?.initialLayout ?? initialLayout(),
   );
+
+  const maxPixelsRef = useRef(opts?.maxImagePixels ?? DEFAULT_MAX_PIXELS);
+  useEffect(() => {
+    maxPixelsRef.current = opts?.maxImagePixels ?? DEFAULT_MAX_PIXELS;
+  }, [opts?.maxImagePixels]);
 
   // Mirror latest layout into a ref so async callbacks (openInActive) can read
   // current state without re-creating callbacks on every layout change.
@@ -88,9 +102,9 @@ export function useViewerGrid(opts?: {
         toast(`画像を開けません: ${basename(path)} — ${errorMessage(e)}`, "error");
         return;
       }
-      if (info.width * info.height > MAX_PIXELS) {
+      if (info.width * info.height > maxPixelsRef.current) {
         const mp = ((info.width * info.height) / 1_000_000).toFixed(1);
-        const limit = MAX_PIXELS / 1_000_000;
+        const limit = Math.round(maxPixelsRef.current / 1_000_000);
         toast(
           `画像が大きすぎます: ${basename(path)} (${mp}MP > ${limit}MP)`,
           "warn",
@@ -205,9 +219,9 @@ export function useViewerGrid(opts?: {
         logger.warn("image", "open failed", { path, err: msg });
         return false;
       }
-      if (info.width * info.height > MAX_PIXELS) {
+      if (info.width * info.height > maxPixelsRef.current) {
         const mp = ((info.width * info.height) / 1_000_000).toFixed(1);
-        const limit = MAX_PIXELS / 1_000_000;
+        const limit = Math.round(maxPixelsRef.current / 1_000_000);
         toast(
           `画像が大きすぎます: ${basename(path)} (${mp}MP > ${limit}MP)`,
           "warn",

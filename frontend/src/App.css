@@ -1465,6 +1465,57 @@ html, body, #root {
   width: 100%;
 }
 
+.settings-number {
+  background: #2d2d30;
+  color: #ddd;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  width: 120px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-tag-colors-list {
+  list-style: none;
+  margin: 0 0 6px 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 4px 12px;
+}
+
+.settings-tag-colors-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #ddd;
+}
+
+.settings-tag-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid #2d2d30;
+  flex-shrink: 0;
+}
+
+.settings-tag-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-tag-hex {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #888;
+}
+
 .settings-segment {
   display: flex;
   flex-direction: row;

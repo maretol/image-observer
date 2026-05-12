@@ -1,9 +1,28 @@
 import { DEFAULT_PALETTE } from "./defaultPalette";
 
-// KNOWN_TAG_COLORS is the active mapping consulted first. Phase H plans to
-// replace this with a settings-driven map; we keep the indirection so the
-// rest of the code does not need to change later.
-export const KNOWN_TAG_COLORS: Readonly<Record<string, string>> = DEFAULT_PALETTE;
+// activeTagColors holds the live tag→color map. Initial value is the seeded
+// DEFAULT_PALETTE; App.tsx overwrites this from settings.tagColors as soon as
+// settings finish loading (so the first paint may show a card-edit badge in
+// the seed color and then snap to the user's preference — fine for v1).
+//
+// Kept as a module-level mutable map (vs a React context) because tagColor()
+// is called from many leaf components and adding a context provider only to
+// thread one map through would be more noise than insight.
+let activeTagColors: Record<string, string> = { ...DEFAULT_PALETTE };
+
+// setKnownTagColors replaces the active mapping. Pass an empty object to
+// reset to the bundled default. Settings round-trip is the only intended
+// caller.
+export function setKnownTagColors(map: Record<string, string> | null | undefined) {
+  activeTagColors = { ...(map && Object.keys(map).length > 0 ? map : DEFAULT_PALETTE) };
+}
+
+// getKnownTagColors returns the active mapping. Read-only consumers (e.g. the
+// settings dialog's "current palette" view) use this; tagColor() reads the
+// underlying map directly.
+export function getKnownTagColors(): Readonly<Record<string, string>> {
+  return activeTagColors;
+}
 
 // Fallback palette for unknown tags. 16 visually-distinct colors at a similar
 // saturation/lightness so adjacent badges remain readable.
@@ -42,11 +61,11 @@ function hashString(s: string): number {
 
 // tagColor returns a deterministic CSS color string for a tag.
 // - Empty string → grey (unclassified).
-// - Known tag (in KNOWN_TAG_COLORS) → that color.
+// - Known tag (in the active palette) → that color.
 // - Otherwise → hash-derived pick from HASH_PALETTE.
 export function tagColor(tag: string): string {
   if (tag === "") return UNCLASSIFIED_COLOR;
-  const known = KNOWN_TAG_COLORS[tag];
+  const known = activeTagColors[tag];
   if (known) return known;
   return HASH_PALETTE[hashString(tag) % HASH_PALETTE.length];
 }

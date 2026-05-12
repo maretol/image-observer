@@ -1,6 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_PALETTE } from "./defaultPalette";
-import { readableTextColor, tagBadgeClass, tagColor } from "./colors";
+import {
+  getKnownTagColors,
+  readableTextColor,
+  setKnownTagColors,
+  tagBadgeClass,
+  tagColor,
+} from "./colors";
+
+// Reset to defaults after each test to keep cross-test isolation. The setter
+// is module-level state, so leaks would otherwise break ordering.
+afterEach(() => {
+  setKnownTagColors(DEFAULT_PALETTE);
+});
 
 describe("tagColor", () => {
   it("returns the unclassified grey for empty tag", () => {
@@ -55,6 +67,39 @@ describe("readableTextColor", () => {
     expect(readableTextColor("rgb(0,0,0)")).toBe("#fff");
     expect(readableTextColor("#fff")).toBe("#fff");
     expect(readableTextColor("")).toBe("#fff");
+  });
+});
+
+describe("setKnownTagColors", () => {
+  it("overrides the active palette so tagColor uses the new map", () => {
+    setKnownTagColors({ iroha: "#abcdef" });
+    expect(tagColor("iroha")).toBe("#abcdef");
+  });
+
+  it("falls back to DEFAULT_PALETTE when given an empty map", () => {
+    setKnownTagColors({ iroha: "#abcdef" });
+    setKnownTagColors({});
+    expect(tagColor("iroha")).toBe(DEFAULT_PALETTE.iroha);
+  });
+
+  it("falls back to DEFAULT_PALETTE when given null/undefined", () => {
+    setKnownTagColors({ iroha: "#abcdef" });
+    setKnownTagColors(null);
+    expect(tagColor("iroha")).toBe(DEFAULT_PALETTE.iroha);
+  });
+
+  it("leaves unknown tags on the hash-derived path", () => {
+    setKnownTagColors({ iroha: "#abcdef" });
+    expect(tagColor("kuro")).toBe(tagColor("kuro")); // still deterministic
+  });
+});
+
+describe("getKnownTagColors", () => {
+  it("returns the active palette as a snapshot", () => {
+    setKnownTagColors({ a: "#000000", b: "#ffffff" });
+    const snap = getKnownTagColors();
+    expect(snap.a).toBe("#000000");
+    expect(snap.b).toBe("#ffffff");
   });
 });
 
