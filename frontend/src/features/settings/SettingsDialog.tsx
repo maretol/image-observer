@@ -179,8 +179,16 @@ export function SettingsDialog({
             * the full WAI-ARIA tabs contract (arrow-key nav, roving tabindex,
             * aria-controls → tabpanel). aria-pressed conveys the same
             * "currently selected category" signal without making assistive
-            * tech expect tab semantics that aren't implemented. */}
-          <div className="settings-category-bar" aria-label="カテゴリ">
+            * tech expect tab semantics that aren't implemented.
+            *
+            * `role="group"` is what makes `aria-label` actually surface in
+            * the accessibility tree — without an explicit role, a bare <div>
+            * is "generic" and ATs drop labels on it. */}
+          <div
+            className="settings-category-bar"
+            role="group"
+            aria-label="カテゴリ"
+          >
             <button
               type="button"
               aria-pressed={category === "settings"}
