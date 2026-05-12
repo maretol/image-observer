@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getKnownTagColors } from "../classification/colors";
 import type { Settings } from "./useSettings";
 
 export type SettingsDialogProps = {
@@ -431,6 +432,13 @@ function Segment<T extends string | number>({
   );
 }
 
+// NumberInput keeps the in-progress value in local string state and only
+// commits (calls onChange) on blur or Enter. Without this, every keystroke
+// would fire UpdateSettings — which (a) races so a delayed response can
+// overwrite the latest user input, and (b) sends `Number("") === 0` mid-edit
+// which Go's Validate rejects (clamped fields like maxImagePixelsMP have a
+// >0 lower bound). On commit the value is clamped to [min, max] so out-of-
+// range entries are silently corrected rather than rejected.
 function NumberInput({
   value,
   min,
@@ -446,6 +454,24 @@ function NumberInput({
   suffix?: string;
   onChange: (n: number) => void;
 }) {
+  const [text, setText] = useState(String(value));
+  // Sync external value changes (e.g. "既定値に戻す") into the local buffer.
+  useEffect(() => {
+    setText(String(value));
+  }, [value]);
+
+  const commit = (raw: string) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || raw.trim() === "") {
+      // Bad / empty — revert the visible text but leave value untouched.
+      setText(String(value));
+      return;
+    }
+    const clamped = Math.max(min, Math.min(max, Math.floor(n)));
+    setText(String(clamped));
+    if (clamped !== value) onChange(clamped);
+  };
+
   return (
     <div className="settings-number-row">
       <input
@@ -454,10 +480,16 @@ function NumberInput({
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(e) => {
-          const n = Number(e.target.value);
-          if (Number.isFinite(n)) onChange(Math.floor(n));
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            (e.target as HTMLInputElement).blur(); // triggers commit via onBlur
+          } else if (e.key === "Escape") {
+            setText(String(value)); // revert without committing
+            (e.target as HTMLInputElement).blur();
+          }
         }}
       />
       {suffix ? <span className="settings-number-suffix">{suffix}</span> : null}
@@ -472,13 +504,26 @@ function NumberInput({
 // without cracking the JSON open"; full table editing is a follow-up issue.
 // Editing today happens by editing settings.json directly and restarting the
 // app (useSettings calls GetSettings only on mount).
+//
+// `colors` is the raw settings payload. When it's empty, colors.ts's
+// setKnownTagColors falls back to DEFAULT_PALETTE, so we display the live
+// palette via getKnownTagColors() to keep "what's shown here" in sync with
+// "what tagColor() actually renders" — anything else would mislead the user
+// into thinking no badge colors are active.
 function TagColorsView({ colors }: { colors: Record<string, string> }) {
-  const entries = Object.entries(colors).sort(([a], [b]) => a.localeCompare(b));
+  const isCustom = Object.keys(colors).length > 0;
+  const effective = isCustom ? colors : getKnownTagColors();
+  const entries = Object.entries(effective).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
   return (
     <div className="settings-tag-colors">
-      {entries.length === 0 ? (
-        <div className="settings-field-hint">(タグ色マップが空です)</div>
-      ) : (
+      {!isCustom ? (
+        <div className="settings-field-hint">
+          <code>settings.json</code> に <code>tagColors</code> 指定がないため既定パレットを使用中。
+        </div>
+      ) : null}
+      {entries.length > 0 ? (
         <ul className="settings-tag-colors-list">
           {entries.map(([name, hex]) => (
             <li key={name} className="settings-tag-colors-item">
@@ -492,7 +537,7 @@ function TagColorsView({ colors }: { colors: Record<string, string> }) {
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
       <div className="settings-field-hint">
         編集は <code>settings.json</code> の <code>tagColors</code> を直接書き換えてください
         (アプリ再起動後に反映 / 不正な値は読み込み時に除外されます)。「既定値に戻す」で初期パレットに戻ります。

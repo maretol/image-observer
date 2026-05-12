@@ -8,7 +8,10 @@ import { setKnownTagColors } from "./features/classification/colors";
 import { useClassification } from "./features/classification/useClassification";
 import { setThumbnailParams } from "./features/classification/useGridThumbnail";
 import { ViewerGrid } from "./features/viewer-grid/ViewerGrid";
-import { useViewerGrid } from "./features/viewer-grid/useViewerGrid";
+import {
+  DEFAULT_MAX_PIXELS,
+  useViewerGrid,
+} from "./features/viewer-grid/useViewerGrid";
 import {
   deserializeLayout,
   type Layout,
@@ -84,9 +87,14 @@ function AppInner({ initialState }: AppInnerProps) {
 
   // maxImagePixelsMP is stored as MP (200 = 200_000_000 px). Convert once and
   // hand the raw pixel count to useViewerGrid, which clamps via a ref so
-  // settings updates take effect on the next image open.
+  // settings updates take effect on the next image open. Falls back to
+  // DEFAULT_MAX_PIXELS (the canonical constant) during the brief settings-
+  // loading window — keeping the fallback wired to a single source avoids
+  // drift against useViewerGrid / Go's defaultMaxImagePixelsMP.
   const maxImagePixels =
-    (settings.data?.maxImagePixelsMP ?? 200) * 1_000_000;
+    settings.data?.maxImagePixelsMP != null
+      ? settings.data.maxImagePixelsMP * 1_000_000
+      : DEFAULT_MAX_PIXELS;
 
   const viewer = useViewerGrid({
     initialLayout: initLayout,
