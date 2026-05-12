@@ -88,9 +88,15 @@ describe("setKnownTagColors", () => {
     expect(tagColor("iroha")).toBe(DEFAULT_PALETTE.iroha);
   });
 
-  it("leaves unknown tags on the hash-derived path", () => {
+  it("leaves unknown tags on the hash-derived path (palette change does not shift them)", () => {
+    // "kuro" is in neither DEFAULT_PALETTE nor the override below, so it must
+    // route through HASH_PALETTE in both states. Swapping the palette must
+    // not affect its color.
+    const before = tagColor("kuro");
     setKnownTagColors({ iroha: "#abcdef" });
-    expect(tagColor("kuro")).toBe(tagColor("kuro")); // still deterministic
+    const after = tagColor("kuro");
+    expect(after).toBe(before);
+    expect(after).toMatch(/^#[0-9a-f]{6}$/i);
   });
 });
 
@@ -100,6 +106,16 @@ describe("getKnownTagColors", () => {
     const snap = getKnownTagColors();
     expect(snap.a).toBe("#000000");
     expect(snap.b).toBe("#ffffff");
+  });
+
+  it("returns a shallow copy so callers cannot mutate the live palette", () => {
+    setKnownTagColors({ keep: "#111111" });
+    // Cast away Readonly to attempt a mutation, then verify it did not leak.
+    const snap = getKnownTagColors() as Record<string, string>;
+    snap.keep = "#ffffff";
+    snap.injected = "#000000";
+    expect(tagColor("keep")).toBe("#111111");
+    expect(getKnownTagColors().injected).toBeUndefined();
   });
 });
 

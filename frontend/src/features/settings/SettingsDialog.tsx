@@ -428,7 +428,7 @@ function TagColorsView({ colors }: { colors: Record<string, string> }) {
       )}
       <div className="settings-field-hint">
         編集は <code>settings.json</code> の <code>tagColors</code> を直接書き換えてください
-        (再起動不要 / 不正な値は読み込み時に除外されます)。「既定値に戻す」で初期パレットに戻ります。
+        (アプリ再起動後に反映 / 不正な値は読み込み時に除外されます)。「既定値に戻す」で初期パレットに戻ります。
       </div>
     </div>
   );

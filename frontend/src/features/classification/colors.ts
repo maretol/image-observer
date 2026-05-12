@@ -17,11 +17,12 @@ export function setKnownTagColors(map: Record<string, string> | null | undefined
   activeTagColors = { ...(map && Object.keys(map).length > 0 ? map : DEFAULT_PALETTE) };
 }
 
-// getKnownTagColors returns the active mapping. Read-only consumers (e.g. the
-// settings dialog's "current palette" view) use this; tagColor() reads the
-// underlying map directly.
+// getKnownTagColors returns a snapshot of the active mapping. A shallow copy
+// is returned so callers cannot mutate the live palette through the result —
+// the Readonly type marker only enforces this at compile time, and we want a
+// runtime guarantee since this map is read by every badge render.
 export function getKnownTagColors(): Readonly<Record<string, string>> {
-  return activeTagColors;
+  return { ...activeTagColors };
 }
 
 // Fallback palette for unknown tags. 16 visually-distinct colors at a similar

@@ -14,7 +14,27 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"image-observer/internal/settings"
 )
+
+// TestThumbDefaultsMatchSettings guards against the defensive defaults in
+// internal/thumb (used when callers pass 0/empty) drifting away from the
+// user-facing defaults exposed by internal/settings. The values are
+// duplicated rather than imported because making thumb depend on settings
+// would invert today's "settings depends on nothing" posture; a single
+// equality assertion is cheaper than that refactor.
+func TestThumbDefaultsMatchSettings(t *testing.T) {
+	d := settings.DefaultSettings()
+	if d.ThumbnailSize != defaultDisplaySize {
+		t.Errorf("settings.DefaultSettings().ThumbnailSize (%d) and internal/thumb.defaultDisplaySize (%d) drifted",
+			d.ThumbnailSize, defaultDisplaySize)
+	}
+	if d.ThumbnailMode != defaultMode {
+		t.Errorf("settings.DefaultSettings().ThumbnailMode (%q) and internal/thumb.defaultMode (%q) drifted",
+			d.ThumbnailMode, defaultMode)
+	}
+}
 
 func TestCacheKey_Determinism(t *testing.T) {
 	a := cacheKey("/x/y.png", 100, 1024)
