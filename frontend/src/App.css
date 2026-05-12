@@ -1374,8 +1374,46 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 14px 18px;
   border-bottom: 1px solid #2d2d30;
+}
+
+.settings-category-bar {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  flex: 1;
+  justify-content: center;
+}
+
+.settings-category-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 5px 14px;
+  color: #aaa;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.08s ease, color 0.08s ease, border-color 0.08s ease;
+}
+
+.settings-category-tab:hover {
+  background: #232327;
+  color: #eee;
+}
+
+.settings-category-tab:focus-visible {
+  outline: none;
+  border-color: #d97a3c;
+  box-shadow: 0 0 0 2px rgba(217, 122, 60, 0.4);
+}
+
+.settings-category-tab-active,
+.settings-category-tab-active:hover {
+  background: #2a1e16;
+  border-color: #4a2a16;
+  color: #f0a363;
 }
 
 .settings-title {

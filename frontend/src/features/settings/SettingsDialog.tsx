@@ -61,13 +61,29 @@ const THUMBNAIL_SIZES: Array<{ value: number; label: string }> = [
   { value: 512, label: "512px" },
 ];
 
+// UI scale tiers exposed by the segment control. Any value within the Go-side
+// validated range is still accepted via settings.json; the UI just surfaces
+// these standard tiers. The actual numeric bounds live in `internal/settings`
+// (single source of truth) so we don't duplicate them in this file.
+const UI_SCALES: Array<{ value: number; label: string; hint: string }> = [
+  { value: 90, label: "小", hint: "90%" },
+  { value: 100, label: "標準", hint: "100%" },
+  { value: 115, label: "大", hint: "115%" },
+  { value: 130, label: "特大", hint: "130%" },
+];
+
+// Top-level category split (#13). v1 has only two: 設定 with sub-nav and
+// ショートカット which today is just the read-only table but is carved out so
+// future rebinding UI can live alongside without expanding the settings nav.
+type Category = "settings" | "shortcuts";
+
 type SectionId =
   | "logging"
+  | "appearance"
   | "viewer"
   | "thumbnail"
   | "list"
-  | "tag-colors"
-  | "keybindings";
+  | "tag-colors";
 
 type SectionDef = {
   id: SectionId;
@@ -82,6 +98,12 @@ const SECTIONS: SectionDef[] = [
     label: "ロギング",
     description: "ログレベルと、不具合報告に使うログファイルの場所。",
     icon: <NavIconLog />,
+  },
+  {
+    id: "appearance",
+    label: "外観",
+    description: "アプリ全体の表示倍率 (文字 / ボタン / 入力欄を一括スケール)。",
+    icon: <NavIconAppearance />,
   },
   {
     id: "viewer",
@@ -107,12 +129,6 @@ const SECTIONS: SectionDef[] = [
     description: "既知タグのバッジ色マッピング (settings.json で編集)。",
     icon: <NavIconPalette />,
   },
-  {
-    id: "keybindings",
-    label: "ショートカット",
-    description: "現在のキーバインド一覧 (再バインドは未対応)。",
-    icon: <NavIconKbd />,
-  },
 ];
 
 export function SettingsDialog({
@@ -125,6 +141,7 @@ export function SettingsDialog({
   onReset,
   onClose,
 }: SettingsDialogProps) {
+  const [category, setCategory] = useState<Category>("settings");
   const [activeId, setActiveId] = useState<SectionId>("logging");
 
   // Esc to close — registered only when open to avoid stealing keys otherwise.
@@ -158,6 +175,41 @@ export function SettingsDialog({
           <h2 id="settings-title" className="settings-title">
             設定
           </h2>
+          {/* Plain toggle-buttons rather than role="tablist" — we don't ship
+            * the full WAI-ARIA tabs contract (arrow-key nav, roving tabindex,
+            * aria-controls → tabpanel). aria-pressed conveys the same
+            * "currently selected category" signal without making assistive
+            * tech expect tab semantics that aren't implemented.
+            *
+            * `role="group"` is what makes `aria-label` actually surface in
+            * the accessibility tree — without an explicit role, a bare <div>
+            * is "generic" and ATs drop labels on it. */}
+          <div
+            className="settings-category-bar"
+            role="group"
+            aria-label="カテゴリ"
+          >
+            <button
+              type="button"
+              aria-pressed={category === "settings"}
+              className={`settings-category-tab ${
+                category === "settings" ? "settings-category-tab-active" : ""
+              }`}
+              onClick={() => setCategory("settings")}
+            >
+              設定
+            </button>
+            <button
+              type="button"
+              aria-pressed={category === "shortcuts"}
+              className={`settings-category-tab ${
+                category === "shortcuts" ? "settings-category-tab-active" : ""
+              }`}
+              onClick={() => setCategory("shortcuts")}
+            >
+              ショートカット
+            </button>
+          </div>
           <button
             type="button"
             className="settings-close"
@@ -174,6 +226,20 @@ export function SettingsDialog({
             <div className="settings-error">
               設定の読み込みに失敗しました
               {error ? `: ${error}` : null}
+            </div>
+          ) : category === "shortcuts" ? (
+            // No side nav in this branch, so the content pane naturally fills
+            // the body — `.settings-content` already has `flex: 1`.
+            <div className="settings-content">
+              <div className="settings-content-header">
+                <h3 className="settings-content-title">ショートカット</h3>
+                <p className="settings-content-description">
+                  現在のキーバインド一覧 (再バインドは未対応)。
+                </p>
+              </div>
+              <div className="settings-content-body">
+                <KeybindingsTable />
+              </div>
             </div>
           ) : (
             <>
@@ -212,6 +278,9 @@ export function SettingsDialog({
                       onChange={onChange}
                     />
                   )}
+                  {activeId === "appearance" && (
+                    <AppearanceSection data={data} onChange={onChange} />
+                  )}
                   {activeId === "viewer" && (
                     <ViewerSection data={data} onChange={onChange} />
                   )}
@@ -224,7 +293,6 @@ export function SettingsDialog({
                   {activeId === "tag-colors" && (
                     <TagColorsView colors={data.tagColors ?? {}} />
                   )}
-                  {activeId === "keybindings" && <KeybindingsTable />}
                   {error ? <div className="settings-error">{error}</div> : null}
                 </div>
               </div>
@@ -284,6 +352,33 @@ function LoggingSection({
         <code className="settings-code">{logPath || "(未初期化)"}</code>
       </Field>
     </>
+  );
+}
+
+function AppearanceSection({ data, onChange }: SectionProps) {
+  // The segment shows 4 standard tiers but uiScalePercent is a free integer
+  // (Go-side validated range). If settings.json holds a non-standard value
+  // (e.g. 105), the segment falls back to highlighting nothing and a hint
+  // shows the live value. The allowed range itself is intentionally not
+  // duplicated here — the Go validator is the single source of truth so the
+  // two can't drift.
+  const matchedStandard = UI_SCALES.some((o) => o.value === data.uiScalePercent);
+  return (
+    <Field
+      label="UI スケール"
+      hint={
+        matchedStandard
+          ? "文字 / ボタン / 入力欄 / 画像表示を含むアプリ全体を均一に拡大縮小します。"
+          : `現在 ${data.uiScalePercent}% (settings.json で個別指定中)。標準のタイル以外を使いたい場合は settings.json の uiScalePercent を編集してください (範囲外は読み込み時に既定値へ戻ります)。`
+      }
+    >
+      <Segment
+        name="uiScalePercent"
+        options={UI_SCALES}
+        value={data.uiScalePercent}
+        onChange={(v) => onChange({ uiScalePercent: v })}
+      />
+    </Field>
   );
 }
 
@@ -602,6 +697,8 @@ function isOverrideValue(
 // (`keybindings.*`) out for future Phase H rebinding.
 const KEYBINDINGS: Array<{ keys: string; action: string; scope: string }> = [
   { keys: "Esc", action: "ドラッグ中の操作をキャンセル", scope: "DnD 中" },
+  { keys: "Ctrl+Shift+1", action: "一覧タブに切替", scope: "全体" },
+  { keys: "Ctrl+Shift+2", action: "ビューアタブに切替", scope: "全体" },
   { keys: "Ctrl+W", action: "アクティブパネルのアクティブタブを閉じる", scope: "ビューア" },
   { keys: "Ctrl+Tab", action: "アクティブパネルの次のタブに切替", scope: "ビューア" },
   { keys: "Ctrl+Shift+Tab", action: "アクティブパネルの前のタブに切替", scope: "ビューア" },
@@ -706,11 +803,11 @@ function NavIconPalette() {
   );
 }
 
-function NavIconKbd() {
+function NavIconAppearance() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1.5" y="4" width="13" height="8" rx="1" />
-      <path d="M4 7h.01M6 7h.01M8 7h.01M10 7h.01M12 7h.01M5 9.5h6" />
+      <path d="M4 13V5h2.5l2 8M4 9h4.5" />
+      <path d="M10.5 13l2.5-6 2.5 6M11.5 11h3" />
     </svg>
   );
 }

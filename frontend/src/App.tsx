@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   WindowGetSize,
   WindowGetPosition,
@@ -159,15 +165,54 @@ function AppInner({ initialState }: AppInnerProps) {
     list: classification.persistableState,
   });
 
-  // Global keybindings (Phase H4). Active only on the viewer tab and when
-  // the user is not typing in a form field / settings dialog.
+  // Global keybindings (Phase H4 + #7). Some are global (top-tab switch),
+  // others are viewer-only. We bail early for editable targets / settings
+  // dialog regardless of scope.
+  //
+  // We register the window listener exactly once and read live state through
+  // refs. The previous design listed `[topTab, settingsOpen, viewer]` as
+  // deps, but `viewer` (the object returned by `useViewerGrid`) gets a new
+  // identity on every layout change — so the listener was being torn down
+  // and re-added on every tab open / close / split. That churn risks
+  // dropping a keydown that arrives between the removal and the next add.
+  // Refs let us keep one stable listener and always read the latest values.
+  const topTabRef = useRef(topTab);
+  const settingsOpenRef = useRef(settingsOpen);
+  const viewerRef = useRef(viewer);
+  topTabRef.current = topTab;
+  settingsOpenRef.current = settingsOpen;
+  viewerRef.current = viewer;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e.target)) return;
-      if (settingsOpen) return; // dialog has its own Esc handler
-      if (topTab !== "viewer") return;
+      if (settingsOpenRef.current) return; // dialog has its own Esc handler
 
-      const layout = viewer.layout;
+      // Global top-tab switching (#7): Ctrl+Shift+1 → list, Ctrl+Shift+2 → viewer.
+      // Works regardless of which tab is active so the user can return to either.
+      // Picked Ctrl+Shift+<digit> to avoid colliding with Ctrl+0/1 (zoom) and
+      // browser-instinct Ctrl+Tab (in-viewer tab cycling).
+      //
+      // We match on `e.code` (layout-independent physical key) rather than
+      // `e.key` because Shift modifies the latter to the shifted character
+      // ("!" / "@" on US, "!" / "\"" on JIS), so `e.key === "1"` would never
+      // fire here.
+      if (isPrimaryModifier(e) && e.shiftKey) {
+        if (e.code === "Digit1") {
+          e.preventDefault();
+          setTopTab("list");
+          return;
+        }
+        if (e.code === "Digit2") {
+          e.preventDefault();
+          setTopTab("viewer");
+          return;
+        }
+      }
+
+      if (topTabRef.current !== "viewer") return;
+
+      const viewerLive = viewerRef.current;
+      const layout = viewerLive.layout;
       const activeLeaf = findLeaf(layout.root, layout.activeId);
       if (!activeLeaf) return;
 
@@ -177,7 +222,7 @@ function AppInner({ initialState }: AppInnerProps) {
       if ((e.key === "w" || e.key === "W") && !e.shiftKey) {
         e.preventDefault();
         if (activeLeaf.activeIndex >= 0) {
-          viewer.closeTab(activeLeaf.id, activeLeaf.activeIndex);
+          viewerLive.closeTab(activeLeaf.id, activeLeaf.activeIndex);
         }
         return;
       }
@@ -188,7 +233,7 @@ function AppInner({ initialState }: AppInnerProps) {
         if (n <= 1) return;
         const dir = e.shiftKey ? -1 : 1;
         const next = (((activeLeaf.activeIndex + dir) % n) + n) % n;
-        viewer.setActiveTab(activeLeaf.id, next);
+        viewerLive.setActiveTab(activeLeaf.id, next);
         return;
       }
       // Ctrl+0: fit to viewport
@@ -218,7 +263,7 @@ function AppInner({ initialState }: AppInnerProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [topTab, settingsOpen, viewer]);
+  }, []);
 
   const onSelectList = useCallback(() => setTopTab("list"), []);
   const onSelectViewer = useCallback(() => setTopTab("viewer"), []);
@@ -260,8 +305,30 @@ function AppInner({ initialState }: AppInnerProps) {
     [classification.folderPath, viewer],
   );
 
+  // UI scale (#10 + #12): apply as CSS `zoom` on the app root so font, button,
+  // and input sizes scale uniformly. `zoom` is non-standard but supported in
+  // both WebView2 (Windows release target) and WebKitGTK (dev).
+  //
+  // Note: `zoom` cascades to ALL descendants, including the <img> inside
+  // ImageView — viewer zoom and UI scale multiply. That is intentional for
+  // v1 (a uniform "make everything larger" knob); if we ever want UI-only
+  // scaling we'd need to move the zoom down to chrome-only containers
+  // (top-tabs / settings dialog / classification view) and leave ViewerGrid
+  // at zoom: 1.
+  //
+  // During the brief settings-loading window the zoom stays at 1.0 (rather
+  // than flickering) — once settings.data resolves the value snaps to user
+  // choice.
+  const uiZoom =
+    settings.data?.uiScalePercent != null
+      ? settings.data.uiScalePercent / 100
+      : 1;
+
   return (
-    <div className="app-toplevel">
+    <div
+      className="app-toplevel"
+      style={{ zoom: uiZoom } as CSSProperties}
+    >
       <nav className="top-tabs" role="tablist" aria-label="トップレベルタブ">
         <button
           type="button"
