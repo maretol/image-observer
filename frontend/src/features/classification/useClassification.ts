@@ -190,17 +190,20 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // Auto-load on mount if a folderPath was restored from session. Also runs
   // the same merge / create-empty decision tree so the user does not need to
   // re-pick the folder to see the migration prompt after an app restart.
-  // The ref guard prevents StrictMode's intentional double-mount in dev from
-  // queueing the merge confirm() prompt twice.
-  const autoLoadStartedRef = useRef(false);
+  // The ref guards postLoadFlow (the user-facing prompt) at the side-effect
+  // point so StrictMode's dev double-mount cannot queue confirm() twice.
+  // Putting the guard at the effect entry instead would suppress *both* runs:
+  // the first async would be killed by `cancelled` (set by the immediate
+  // cleanup), and the second would early-return before starting any work.
+  const autoLoadFlowedRef = useRef(false);
   useEffect(() => {
     if (!initFolderPath) return;
-    if (autoLoadStartedRef.current) return;
-    autoLoadStartedRef.current = true;
     let cancelled = false;
     (async () => {
       const res = await loadInternal(initFolderPath);
       if (cancelled || !res) return;
+      if (autoLoadFlowedRef.current) return;
+      autoLoadFlowedRef.current = true;
       await postLoadFlow(initFolderPath, res);
     })();
     return () => {
