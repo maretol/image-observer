@@ -50,13 +50,17 @@ const (
 // Defaults / bounds for the numeric fields. Bounds are intentionally generous
 // — the goal is to catch garbage (negative / absurdly huge) without preventing
 // legitimate tuning.
+//
+// MaxThumbnailWorkerCount is exported so internal/thumb can keep its auto
+// (NumCPU/2) branch capped at the same ceiling — without that pairing, auto
+// could spawn more workers than any explicit user setting on a large host.
 const (
 	defaultMaxImagePixelsMP = 200 // 200 MP ~ a 14000×14000 px image
 	maxMaxImagePixelsMP     = 4000
 	defaultThumbnailSize    = 256
 	minThumbnailSize        = 32
 	maxThumbnailSize        = 1024
-	maxThumbnailWorkerCount = 64
+	MaxThumbnailWorkerCount = 64
 )
 
 // Allowed values for SettingsData.LogLevel.
@@ -230,8 +234,8 @@ func Validate(s *SettingsData) error {
 	if _, ok := validThumbnailModes[s.ThumbnailMode]; !ok {
 		return errors.New("invalid thumbnailMode: " + s.ThumbnailMode)
 	}
-	if s.ThumbnailWorkerCount < 0 || s.ThumbnailWorkerCount > maxThumbnailWorkerCount {
-		return fmt.Errorf("thumbnailWorkerCount out of range (0..%d)", maxThumbnailWorkerCount)
+	if s.ThumbnailWorkerCount < 0 || s.ThumbnailWorkerCount > MaxThumbnailWorkerCount {
+		return fmt.Errorf("thumbnailWorkerCount out of range (0..%d)", MaxThumbnailWorkerCount)
 	}
 	for k, v := range s.TagColors {
 		if !isValidHexColor(v) {
@@ -262,7 +266,7 @@ func applyFieldDefaults(s *SettingsData) {
 	if _, ok := validThumbnailModes[s.ThumbnailMode]; !ok {
 		s.ThumbnailMode = ThumbnailModeLetterbox
 	}
-	if s.ThumbnailWorkerCount < 0 || s.ThumbnailWorkerCount > maxThumbnailWorkerCount {
+	if s.ThumbnailWorkerCount < 0 || s.ThumbnailWorkerCount > MaxThumbnailWorkerCount {
 		s.ThumbnailWorkerCount = 0
 	}
 	// nil (field absent in JSON, e.g. upgrading from a build before this

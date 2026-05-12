@@ -34,6 +34,18 @@ func TestThumbDefaultsMatchSettings(t *testing.T) {
 		t.Errorf("settings.DefaultSettings().ThumbnailMode (%q) and internal/thumb.defaultMode (%q) drifted",
 			d.ThumbnailMode, defaultMode)
 	}
+	// maxAutoWorkers (auto-pool ceiling) must not exceed the explicit user
+	// setting cap — otherwise on a 256-CPU host the auto branch could spin
+	// up more workers than any explicit setting could ever request.
+	if maxAutoWorkers > settings.MaxThumbnailWorkerCount {
+		t.Errorf("internal/thumb.maxAutoWorkers (%d) exceeds settings.MaxThumbnailWorkerCount (%d) — auto branch could outpace explicit ceiling",
+			maxAutoWorkers, settings.MaxThumbnailWorkerCount)
+	}
+	// defaultWorkerCount itself must respect the cap on every host.
+	if got := defaultWorkerCount(); got > settings.MaxThumbnailWorkerCount {
+		t.Errorf("defaultWorkerCount() = %d exceeds settings.MaxThumbnailWorkerCount (%d)",
+			got, settings.MaxThumbnailWorkerCount)
+	}
 }
 
 func TestCacheKey_Determinism(t *testing.T) {

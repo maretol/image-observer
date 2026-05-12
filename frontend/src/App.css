@@ -1661,6 +1661,16 @@ html, body, #root {
   color: #eee;
 }
 
+/* The inner <input type="radio"> is visually hidden, so :focus-within on the
+ * wrapper <label> is the only way to surface keyboard focus. Without this,
+ * Tab-navigating into the segment leaves no visual indication of which
+ * option is focused (Issue: a11y review). */
+.settings-segment-opt:focus-within {
+  outline: none;
+  border-color: #d97a3c;
+  box-shadow: 0 0 0 2px rgba(217, 122, 60, 0.4);
+}
+
 .settings-segment-opt-active,
 .settings-segment-opt-active:hover {
   background: #4a2a16;

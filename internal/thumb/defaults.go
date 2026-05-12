@@ -10,9 +10,21 @@ var (
 	jpegQuality         = 85
 )
 
+// maxAutoWorkers caps the auto (NumCPU/2) worker count so a very large NUMA
+// host does not end up with a pool wider than the explicit-setting upper
+// bound (internal/settings.maxThumbnailWorkerCount = 64). Keeping the auto
+// branch and the explicit branch on the same ceiling makes the "auto vs
+// explicit" choice a true choice — without this, auto could silently spawn
+// more workers than any value the user could type into the settings UI.
+const maxAutoWorkers = 64
+
 func defaultWorkerCount() int {
-	if n := runtime.NumCPU() / 2; n >= 1 {
-		return n
+	n := runtime.NumCPU() / 2
+	if n < 1 {
+		n = 1
 	}
-	return 1
+	if n > maxAutoWorkers {
+		n = maxAutoWorkers
+	}
+	return n
 }
