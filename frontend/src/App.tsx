@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import {
   WindowGetSize,
   WindowGetPosition,
@@ -159,12 +159,31 @@ function AppInner({ initialState }: AppInnerProps) {
     list: classification.persistableState,
   });
 
-  // Global keybindings (Phase H4). Active only on the viewer tab and when
-  // the user is not typing in a form field / settings dialog.
+  // Global keybindings (Phase H4 + #7). Some are global (top-tab switch),
+  // others are viewer-only. We bail early for editable targets / settings
+  // dialog regardless of scope.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e.target)) return;
       if (settingsOpen) return; // dialog has its own Esc handler
+
+      // Global top-tab switching (#7): Ctrl+Shift+1 → list, Ctrl+Shift+2 → viewer.
+      // Works regardless of which tab is active so the user can return to either.
+      // Picked Ctrl+Shift+<digit> to avoid colliding with Ctrl+0/1 (zoom) and
+      // browser-instinct Ctrl+Tab (in-viewer tab cycling).
+      if (isPrimaryModifier(e) && e.shiftKey) {
+        if (e.key === "1" || e.code === "Digit1") {
+          e.preventDefault();
+          setTopTab("list");
+          return;
+        }
+        if (e.key === "2" || e.code === "Digit2") {
+          e.preventDefault();
+          setTopTab("viewer");
+          return;
+        }
+      }
+
       if (topTab !== "viewer") return;
 
       const layout = viewer.layout;
@@ -260,8 +279,22 @@ function AppInner({ initialState }: AppInnerProps) {
     [classification.folderPath, viewer],
   );
 
+  // UI scale (#10 + #12): apply as CSS `zoom` on the app root so font, button,
+  // and input sizes scale uniformly. `zoom` is non-standard but supported in
+  // both WebView2 (Windows release target) and WebKitGTK (dev). Image rendering
+  // inside ImageView uses its own intrinsic pixel size and is unaffected.
+  // During the brief settings-loading window the zoom stays at 1.0 (rather than
+  // flickering) — once settings.data resolves the value snaps to user choice.
+  const uiZoom =
+    settings.data?.uiScalePercent != null
+      ? settings.data.uiScalePercent / 100
+      : 1;
+
   return (
-    <div className="app-toplevel">
+    <div
+      className="app-toplevel"
+      style={{ zoom: uiZoom } as CSSProperties}
+    >
       <nav className="top-tabs" role="tablist" aria-label="トップレベルタブ">
         <button
           type="button"
