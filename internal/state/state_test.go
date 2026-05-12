@@ -311,17 +311,19 @@ func TestLoadState_V1FallsBackToDefault(t *testing.T) {
 
 func TestLoadState_V4FallsBackToDefault(t *testing.T) {
 	// v4 had RootPath / LeftPaneWidth fields. v5 dropped them, so v4 payloads
-	// must fall back to defaults.
+	// must fall back to defaults. Use distinguishing values (topTab "viewer",
+	// layout root id "L") so the assertions actually catch a "values survived
+	// instead of falling back" regression.
 	p := setStateFile(t)
 	os.MkdirAll(filepath.Dir(p), 0o755)
 	v4 := []byte(`{
 		"version": 4,
 		"rootPath": "/old",
 		"leftPaneWidth": 300,
-		"window": {"width":1024,"height":768,"x":-1,"y":-1},
+		"window": {"width":1600,"height":900,"x":42,"y":42},
 		"layout": {"root":{"kind":"leaf","id":"L","tabs":[],"activeIndex":-1},"activeId":"L"},
-		"topTab": "list",
-		"list": {"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}
+		"topTab": "viewer",
+		"list": {"folderPath":"/old","filter":{"tags":["t"],"confidence":"high","query":"q"},"collapsedGroups":["g"]}
 	}`)
 	if err := os.WriteFile(p, v4, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -329,6 +331,18 @@ func TestLoadState_V4FallsBackToDefault(t *testing.T) {
 	s := Load()
 	if s.Version != StateSchemaVersion {
 		t.Errorf("expected schema v%d, got %d", StateSchemaVersion, s.Version)
+	}
+	if s.Layout.Root.ID != defaultRootKey {
+		t.Errorf("expected default layout root id %q, got %q (v4 payload survived)", defaultRootKey, s.Layout.Root.ID)
+	}
+	if s.TopTab != "list" {
+		t.Errorf("expected default TopTab \"list\", got %q (v4 payload survived)", s.TopTab)
+	}
+	if s.List.FolderPath != "" {
+		t.Errorf("expected default empty FolderPath, got %q (v4 payload survived)", s.List.FolderPath)
+	}
+	if s.Window.Width != 1024 || s.Window.Height != 768 {
+		t.Errorf("expected default window size 1024x768, got %dx%d (v4 payload survived)", s.Window.Width, s.Window.Height)
 	}
 }
 

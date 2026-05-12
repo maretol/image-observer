@@ -164,8 +164,7 @@ export function ClassificationView({
             すべて展開
           </button>
         ) : null}
-        {allGroupKeys.length > collapsedGroups.length &&
-        allGroupKeys.length > 0 ? (
+        {allGroupKeys.some((k) => !isCollapsed(k)) ? (
           <button
             type="button"
             className="cls-expand-all-btn"
