@@ -12,10 +12,11 @@ var (
 
 // maxAutoWorkers caps the auto (NumCPU/2) worker count so a very large NUMA
 // host does not end up with a pool wider than the explicit-setting upper
-// bound (internal/settings.maxThumbnailWorkerCount = 64). Keeping the auto
+// bound (`internal/settings.MaxThumbnailWorkerCount` = 64). Keeping the auto
 // branch and the explicit branch on the same ceiling makes the "auto vs
 // explicit" choice a true choice — without this, auto could silently spawn
 // more workers than any value the user could type into the settings UI.
+// `TestThumbDefaultsMatchSettings` (in thumb_test.go) guards the equality.
 const maxAutoWorkers = 64
 
 func defaultWorkerCount() int {

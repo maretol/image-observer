@@ -1437,6 +1437,14 @@ html, body, #root {
   color: #eee;
 }
 
+/* Visible focus ring for keyboard users (Tab navigation). hover/active alone
+ * doesn't surface "this is where I am" without a pointer. */
+.settings-nav-item:focus-visible {
+  outline: none;
+  border-color: #d97a3c;
+  box-shadow: 0 0 0 2px rgba(217, 122, 60, 0.4);
+}
+
 .settings-nav-item-active,
 .settings-nav-item-active:hover {
   background: #2a1e16;
