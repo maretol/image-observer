@@ -357,8 +357,6 @@ export namespace state {
 	}
 	export class StateData {
 	    version: number;
-	    rootPath: string;
-	    leftPaneWidth: number;
 	    window: WindowState;
 	    layout: LayoutState;
 	    topTab: string;
@@ -371,8 +369,6 @@ export namespace state {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
-	        this.rootPath = source["rootPath"];
-	        this.leftPaneWidth = source["leftPaneWidth"];
 	        this.window = this.convertValues(source["window"], WindowState);
 	        this.layout = this.convertValues(source["layout"], LayoutState);
 	        this.topTab = source["topTab"];

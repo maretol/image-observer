@@ -17,6 +17,12 @@ export function useDirectoryGroups(initialCollapsed: string[] = []) {
 
   const expandAll = useCallback(() => setCollapsedList([]), []);
 
+  // collapseAll takes the full list of currently displayed group keys (the hook
+  // itself does not know about uncollapsed groups). Caller passes them in.
+  const collapseAll = useCallback((keys: string[]) => {
+    setCollapsedList(Array.from(new Set(keys)));
+  }, []);
+
   const isCollapsed = useCallback(
     (key: string) => collapsed.has(key),
     [collapsed],
@@ -27,5 +33,6 @@ export function useDirectoryGroups(initialCollapsed: string[] = []) {
     isCollapsed,
     toggle,
     expandAll,
+    collapseAll,
   };
 }

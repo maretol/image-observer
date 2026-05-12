@@ -4,7 +4,9 @@ import { imgread } from "../../../wailsjs/go/models";
 import type { Tab } from "./useTabs";
 import { toDataURL } from "../../shared/utils/base64";
 import { useToastFn } from "../../shared/components/Toast";
+import { errorMessage } from "../../shared/utils/error";
 import { zoomCommandBus, type ZoomCommand } from "../../shared/utils/keybindings";
+import { basename } from "../../shared/utils/path";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8.0;
@@ -433,14 +435,3 @@ function clampPan(
   return { panX: nx, panY: ny };
 }
 
-function errorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === "string") return e;
-  return String(e);
-}
-
-function basename(p: string): string {
-  const norm = p.replace(/[\\/]+$/, "");
-  const idx = Math.max(norm.lastIndexOf("/"), norm.lastIndexOf("\\"));
-  return idx >= 0 ? norm.slice(idx + 1) : norm;
-}

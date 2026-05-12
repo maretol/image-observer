@@ -84,6 +84,7 @@ function AppInner({ initialState }: AppInnerProps) {
   });
   useEffect(() => {
     let cancelled = false;
+    const POLL_INTERVAL_MS = 2000;
     const update = async () => {
       try {
         const sz = await WindowGetSize();
@@ -98,7 +99,9 @@ function AppInner({ initialState }: AppInnerProps) {
           ) {
             return cur;
           }
-          return { width: sz.w, height: sz.h, x: pos.x, y: pos.y };
+          const next = { width: sz.w, height: sz.h, x: pos.x, y: pos.y };
+          logger.debug("session", "window pos/size changed", next);
+          return next;
         });
       } catch {
         // ignore — Wails runtime may not be ready briefly during startup
@@ -106,7 +109,10 @@ function AppInner({ initialState }: AppInnerProps) {
     };
     const onResize = () => update();
     window.addEventListener("resize", onResize);
-    const interval = window.setInterval(update, 2000);
+    const interval = window.setInterval(update, POLL_INTERVAL_MS);
+    logger.debug("session", "window pos/size polling started", {
+      intervalMs: POLL_INTERVAL_MS,
+    });
     update();
     return () => {
       cancelled = true;

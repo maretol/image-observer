@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { SaveState } from "../../../wailsjs/go/main/App";
+import { state } from "../../../wailsjs/go/models";
 import { useDebounce } from "../../shared/utils/debounce";
+import { errorMessage } from "../../shared/utils/error";
 import { logger } from "../../shared/utils/logger";
 import { serializeLayout, type Layout } from "../viewer-grid/layout";
 
@@ -22,7 +24,7 @@ export type SessionInput = {
 };
 
 const SAVE_DEBOUNCE_MS = 500;
-const STATE_SCHEMA_VERSION = 4;
+const STATE_SCHEMA_VERSION = 5;
 
 export function useSessionSave(input: SessionInput) {
   const serialized = JSON.stringify({
@@ -50,11 +52,9 @@ export function useSessionSave(input: SessionInput) {
     } catch {
       return;
     }
-    const data = buildStateData(parsed);
-    SaveState(data as any).catch((e) => {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.warn("SaveState failed:", e);
-      logger.warn("state", "save failed", { err: msg });
+    const data = state.StateData.createFrom(buildStateData(parsed));
+    SaveState(data).catch((e) => {
+      logger.warn("state", "save failed", { err: errorMessage(e) });
     });
   }, [debouncedJson]);
 }
@@ -67,9 +67,6 @@ function buildStateData(input: {
 }) {
   return {
     version: STATE_SCHEMA_VERSION,
-    // v1 leftovers; kept in payload to satisfy the Go struct shape but unused.
-    rootPath: "",
-    leftPaneWidth: 280,
     window: input.window,
     layout: input.layout,
     topTab: input.topTab,

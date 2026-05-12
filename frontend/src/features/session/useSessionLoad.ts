@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { GetState } from "../../../wailsjs/go/main/App";
 import { state } from "../../../wailsjs/go/models";
+import { errorMessage } from "../../shared/utils/error";
+import { logger } from "../../shared/utils/logger";
 
 export function useSessionLoad() {
   const [loaded, setLoaded] = useState(false);
@@ -13,7 +15,9 @@ export function useSessionLoad() {
         setLoaded(true);
       })
       .catch((e) => {
-        console.warn("GetState failed, using defaults:", e);
+        logger.warn("state", "load failed (using defaults)", {
+          err: errorMessage(e),
+        });
         setInitialState(null);
         setLoaded(true);
       });

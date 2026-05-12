@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GetImageInfo } from "../../../wailsjs/go/main/App";
 import { useToastFn } from "../../shared/components/Toast";
+import { errorMessage } from "../../shared/utils/error";
 import { logger } from "../../shared/utils/logger";
+import { basename } from "../../shared/utils/path";
 import {
   appendOrFocusInActive,
   closeTabInLeaf,
@@ -323,16 +325,4 @@ export function useViewerGrid(opts?: {
       setSplitRatioCb,
     ],
   );
-}
-
-function basename(p: string): string {
-  const norm = p.replace(/[\\/]+$/, "");
-  const idx = Math.max(norm.lastIndexOf("/"), norm.lastIndexOf("\\"));
-  return idx >= 0 ? norm.slice(idx + 1) : norm;
-}
-
-function errorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === "string") return e;
-  return String(e);
 }

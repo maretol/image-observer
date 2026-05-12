@@ -1,3 +1,4 @@
+import { basename } from "../../shared/utils/path";
 import type { DnDState } from "./useDnD";
 
 type Props = {
@@ -16,10 +17,4 @@ export function TabDragGhost({ dnd }: Props) {
       {name}
     </div>
   );
-}
-
-function basename(p: string): string {
-  const norm = p.replace(/[\\/]+$/, "");
-  const idx = Math.max(norm.lastIndexOf("/"), norm.lastIndexOf("\\"));
-  return idx >= 0 ? norm.slice(idx + 1) : norm;
 }
