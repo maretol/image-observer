@@ -1360,13 +1360,14 @@ html, body, #root {
   background: #1e1e1e;
   border: 1px solid #3f3f46;
   border-radius: 12px;
-  width: min(560px, 92vw);
-  max-height: 88vh;
+  width: min(760px, 94vw);
+  height: min(560px, 88vh);
   display: flex;
   flex-direction: column;
   color: #ddd;
   font-size: 13px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
 }
 
 .settings-header {
@@ -1399,7 +1400,95 @@ html, body, #root {
 }
 
 .settings-body {
-  padding: 14px 18px;
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+}
+
+.settings-nav {
+  flex: 0 0 200px;
+  background: #161618;
+  border-right: 1px solid #2d2d30;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #bbb;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.08s ease, color 0.08s ease;
+}
+
+.settings-nav-item:hover {
+  background: #232327;
+  color: #eee;
+}
+
+.settings-nav-item-active,
+.settings-nav-item-active:hover {
+  background: #2a1e16;
+  border-color: #4a2a16;
+  color: #f0a363;
+}
+
+.settings-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.settings-nav-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-content-header {
+  padding: 18px 22px 10px;
+  border-bottom: 1px solid #232327;
+}
+
+.settings-content-title {
+  margin: 0 0 4px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.settings-content-description {
+  margin: 0;
+  font-size: 12px;
+  color: #888;
+  line-height: 1.5;
+}
+
+.settings-content-body {
+  flex: 1;
+  padding: 18px 22px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1417,36 +1506,16 @@ html, body, #root {
   color: #f48771;
 }
 
-.settings-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.settings-section-title {
-  margin: 0 0 6px 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.settings-section-body {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
 .settings-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .settings-field-label {
   font-size: 13px;
-  color: #ddd;
+  font-weight: 500;
+  color: #e6e6e6;
 }
 
 .settings-field-hint {
@@ -1455,14 +1524,42 @@ html, body, #root {
   line-height: 1.4;
 }
 
+/* .settings-select is currently unused (all selection settings use Segment),
+ * but kept here so any future dropdown picks up dark-theme colors instead of
+ * inheriting GTK/WebView2 native chrome. The `option` rule is the important
+ * part on Linux/WebKitGTK — without it the popup list reverts to OS colors
+ * which can be unreadable against the app's dark UI. */
 .settings-select {
   background: #2d2d30;
   color: #ddd;
   border: 1px solid #3f3f46;
   border-radius: 6px;
-  padding: 5px 8px;
-  font-size: 12px;
+  padding: 6px 10px;
+  font-size: 13px;
   width: 100%;
+  max-width: 360px;
+}
+
+.settings-select:focus-visible {
+  outline: none;
+  border-color: #d97a3c;
+  box-shadow: 0 0 0 1px #d97a3c;
+}
+
+.settings-select option {
+  background: #2d2d30;
+  color: #ddd;
+}
+
+.settings-select option:checked {
+  background: #4a2a16;
+  color: #fff;
+}
+
+.settings-number-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .settings-number {
@@ -1470,9 +1567,21 @@ html, body, #root {
   color: #ddd;
   border: 1px solid #3f3f46;
   border-radius: 6px;
-  padding: 5px 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  width: 100px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-number:focus-visible {
+  outline: none;
+  border-color: #d97a3c;
+  box-shadow: 0 0 0 1px #d97a3c;
+}
+
+.settings-number-suffix {
   font-size: 12px;
-  width: 120px;
+  color: #888;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1519,7 +1628,7 @@ html, body, #root {
 .settings-segment {
   display: flex;
   flex-direction: row;
-  gap: 4px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -1530,12 +1639,20 @@ html, body, #root {
   background: #2d2d30;
   border: 1px solid #3f3f46;
   border-radius: 6px;
-  padding: 4px 10px;
+  padding: 6px 12px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
+  color: #bbb;
+  transition: background-color 0.08s ease, color 0.08s ease, border-color 0.08s ease;
 }
 
-.settings-segment-opt-active {
+.settings-segment-opt:hover {
+  background: #353539;
+  color: #eee;
+}
+
+.settings-segment-opt-active,
+.settings-segment-opt-active:hover {
   background: #4a2a16;
   border-color: #d97a3c;
   color: #fff;
