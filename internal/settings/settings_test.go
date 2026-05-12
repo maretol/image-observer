@@ -42,6 +42,9 @@ func TestLoad_Missing_ReturnsDefaults(t *testing.T) {
 	if s.ThumbnailWorkerCount != 0 {
 		t.Errorf("ThumbnailWorkerCount default: got %d, want 0 (auto)", s.ThumbnailWorkerCount)
 	}
+	if s.UIScalePercent != defaultUIScalePercent {
+		t.Errorf("UIScalePercent default: got %d, want %d", s.UIScalePercent, defaultUIScalePercent)
+	}
 	if len(s.TagColors) == 0 {
 		t.Errorf("TagColors default should be a non-empty map (defaultTagColors)")
 	}
@@ -63,6 +66,7 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	in.ThumbnailMode = ThumbnailModeCrop
 	in.ThumbnailWorkerCount = 4
 	in.TagColors = map[string]string{"alpha": "#abcdef", "beta": "#000000"}
+	in.UIScalePercent = 125
 	if err := Save(in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -90,6 +94,9 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	}
 	if out.TagColors["alpha"] != "#abcdef" || out.TagColors["beta"] != "#000000" {
 		t.Errorf("TagColors round-trip: %v", out.TagColors)
+	}
+	if out.UIScalePercent != 125 {
+		t.Errorf("UIScalePercent: got %d", out.UIScalePercent)
 	}
 }
 
@@ -139,6 +146,16 @@ func TestSave_RejectsInvalid(t *testing.T) {
 	bad.TagColors = map[string]string{"x": "not-a-color"}
 	if err := Save(bad); err == nil {
 		t.Errorf("Save should reject malformed tag color")
+	}
+	bad = DefaultSettings()
+	bad.UIScalePercent = minUIScalePercent - 1
+	if err := Save(bad); err == nil {
+		t.Errorf("Save should reject UIScalePercent below min")
+	}
+	bad = DefaultSettings()
+	bad.UIScalePercent = maxUIScalePercent + 1
+	if err := Save(bad); err == nil {
+		t.Errorf("Save should reject UIScalePercent above max")
 	}
 }
 
@@ -195,6 +212,7 @@ func TestLoad_PerFieldFallbackKeepsValidFields(t *testing.T) {
 		"thumbnailMode":        "stretch",              // invalid
 		"thumbnailWorkerCount": 8,                      // valid
 		"tagColors":            map[string]string{"keep": "#abc123", "drop": "garbage"},
+		"uiScalePercent":       9999, // out of range — should fall back
 	})
 	if err := os.WriteFile(p, bad, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -226,6 +244,9 @@ func TestLoad_PerFieldFallbackKeepsValidFields(t *testing.T) {
 	}
 	if _, exists := s.TagColors["drop"]; exists {
 		t.Errorf("malformed tag color should be dropped, got %v", s.TagColors)
+	}
+	if s.UIScalePercent != defaultUIScalePercent {
+		t.Errorf("out-of-range UIScalePercent should fall back, got %d", s.UIScalePercent)
 	}
 }
 
@@ -259,6 +280,9 @@ func TestLoad_NewFieldsMissing_GetDefaults(t *testing.T) {
 	}
 	if len(s.TagColors) == 0 {
 		t.Errorf("missing TagColors should default to defaultTagColors")
+	}
+	if s.UIScalePercent != defaultUIScalePercent {
+		t.Errorf("missing UIScalePercent should default, got %d", s.UIScalePercent)
 	}
 }
 

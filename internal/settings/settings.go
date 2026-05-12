@@ -61,6 +61,13 @@ const (
 	minThumbnailSize        = 32
 	maxThumbnailSize        = 1024
 	MaxThumbnailWorkerCount = 64
+	// UIScale is stored as an integer percent applied via CSS `zoom` on the
+	// app root. Bounds are intentionally generous; the UI picker only exposes
+	// the 4 standard tiers but power users can set anything in this range via
+	// settings.json.
+	defaultUIScalePercent = 100
+	minUIScalePercent     = 75
+	maxUIScalePercent     = 150
 )
 
 // Allowed values for SettingsData.LogLevel.
@@ -114,6 +121,7 @@ var defaultTagColors = map[string]string{
 //   - ThumbnailWorkerCount: 0 = auto (NumCPU/2), positive = explicit cap;
 //     restart-required (the worker pool is initialized once at startup)
 //   - TagColors: tag-name → CSS color override for the classification badges
+//   - UIScalePercent: global UI scale as an integer percent (100 = native)
 type SettingsData struct {
 	Version              int               `json:"version"`
 	LogLevel             string            `json:"logLevel"`
@@ -124,6 +132,7 @@ type SettingsData struct {
 	ThumbnailMode        string            `json:"thumbnailMode"`
 	ThumbnailWorkerCount int               `json:"thumbnailWorkerCount"`
 	TagColors            map[string]string `json:"tagColors"`
+	UIScalePercent       int               `json:"uiScalePercent"`
 }
 
 // settingsFilePathOverride lets tests redirect away from the user config dir.
@@ -153,6 +162,7 @@ func DefaultSettings() SettingsData {
 		ThumbnailMode:        ThumbnailModeLetterbox,
 		ThumbnailWorkerCount: 0, // auto
 		TagColors:            cloneTagColors(defaultTagColors),
+		UIScalePercent:       defaultUIScalePercent,
 	}
 }
 
@@ -237,6 +247,10 @@ func Validate(s *SettingsData) error {
 	if s.ThumbnailWorkerCount < 0 || s.ThumbnailWorkerCount > MaxThumbnailWorkerCount {
 		return fmt.Errorf("thumbnailWorkerCount out of range (0..%d)", MaxThumbnailWorkerCount)
 	}
+	if s.UIScalePercent < minUIScalePercent || s.UIScalePercent > maxUIScalePercent {
+		return fmt.Errorf("uiScalePercent out of range (%d..%d)",
+			minUIScalePercent, maxUIScalePercent)
+	}
 	for k, v := range s.TagColors {
 		if !isValidHexColor(v) {
 			return fmt.Errorf("tagColors[%q] is not a valid #rrggbb color: %q", k, v)
@@ -268,6 +282,9 @@ func applyFieldDefaults(s *SettingsData) {
 	}
 	if s.ThumbnailWorkerCount < 0 || s.ThumbnailWorkerCount > MaxThumbnailWorkerCount {
 		s.ThumbnailWorkerCount = 0
+	}
+	if s.UIScalePercent < minUIScalePercent || s.UIScalePercent > maxUIScalePercent {
+		s.UIScalePercent = defaultUIScalePercent
 	}
 	// nil (field absent in JSON, e.g. upgrading from a build before this
 	// field existed) seeds the defaults so the user starts with badge colors.
