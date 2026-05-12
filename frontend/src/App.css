@@ -1416,12 +1416,6 @@ html, body, #root {
   color: #f0a363;
 }
 
-/* When shortcuts category is shown the side nav is suppressed, so the content
- * pane occupies the full body width. */
-.settings-content-full {
-  flex: 1;
-}
-
 .settings-title {
   margin: 0;
   font-size: 14px;

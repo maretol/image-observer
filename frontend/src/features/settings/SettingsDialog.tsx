@@ -61,9 +61,10 @@ const THUMBNAIL_SIZES: Array<{ value: number; label: string }> = [
   { value: 512, label: "512px" },
 ];
 
-// UI scale tiers exposed by the segment control. Free-form values within the
-// Go-side range (75..150) are still accepted via settings.json; the UI just
-// surfaces these four standard tiers.
+// UI scale tiers exposed by the segment control. Any value within the Go-side
+// validated range is still accepted via settings.json; the UI just surfaces
+// these standard tiers. The actual numeric bounds live in `internal/settings`
+// (single source of truth) so we don't duplicate them in this file.
 const UI_SCALES: Array<{ value: number; label: string; hint: string }> = [
   { value: 90, label: "小", hint: "90%" },
   { value: 100, label: "標準", hint: "100%" },
@@ -219,7 +220,9 @@ export function SettingsDialog({
               {error ? `: ${error}` : null}
             </div>
           ) : category === "shortcuts" ? (
-            <div className="settings-content settings-content-full">
+            // No side nav in this branch, so the content pane naturally fills
+            // the body — `.settings-content` already has `flex: 1`.
+            <div className="settings-content">
               <div className="settings-content-header">
                 <h3 className="settings-content-title">ショートカット</h3>
                 <p className="settings-content-description">
