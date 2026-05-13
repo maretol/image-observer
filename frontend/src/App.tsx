@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   WindowGetSize,
   WindowGetPosition,
@@ -308,7 +314,11 @@ function AppInner({ initialState }: AppInnerProps) {
   //
   // Setting it on <html> (not .app-toplevel) so it reaches ConfirmDialog and
   // Toast, which portal to document.body — they read the same variable inline.
-  useEffect(() => {
+  //
+  // useLayoutEffect (not useEffect) so the variable is written before the
+  // browser paints. Otherwise a settings change would render once at the old
+  // scale and snap to the new scale on the next frame — visible flicker.
+  useLayoutEffect(() => {
     // Briefly null during initial load; treat as 100% so nothing scales until
     // the real value arrives.
     const scale = (settings.data?.uiScalePercent ?? 100) / 100;

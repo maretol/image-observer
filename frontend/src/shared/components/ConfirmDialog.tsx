@@ -81,15 +81,18 @@ function ConfirmDialog({ message, onConfirm, onCancel }: ConfirmDialogProps) {
   }, [onCancel]);
 
   return createPortal(
-    // Portals to <body>, outside .app-toplevel — read --ui-scale (set on
-    // <html> in App.tsx) directly so the dialog scales with the rest of
-    // the chrome. See App.css "UI scale" block.
-    <div className="confirm-dialog-overlay" style={{ zoom: "var(--ui-scale, 1)" }}>
+    // Portaled to <body>, outside .app-toplevel. We apply --ui-scale to the
+    // inner dialog box only — not the overlay — because the overlay is
+    // `position: fixed; inset: 0` and scaling it would shrink/grow the dark
+    // backdrop away from full-viewport coverage. Same pattern as
+    // SettingsDialog (backdrop unscaled, .settings-dialog scaled).
+    <div className="confirm-dialog-overlay">
       <div
         className="confirm-dialog"
         role="alertdialog"
         aria-modal="true"
         aria-describedby="confirm-dialog-message"
+        style={{ zoom: "var(--ui-scale, 1)" }}
       >
         <div className="confirm-dialog-message" id="confirm-dialog-message">
           {message}
