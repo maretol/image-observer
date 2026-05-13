@@ -1,9 +1,8 @@
 name: CI
 
 # Runs on every push and pull request. Verifies the codebase compiles, the
-# Go and TypeScript test suites pass, and the frontend type-checks.
-# Does NOT call `wails build` — release artifacts are produced only by
-# `release.yml` on tag pushes (Windows-only, see docs/todo.md §I-5).
+# Go and TypeScript test suites pass, and frontend self-tests catch UI regressions.
+# Heavy `wails build` smoke stays in `build-smoke.yml` so PR CI remains fast.
 
 on:
   pull_request:
@@ -63,10 +62,18 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Frontend test (vitest)
+      - name: Frontend test (vitest + DOM smoke)
         working-directory: frontend
         run: npm run test
 
       - name: Frontend type-check
         working-directory: frontend
         run: npx tsc --noEmit
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Frontend visual smoke (Playwright)
+        working-directory: frontend
+        run: npm run test:ui
