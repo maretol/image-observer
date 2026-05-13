@@ -50,7 +50,7 @@ export function setBrowserMockState(patch: Partial<MockState>) {
   installBrowserMocks();
 }
 
-export function installBrowserMocks(opts: { eagerIntersection?: boolean } = {}) {
+export function installBrowserMocks(opts: { immediateIntersectionCallbacks?: boolean } = {}) {
   const app = {
     CreateEmptyClassification: async () => undefined,
     GetImageInfo: async () => mockState.imageInfo,
@@ -95,7 +95,7 @@ export function installBrowserMocks(opts: { eagerIntersection?: boolean } = {}) 
     };
   }
 
-  if (opts.eagerIntersection || typeof window.IntersectionObserver === 'undefined') {
+  if (opts.immediateIntersectionCallbacks || typeof window.IntersectionObserver === 'undefined') {
     window.IntersectionObserver = class IntersectionObserver {
       root = null;
       rootMargin = '0px';

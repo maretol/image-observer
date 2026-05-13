@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
-async function gotoScenario(page: import('@playwright/test').Page, scenario: string) {
+async function gotoScenario(page: Page, scenario: string) {
   await page.goto(`/smoke.html?scenario=${scenario}`);
   await expect(page.getByTestId('smoke-root')).toBeVisible();
 }

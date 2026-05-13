@@ -5,7 +5,7 @@ import './App.css';
 import { installBrowserMocks } from './test/browserMocks';
 import { SmokeScenario } from './test/smokeScenarios';
 
-installBrowserMocks({ eagerIntersection: true });
+installBrowserMocks({ immediateIntersectionCallbacks: true });
 
 document.body.dataset.smoke = 'true';
 const scenario = new URLSearchParams(window.location.search).get('scenario') ?? 'settings';
