@@ -3,10 +3,14 @@ import { afterEach, beforeEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import { installBrowserMocks, resetBrowserMocks } from './browserMocks';
 
-installBrowserMocks({ eagerIntersection: true });
+if (typeof window !== 'undefined') {
+  installBrowserMocks({ eagerIntersection: true });
+}
 
 beforeEach(() => {
-  resetBrowserMocks();
+  if (typeof window !== 'undefined') {
+    resetBrowserMocks();
+  }
 });
 
 afterEach(() => {

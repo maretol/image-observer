@@ -1,6 +1,7 @@
+// @vitest-environment jsdom
 import { useState } from 'react';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 import { ViewerGrid } from './ViewerGrid';
 import {
   closeTabInLeaf,
@@ -43,14 +44,13 @@ function ViewerGridHarness() {
 
 describe('ViewerGrid smoke', () => {
   it('renders existing tabs and switches the active tab', async () => {
-    const user = userEvent.setup();
     render(<ViewerGridHarness />);
 
     expect(screen.getByText('cat-01.png')).toBeInTheDocument();
     expect(screen.getByText('dog-01.png')).toBeInTheDocument();
     expect(screen.getByText('bird-01.png')).toBeInTheDocument();
 
-    await user.click(screen.getByText('dog-01.png'));
+    fireEvent.click(screen.getByText('dog-01.png'));
     expect(screen.getAllByText('dog-01.png')[0]).toBeInTheDocument();
   });
 });

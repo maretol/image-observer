@@ -1,11 +1,11 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+// @vitest-environment jsdom
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 import { SettingsDialog } from './SettingsDialog';
 import { makeSettings } from '../../test/fixtures';
 
 describe('SettingsDialog smoke', () => {
   it('switches category and section content', async () => {
-    const user = userEvent.setup();
     render(
       <SettingsDialog
         open
@@ -21,10 +21,10 @@ describe('SettingsDialog smoke', () => {
 
     expect(screen.getByText('ログレベル')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'タグ色' }));
-    expect(screen.getByText('既知タグのバッジ色')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'タグ色' }));
+    expect(screen.getByText('既知タグのバッジ色マッピング (settings.json で編集)。')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'ショートカット' }));
-    expect(screen.getByText('現在のキーバインド一覧')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'ショートカット' }));
+    expect(screen.getByText('現在のキーバインド一覧 (再バインドは未対応)。')).toBeInTheDocument();
   });
 });

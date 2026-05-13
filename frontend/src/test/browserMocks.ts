@@ -99,6 +99,7 @@ export function installBrowserMocks(opts: { eagerIntersection?: boolean } = {}) 
     window.IntersectionObserver = class IntersectionObserver {
       root = null;
       rootMargin = '0px';
+      scrollMargin = '0px';
       thresholds = [0];
       #callback: IntersectionObserverCallback;
 
@@ -130,7 +131,7 @@ export function installBrowserMocks(opts: { eagerIntersection?: boolean } = {}) 
       takeRecords() {
         return [];
       }
-    } as typeof IntersectionObserver;
+    } as unknown as typeof IntersectionObserver;
   }
 
   if (typeof URL.createObjectURL !== 'function') {

@@ -5,7 +5,8 @@ export default defineConfig({
   plugins: [react()],
   test: {
     css: true,
-    environmentMatchGlobs: [['src/**/*.dom.test.tsx', 'jsdom']],
+    environmentMatchGlobs: [['**/*.dom.test.tsx', 'jsdom']],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.{idea,git,cache,output,temp}/**', 'e2e/**'],
     setupFiles: './src/test/setup.ts',
   },
 });

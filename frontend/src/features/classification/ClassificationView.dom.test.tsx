@@ -1,13 +1,12 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { vi } from 'vitest';
+// @vitest-environment jsdom
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import { ClassificationView } from './ClassificationView';
 import type { UseClassificationReturn } from './useClassification';
 import { makeLoadResult } from '../../test/fixtures';
 
 describe('ClassificationView smoke', () => {
   it('opens a card in viewer and exposes bulk actions', async () => {
-    const user = userEvent.setup();
     const loadResult = makeLoadResult();
     const onOpenInViewer = vi.fn();
     const onOpenManyInTabs = vi.fn();
@@ -65,10 +64,10 @@ describe('ClassificationView smoke', () => {
       />,
     );
 
-    await user.click(screen.getByTitle('cat-01.png'));
+    fireEvent.click(screen.getAllByTitle('cat-01.png')[0]);
     expect(onOpenInViewer).toHaveBeenCalledWith('cat-01.png');
 
-    await user.click(screen.getByRole('button', { name: 'タブで開く' }));
+    fireEvent.click(screen.getByRole('button', { name: 'タブで開く' }));
     expect(onOpenManyInTabs).toHaveBeenCalledWith(['cat-01.png', 'cat-02.png']);
     expect(clearSelected).toHaveBeenCalledTimes(1);
   });
