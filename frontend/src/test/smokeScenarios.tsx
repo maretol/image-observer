@@ -21,7 +21,8 @@ import { makeLoadResult, makeSettings, makeViewerLayout } from './fixtures';
 export function SmokeScenario({ scenario }: { scenario: string }) {
   if (scenario === 'classification') return <ClassificationScenario />;
   if (scenario === 'viewer') return <ViewerScenario />;
-  return <SettingsScenario />;
+  if (scenario === 'settings') return <SettingsScenario />;
+  throw new Error(`unknown smoke scenario: ${scenario}`);
 }
 
 function ClassificationScenario() {

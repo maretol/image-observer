@@ -8,15 +8,15 @@ export default defineConfig({
     timeout: 10_000,
   },
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: 'http://127.0.0.1:5173',
     browserName: 'chromium',
     headless: true,
     viewport: { width: 1440, height: 960 },
     deviceScaleFactor: 1,
   },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 4173 --strictPort',
-    url: 'http://127.0.0.1:4173/smoke.html?scenario=settings',
+    command: 'npm run dev -- --host 127.0.0.1 --port 5173 --strictPort',
+    url: 'http://127.0.0.1:5173/smoke.html?scenario=settings',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
