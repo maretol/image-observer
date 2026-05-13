@@ -101,15 +101,15 @@ export function installBrowserMocks(opts: { eagerIntersection?: boolean } = {}) 
       rootMargin = '0px';
       scrollMargin = '0px';
       thresholds = [0];
-      #callback: IntersectionObserverCallback;
+      private callback: IntersectionObserverCallback;
 
       constructor(callback: IntersectionObserverCallback) {
-        this.#callback = callback;
+        this.callback = callback;
       }
 
       observe(target: Element) {
         queueMicrotask(() => {
-          this.#callback(
+          this.callback(
             [
               {
                 isIntersecting: true,

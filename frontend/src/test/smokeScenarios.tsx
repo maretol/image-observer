@@ -140,7 +140,7 @@ function SettingsScenario() {
         loading={false}
         error={null}
         logPath="/tmp/image-observer/app.log"
-        onChange={(_patch: Partial<typeof data>) => {}}
+        onChange={() => {}}
         onReset={() => {}}
         onClose={() => {}}
       />
