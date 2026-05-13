@@ -14,6 +14,21 @@ html, body, #root {
   width: 100vw;
 }
 
+/* UI scale (#10, #12, #39). The app root stays at zoom 1 so the layout
+   always fills the window and the image canvas renders at native pixel
+   size. Scale is applied per chrome container below; --ui-scale is set on
+   <html> from App.tsx so portaled overlays (ConfirmDialog, Toast) can
+   read it too. `zoom` is non-standard but supported in WebView2 and
+   WebKitGTK — both render targets. */
+.top-tabs,
+.tab-bar,
+.tab-context-menu,
+.tab-drag-ghost,
+.cls-view,
+.settings-dialog {
+  zoom: var(--ui-scale, 1);
+}
+
 .top-tabs {
   display: flex;
   flex-direction: row;

@@ -104,7 +104,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={toast}>
       {children}
       {createPortal(
-        <div className="toast-host">
+        // Portals to <body>, outside .app-toplevel — read --ui-scale (set on
+        // <html> in App.tsx) directly so toasts scale with the rest of the
+        // chrome. See App.css "UI scale" block.
+        <div className="toast-host" style={{ zoom: "var(--ui-scale, 1)" }}>
           {items.map((item) => (
             <ToastView
               key={item.id}
