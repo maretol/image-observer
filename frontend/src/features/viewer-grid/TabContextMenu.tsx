@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 type Props = {
   leafId: string;
@@ -19,6 +19,8 @@ export function TabContextMenu({
   onCloseTab,
   onSplit,
 }: Props) {
+  const itemsRef = useRef<Array<HTMLButtonElement | null>>([]);
+
   useEffect(() => {
     // Defer registration so we don't catch the same click that opened the menu.
     const t = window.setTimeout(() => {
@@ -28,6 +30,8 @@ export function TabContextMenu({
       };
       document.addEventListener("mousedown", onDocMouseDown);
       document.addEventListener("keydown", onKey);
+      // Move focus into the menu so keyboard users land on the first item.
+      itemsRef.current[0]?.focus();
       cleanup = () => {
         document.removeEventListener("mousedown", onDocMouseDown);
         document.removeEventListener("keydown", onKey);
@@ -40,6 +44,38 @@ export function TabContextMenu({
     };
   }, [onClose]);
 
+  // Vertical arrow-key navigation between items. Wraps top↔bottom.
+  const focusItem = (idx: number) => {
+    const items = itemsRef.current.filter(
+      (el): el is HTMLButtonElement => el !== null,
+    );
+    if (items.length === 0) return;
+    const wrapped = (idx + items.length) % items.length;
+    items[wrapped]?.focus();
+  };
+
+  const onMenuKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = itemsRef.current.filter(
+      (el): el is HTMLButtonElement => el !== null,
+    );
+    const current = items.indexOf(
+      document.activeElement as HTMLButtonElement,
+    );
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      focusItem(current < 0 ? 0 : current + 1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      focusItem(current < 0 ? items.length - 1 : current - 1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      focusItem(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      focusItem(items.length - 1);
+    }
+  };
+
   // Position clamped within viewport.
   const left = Math.min(x, window.innerWidth - 200);
   const top = Math.min(y, window.innerHeight - 120);
@@ -47,18 +83,45 @@ export function TabContextMenu({
   return (
     <div
       className="tab-context-menu"
+      role="menu"
+      aria-label="タブ操作メニュー"
       style={{ position: "fixed", left, top }}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
+      onKeyDown={onMenuKeyDown}
     >
-      <button className="ctx-item" onClick={onCloseTab}>
+      <button
+        ref={(el) => {
+          itemsRef.current[0] = el;
+        }}
+        type="button"
+        role="menuitem"
+        className="ctx-item"
+        onClick={onCloseTab}
+      >
         閉じる
       </button>
-      <div className="ctx-divider" />
-      <button className="ctx-item" onClick={() => onSplit("col")}>
+      <div className="ctx-divider" role="separator" />
+      <button
+        ref={(el) => {
+          itemsRef.current[1] = el;
+        }}
+        type="button"
+        role="menuitem"
+        className="ctx-item"
+        onClick={() => onSplit("col")}
+      >
         右に分割
       </button>
-      <button className="ctx-item" onClick={() => onSplit("row")}>
+      <button
+        ref={(el) => {
+          itemsRef.current[2] = el;
+        }}
+        type="button"
+        role="menuitem"
+        className="ctx-item"
+        onClick={() => onSplit("row")}
+      >
         下に分割
       </button>
     </div>

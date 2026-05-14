@@ -261,6 +261,119 @@ git grep -nE "(:hover|cursor: pointer)" frontend/src/App.css
 
 ---
 
+## G. コミット運用
+
+### G-1. commit は Claude が実行しない — コマンドを提示してユーザに任せる
+
+このリポジトリは **署名付き commit のみ取り込み可** に制限されている。
+GPG / SSH 署名鍵の passphrase は Claude Code に共有していないため、
+Claude が `git commit` を直接走らせると署名できずに失敗する (gpg-agent が
+non-interactive 環境で pinentry を起動できずタイムアウトする)。
+
+そのため commit 段階に入ったら、Claude は実行を止めて以下を行う:
+
+1. コミットメッセージを起こす (HEREDOC で扱えるよう改行込みで提示)
+2. `git commit -m "$(cat <<'EOF' ... EOF)"` の形でコマンドをそのまま出す
+3. ユーザがローカルでそのコマンドを走らせて署名付き commit を作る
+
+過去事例: issue #30 の PR で Claude が `git commit` を実行 → `gpg failed to
+sign the data` でタイムアウト失敗。`--no-gpg-sign` でバイパスする手は
+ルール上 NG (system prompt の "NEVER bypass signing unless explicitly asked")。
+
+`git add` / `git status` / `git diff` / `git push` / `gh pr create` 等は
+Claude が走らせて構わない。止まるのは **commit を作るコマンド** だけ。
+
+---
+
+## H. PR 投稿前セルフレビューチェックリスト
+
+Copilot reviewer / 人間レビュアーが **複数ラウンドに分けて指摘してくる頻出
+パターン** を集約したチェックリスト。PR を作る直前にこのリスト全項目に目を通せ
+ば、1〜2 ラウンド分のレビュー往復が省ける。
+
+新しい指摘パターンが出たら追記して育てる (= 過去 PR の Round 2 以降で出てきた
+指摘で「初回に気づけたな」と思うもの)。古くなった項目は削除して短く保つ。
+
+### H-1. ARIA / アクセシビリティ
+
+- **`alertdialog` / `dialog` には accessible name を必ず付ける**
+  - `aria-label` (短い名前) or `aria-labelledby` (見出し要素 id)。`aria-describedby` は
+    本文用でラベルにはならない。
+  - 過去事例: `ConfirmDialog` で `aria-describedby` だけ付けて name が無かった (#43)
+- **`role="button"` / `role="tab"` の中に他の interactive 要素を入れる場合**
+  - 厳密 ARIA Authoring Practices では非推奨だが、VS Code / Finder などで広く使われる
+    現実的パターン。本リポジトリは現状受け入れている。
+  - 入れる場合は子の interactive 要素に `tabIndex={-1}` を付けて Tab 巡回 / roving
+    tabindex から除外する。
+  - 過去事例: `TabBar` の tab 内 close button、`Card.cls-card-thumb` 内の checkbox /
+    edit button (#43)
+- 新規 interactive 要素には **`:focus-visible` スタイル**を必ず付ける (F-1)。**同じ画面
+  内の周辺 interactive 要素にも同レベルの focus 表示があるか**併せて確認 (F-1 拡張)
+- input は **`<label htmlFor>` か `aria-label`** で必ずラベル関連付け (F-2)
+
+### H-2. イベントハンドラ
+
+- **新規 `onKeyDown` / `onClick` がバブリングで二重発火しないか**
+  - 親に handler を付けて子に interactive 要素がある場合、子で Enter/Space を押すと
+    子の通常動作 + 親 handler が両方走る。
+  - 対策: 親側で `if (e.target !== e.currentTarget) return;` か、子側で
+    `stopPropagation()`。
+  - 過去事例: `Card.cls-card-thumb` の `onKeyDown` (#43)
+- **PointerEvent ベースのドラッガはマルチタッチ / 二重 pointerdown を防御**
+  - 既存ドラッグ中に新規 pointerdown が来ると、`dragRef` が上書きされ古い `release()`
+    が orphan 化し、`body.cursor` / `userSelect` が戻らないリークを生む。
+  - 対策: `onPointerDown` 冒頭で `if (dragRef.current) return;`。
+  - 過去事例: `ImageView` / `GridSplitter` (#43)
+- **`pointercancel` と unmount の cleanup 両方で release が呼ばれる**こと
+  - drag 中に component が unmount される / ブラウザが drag をキャンセルするケース。
+
+### H-3. グローバル / モジュール state のリーク
+
+- **token stack / baseline cache / module-scoped Map** などの global state は
+  **full lifecycle で正しくリセット** されるか
+  - 初回キャプチャしたままにせず、空になった時に再キャプチャ可能な状態へ戻す。
+  - 過去事例: `bodyStyles.ts` で `baseCursor` / `baseUserSelect` を null に戻し忘れ、
+    ドラッグ間に他処理が `body.style` を変えても次のドラッグ終了で巻き戻された (#43)
+
+### H-4. CSS クラス参照
+
+- **参照する CSS クラスが実在するか必ず grep で確認** (新規 / 既存問わず)
+  - 既存コードから引き継いだクラス名も「動いていた前提」で信用しない。
+  - 過去事例: `MergePromptDialog` が Phase 4 v1.2 から未定義の `.confirm-overlay` を
+    引きずっており、本来 backdrop / 中央配置が効いていなかった (#43)
+  - 確認: `git grep -n '\.confirm-overlay' frontend/src/App.css` のようにピンポイントで
+- **CSS rule を追加したら、同じ目的の周辺要素にも同じ rule が必要か**確認
+  - 過去事例: UI scale の chrome rule に `.top-tabs` / `.tab-bar` を追加したが
+    `.cls-empty-state` を追加し忘れていた (#41)
+
+### H-5. Modal / Dialog の意図と prop default
+
+- **`ModalShell` の `closeOnBackdrop` default (true)** が「そのダイアログの意図」と
+  一致するか
+  - yes/no 確認 (`ConfirmDialog`) や複数 action 必須 (`MergePromptDialog`) なら明示的に
+    `false` を渡す。誤クリックで暗黙のキャンセル扱いになるのは大抵 NG。
+  - 過去事例: `MergePromptDialog` が旧コードでは backdrop click を無視していたのに、
+    ModalShell 移行で default true のまま放置された (#43)
+- **`closeOnEscape`** も意図通りか (大抵 true でよい)
+
+### H-6. ドキュメント追従
+
+- **A-3 に従い、`.claude/context.md` の説明が**実装の最終形と**一致**しているか
+  - 旧クラス名 / 旧 hook 名 / 旧フロー説明が残っていないか。
+  - 過去事例: context.md §20 に `confirm-overlay` を既存 CSS クラスとして書いていたが、
+    実コードは `confirm-dialog-overlay` に統一済みだった (#43)
+- **PR 説明の test plan** に、自動テストできない手動確認項目を明示しているか
+
+### H-7. レビュー指摘を受けた後の波及確認
+
+レビューで 1 件指摘されたら、**同種のパターンが他に無いか必ず grep で広く探す**。
+Copilot は diff 中心に見るので「同じ問題が別ファイルにもある」のは検出されにくい。
+
+例:
+- ARIA name 不在指摘 → 全 `role="alertdialog"` / `role="dialog"` を grep して確認
+- マルチタッチ二重 pointerdown 指摘 → 全 `onPointerDown` を grep
+- 未定義 CSS クラス指摘 → 全 `overlayClassName=` / `className=` を grep
+
 ## まとめ
 
 実装着手前に該当する節を再読する。特に:
@@ -270,3 +383,9 @@ git grep -nE "(:hover|cursor: pointer)" frontend/src/App.css
 - export 公開の追加 (B-1, B-2) → 参照型なら必ず clone
 - ドキュメント更新 (A-1, A-2) → 実体と突き合わせる
 - 実装 iterate / レビュー対応 (A-3) → 変更後に context.md / コメントが追従しているか再確認
+- commit 段階 (G-1) → コマンドを提示してユーザに任せる、Claude は実行しない
+
+PR を作る直前には:
+
+- **H 章のチェックリスト全項目** を通読し、自分の変更に該当する箇所を確認
+- レビューが返ってきたら **H-7 の波及確認** を必ず実施

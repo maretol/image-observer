@@ -387,7 +387,7 @@ function ViewerSection({ data, onChange }: SectionProps) {
     <>
       <Field
         label="マウスホイールの動作"
-        hint="Shift / Ctrl + ホイール モードでは通常スクロールが画像のパン (移動) になります。ドラッグでのパンは引き続き利用できます。"
+        hint="どちらのモードでも、ホイールでズーム / パンするのは画像領域だけです。タブバー上では常にタブ列の横スクロールに使われ、ズームしません。Shift / Ctrl + ホイール モードでは画像領域の通常スクロールがパン (移動) になります。ドラッグでのパンは引き続き利用できます。"
       >
         <Segment
           name="wheelMode"
@@ -708,7 +708,7 @@ const KEYBINDINGS: Array<{ keys: string; action: string; scope: string }> = [
   { keys: "Ctrl+-", action: "ズームアウト (中心基準)", scope: "ビューア" },
   {
     keys: "Shift+ホイール / Ctrl+ホイール",
-    action: "ズームイン / アウト (Shift / Ctrl + ホイール モード時のみ)",
+    action: "ズームイン / アウト (画像領域のみ。Shift / Ctrl + ホイール モード時)",
     scope: "ビューア",
   },
   {

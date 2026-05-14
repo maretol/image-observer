@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import type { classification } from "../../../wailsjs/go/models";
+import { ModalShell } from "./ModalShell";
 
 export type MergePromptDialogProps = {
   open: boolean;
@@ -23,53 +25,64 @@ export function MergePromptDialog({
   onSkip,
   onCancel,
 }: MergePromptDialogProps) {
-  if (!open || !preview) return null;
+  const mergeRef = useRef<HTMLButtonElement>(null);
+  if (!preview) return null;
   const children = preview.children ?? [];
   return (
-    <div className="confirm-overlay" role="dialog" aria-modal="true">
-      <div className="confirm-dialog cls-merge-dialog">
-        <div className="confirm-message">
-          <strong>子フォルダのサイドカーが見つかりました</strong>
-          <p>
-            以下の子フォルダの分類データを親 (
-            <code>_classification.json</code>) に取り込めます。
-          </p>
-        </div>
-        <ul className="cls-merge-list">
-          {children.map((c) => (
-            <li key={c.subfolder} className="cls-merge-item">
-              <span className="cls-merge-folder">{c.subfolder}/</span>
-              <span className="cls-merge-source">{c.source}</span>
-              <span className="cls-merge-counts">
-                {c.nonEmptyCount} / {c.entryCount} 件
-              </span>
-            </li>
-          ))}
-        </ul>
-        <div className="confirm-buttons">
-          <button
-            type="button"
-            className="confirm-btn confirm-btn-cancel"
-            onClick={onCancel}
-          >
-            キャンセル
-          </button>
-          <button
-            type="button"
-            className="confirm-btn confirm-btn-secondary"
-            onClick={onSkip}
-          >
-            無視して空の親サイドカーを作成
-          </button>
-          <button
-            type="button"
-            className="confirm-btn confirm-btn-primary"
-            onClick={onMerge}
-          >
-            マージして親に取込
-          </button>
-        </div>
+    <ModalShell
+      open={open}
+      onClose={onCancel}
+      // Three explicit actions (merge / skip / cancel) — a stray backdrop
+      // click shouldn't be treated as cancel, since it conflates "I didn't
+      // mean to click" with a real decision to ignore the children.
+      closeOnBackdrop={false}
+      initialFocusRef={mergeRef}
+      ariaLabel="子フォルダのサイドカーをマージ"
+      overlayClassName="confirm-dialog-overlay"
+      dialogClassName="confirm-dialog cls-merge-dialog"
+    >
+      <div className="confirm-message">
+        <strong>子フォルダのサイドカーが見つかりました</strong>
+        <p>
+          以下の子フォルダの分類データを親 (
+          <code>_classification.json</code>) に取り込めます。
+        </p>
       </div>
-    </div>
+      <ul className="cls-merge-list">
+        {children.map((c) => (
+          <li key={c.subfolder} className="cls-merge-item">
+            <span className="cls-merge-folder">{c.subfolder}/</span>
+            <span className="cls-merge-source">{c.source}</span>
+            <span className="cls-merge-counts">
+              {c.nonEmptyCount} / {c.entryCount} 件
+            </span>
+          </li>
+        ))}
+      </ul>
+      <div className="confirm-buttons">
+        <button
+          type="button"
+          className="confirm-btn confirm-btn-cancel"
+          onClick={onCancel}
+        >
+          キャンセル
+        </button>
+        <button
+          type="button"
+          className="confirm-btn confirm-btn-secondary"
+          onClick={onSkip}
+        >
+          無視して空の親サイドカーを作成
+        </button>
+        <button
+          ref={mergeRef}
+          type="button"
+          className="confirm-btn confirm-btn-primary"
+          onClick={onMerge}
+        >
+          マージして親に取込
+        </button>
+      </div>
+    </ModalShell>
   );
 }

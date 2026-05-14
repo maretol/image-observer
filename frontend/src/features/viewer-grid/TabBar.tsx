@@ -62,6 +62,25 @@ export function TabBar({
     onStartDrag(leafId, index, path, e);
   };
 
+  // Roving tabindex with Left/Right/Home/End for the tab strip. The newly
+  // focused tab also becomes active (standard "follow focus" tabs pattern,
+  // matching the click behaviour here since switching tabs is cheap).
+  const onTabKeyDown = (e: React.KeyboardEvent, index: number) => {
+    let next: number | null = null;
+    if (e.key === "ArrowLeft") next = index > 0 ? index - 1 : tabs.length - 1;
+    else if (e.key === "ArrowRight")
+      next = index < tabs.length - 1 ? index + 1 : 0;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabs.length - 1;
+    if (next === null) return;
+    e.preventDefault();
+    onSelect(next);
+    // Move DOM focus to match aria-selected = focused tab.
+    const bar = barRef.current;
+    const target = bar?.querySelector<HTMLElement>(`[${DATA_TAB}="${next}"]`);
+    target?.focus();
+  };
+
   const isInsertHere =
     dnd?.active && dnd.hit?.kind === "tab-bar" && dnd.hit.leafId === leafId;
   const insertIdx = isInsertHere
@@ -71,6 +90,7 @@ export function TabBar({
   return (
     <div
       className="tab-bar"
+      role="tablist"
       ref={barRef}
       {...{ [DATA_TAB_BAR]: leafId }}
     >
@@ -79,9 +99,21 @@ export function TabBar({
           {insertIdx === i && <span className="tab-insert-indicator" />}
           <div
             className={`tab ${i === activeIndex ? "active" : ""}`}
-            onClick={() => onSelect(i)}
+            role="tab"
+            aria-selected={i === activeIndex}
+            tabIndex={i === activeIndex ? 0 : -1}
+            onClick={(e) => {
+              onSelect(i);
+              // onPointerDown calls preventDefault to suppress text selection
+              // during DnD, which also blocks the default focus shift on
+              // mousedown. Without this manual focus(), DOM focus stays on
+              // the previously active tab while aria-selected / tabIndex=0
+              // move to the new one, and the next arrow key lands wrong.
+              e.currentTarget.focus();
+            }}
             onMouseDown={(e) => onTabMouseDown(e, i)}
             onPointerDown={(e) => onTabPointerDown(e, i, tab.path)}
+            onKeyDown={(e) => onTabKeyDown(e, i)}
             onContextMenu={(e) => {
               if (onContextMenu) {
                 e.preventDefault();
@@ -99,6 +131,7 @@ export function TabBar({
                 onClose(i);
               }}
               aria-label="閉じる"
+              tabIndex={-1}
             >
               <CloseIcon />
             </button>

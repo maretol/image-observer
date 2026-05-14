@@ -41,11 +41,29 @@ export function Card({
 
   const tags = extractTags(entry.folder);
 
+  // Primary action depends on the current mode (mirror of onClick logic, but
+  // keyboard activation doesn't carry shift/ctrl meaning — Space/Enter on a
+  // selection-mode thumb toggles selection, otherwise it opens the image).
+  const activate = () => {
+    if (showCheckbox && selectionMode) {
+      onToggleSelect();
+    } else {
+      onClickThumb();
+    }
+  };
+
   return (
     <div className={`cls-card ${selected ? "cls-card-selected" : ""}`}>
       <div
         ref={ref}
         className="cls-card-thumb"
+        role="button"
+        tabIndex={0}
+        aria-label={
+          showCheckbox && selectionMode
+            ? `${entry.filename} の選択を切替`
+            : `${entry.filename} を開く`
+        }
         onClick={(e) => {
           if (modifierEnabled && e.shiftKey) {
             onExtendSelectionTo();
@@ -63,6 +81,17 @@ export function Card({
             return;
           }
           onClickThumb();
+        }}
+        onKeyDown={(e) => {
+          // Only react when the thumb itself is focused — without this, an
+          // Enter/Space on the inner checkbox or edit button bubbles up and
+          // double-fires (e.g. checkbox toggles selection, parent then runs
+          // activate() and toggles it back).
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            activate();
+          }
         }}
         title={entry.filename}
         style={
