@@ -261,6 +261,28 @@ git grep -nE "(:hover|cursor: pointer)" frontend/src/App.css
 
 ---
 
+## G. コミット運用
+
+### G-1. commit は Claude が実行しない — コマンドを提示してユーザに任せる
+
+このリポジトリは **署名付き commit のみ取り込み可** に制限されている。
+GPG / SSH 署名鍵の passphrase は Claude Code に共有していないため、
+Claude が `git commit` を直接走らせると署名できずに失敗する (gpg-agent が
+non-interactive 環境で pinentry を起動できずタイムアウトする)。
+
+そのため commit 段階に入ったら、Claude は実行を止めて以下を行う:
+
+1. コミットメッセージを起こす (HEREDOC で扱えるよう改行込みで提示)
+2. `git commit -m "$(cat <<'EOF' ... EOF)"` の形でコマンドをそのまま出す
+3. ユーザがローカルでそのコマンドを走らせて署名付き commit を作る
+
+過去事例: issue #30 の PR で Claude が `git commit` を実行 → `gpg failed to
+sign the data` でタイムアウト失敗。`--no-gpg-sign` でバイパスする手は
+ルール上 NG (system prompt の "NEVER bypass signing unless explicitly asked")。
+
+`git add` / `git status` / `git diff` / `git push` / `gh pr create` 等は
+Claude が走らせて構わない。止まるのは **commit を作るコマンド** だけ。
+
 ## まとめ
 
 実装着手前に該当する節を再読する。特に:
@@ -270,3 +292,4 @@ git grep -nE "(:hover|cursor: pointer)" frontend/src/App.css
 - export 公開の追加 (B-1, B-2) → 参照型なら必ず clone
 - ドキュメント更新 (A-1, A-2) → 実体と突き合わせる
 - 実装 iterate / レビュー対応 (A-3) → 変更後に context.md / コメントが追従しているか再確認
+- commit 段階 (G-1) → コマンドを提示してユーザに任せる、Claude は実行しない
