@@ -1,4 +1,11 @@
-import { useMemo } from "react";
+import {
+  type MutableRefObject,
+  type UIEvent,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
 import { ConflictDialog } from "../../shared/components/ConflictDialog";
 import { MergePromptDialog } from "../../shared/components/MergePromptDialog";
 import { ClassificationHeader } from "./ClassificationHeader";
@@ -16,6 +23,10 @@ export type ClassificationViewProps = {
   // "checkbox" (default) | "modifier" | "both" — see settings.SettingsData.
   // Falls back to "checkbox" while settings load.
   multiSelectMode?: string;
+  // Owned by the parent so the scroll position survives ClassificationView
+  // unmount when the top tab switches away from "list". Folder changes reset
+  // it to 0 (handled below). Not persisted to settings/state.json.
+  scrollTopRef: MutableRefObject<number>;
   onOpenInViewer: (filename: string) => void;
   onOpenManyInTabs: (filenames: string[]) => void;
   onOpenManyAsSplit: (filenames: string[]) => void;
@@ -28,6 +39,7 @@ const SPLIT_OPEN_LIMIT = 8;
 export function ClassificationView({
   state,
   multiSelectMode = "checkbox",
+  scrollTopRef,
   onOpenInViewer,
   onOpenManyInTabs,
   onOpenManyAsSplit,
@@ -110,6 +122,38 @@ export function ClassificationView({
     multiSelectMode === "checkbox" || multiSelectMode === "both";
   const modifierEnabled =
     multiSelectMode === "modifier" || multiSelectMode === "both";
+
+  // Scroll position survival (#40).
+  // The `.cls-groups` element can disappear and reappear during a single
+  // ClassificationView lifetime (filter clears all entries → comes back), and
+  // the ClassificationView itself unmounts when the top tab switches to
+  // "viewer". The parent-owned `scrollTopRef` outlives both. A ref callback
+  // on the scroll container handles the "remount" cases by restoring on
+  // attach; `onScroll` writes back. Folder changes reset to top.
+  const groupsElRef = useRef<HTMLDivElement | null>(null);
+  const groupsRefCallback = useCallback(
+    (el: HTMLDivElement | null) => {
+      groupsElRef.current = el;
+      if (el) el.scrollTop = scrollTopRef.current;
+    },
+    [scrollTopRef],
+  );
+  const onGroupsScroll = useCallback(
+    (e: UIEvent<HTMLDivElement>) => {
+      scrollTopRef.current = e.currentTarget.scrollTop;
+    },
+    [scrollTopRef],
+  );
+  // Reset on folder change. Initialized with the current folderPath so the
+  // first mount after a tab switch (folderPath unchanged) does NOT reset and
+  // the restore-on-attach path above wins.
+  const lastFolderRef = useRef(folderPath);
+  useLayoutEffect(() => {
+    if (lastFolderRef.current === folderPath) return;
+    lastFolderRef.current = folderPath;
+    scrollTopRef.current = 0;
+    if (groupsElRef.current) groupsElRef.current.scrollTop = 0;
+  }, [folderPath, scrollTopRef]);
 
   if (!folderPath) {
     return (
@@ -220,7 +264,11 @@ export function ClassificationView({
       ) : filteredGroups.length === 0 ? (
         <div className="cls-grid-empty">該当する画像がありません</div>
       ) : (
-        <div className="cls-groups">
+        <div
+          className="cls-groups"
+          ref={groupsRefCallback}
+          onScroll={onGroupsScroll}
+        >
           {filteredGroups.map((g) => (
             <DirectoryGroup
               key={g.key}

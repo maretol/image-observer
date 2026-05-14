@@ -112,6 +112,13 @@ function AppInner({ initialState }: AppInnerProps) {
     confirm,
   });
 
+  // List-tab scroll position (#40). Owned here so it survives the
+  // ClassificationView unmount that happens when the top tab switches to
+  // "viewer". ClassificationView restores from this on mount and writes back
+  // on scroll; folder changes inside ClassificationView reset it to 0.
+  // Intentionally not persisted to settings/state.json.
+  const listScrollTopRef = useRef(0);
+
   // Window dimensions/position polling (Wails has no window-move event).
   const [windowState, setWindowState] = useState({
     width: initialState?.window?.width ?? 1024,
@@ -361,6 +368,7 @@ function AppInner({ initialState }: AppInnerProps) {
           <ClassificationView
             state={classification}
             multiSelectMode={settings.data?.multiSelectMode}
+            scrollTopRef={listScrollTopRef}
             onOpenInViewer={onOpenInViewer}
             onOpenManyInTabs={onOpenManyInTabs}
             onOpenManyAsSplit={onOpenManyAsSplit}
