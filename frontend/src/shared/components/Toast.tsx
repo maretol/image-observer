@@ -104,9 +104,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={toast}>
       {children}
       {createPortal(
-        // Portals to <body>, outside .app-toplevel — read --ui-scale (set on
-        // <html> in App.tsx) directly so toasts scale with the rest of the
-        // chrome. See App.css "UI scale" block.
+        // Portaled to <body>, outside .app-toplevel. .toast-host は bottom/right
+        // anchored で content-sized なので、ConfirmDialog の overlay と違って
+        // host 自体に zoom をかけても画面カバレッジは崩れない (覆うべき面が
+        // ない)。それゆえ overlay 等倍 / inner scale の非対称パターンは取らず、
+        // host に直接 --ui-scale を当てている。
         <div className="toast-host" style={{ zoom: "var(--ui-scale, 1)" }}>
           {items.map((item) => (
             <ToastView
