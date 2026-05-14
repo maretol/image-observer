@@ -83,6 +83,11 @@ export function Card({
           onClickThumb();
         }}
         onKeyDown={(e) => {
+          // Only react when the thumb itself is focused — without this, an
+          // Enter/Space on the inner checkbox or edit button bubbles up and
+          // double-fires (e.g. checkbox toggles selection, parent then runs
+          // activate() and toggles it back).
+          if (e.target !== e.currentTarget) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             activate();

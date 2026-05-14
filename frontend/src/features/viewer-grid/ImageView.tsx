@@ -310,6 +310,10 @@ export function ImageView({
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.button !== 0) return;
       if (!tab.initialized) return;
+      // A drag is already in flight (e.g. multi-touch second finger). Ignore
+      // the new pointer so we don't overwrite dragRef and orphan the existing
+      // release(), which would leak the body cursor/userSelect override.
+      if (dragRef.current) return;
       e.preventDefault();
       const release = pushBodyStyle({
         cursor: "grabbing",
