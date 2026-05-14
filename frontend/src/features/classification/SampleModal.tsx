@@ -21,8 +21,9 @@ type SampleModalProps = {
   // POSIX path the modal should show. null while closed.
   imagePath: string | null;
   // Display name shown in the header. Caller supplies it so we don't have
-  // to parse paths here (folderPath has a trailing slash and filename may
-  // contain subdirectory separators).
+  // to parse paths here — `filename` may contain subdirectory separators
+  // (e.g. `child/foo.png` for recursively-scanned sidecars) and the caller
+  // has already decided how it wants to label that.
   filename: string | null;
   onClose: () => void;
   onOpenInViewer: () => void;
