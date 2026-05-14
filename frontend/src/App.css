@@ -224,6 +224,9 @@ html, body, #root {
   inset: 0;
   overflow: hidden;
   cursor: grab;
+  /* Suppress browser default pan/zoom so PointerEvent pan keeps receiving
+     pointermove on touch input instead of firing pointercancel mid-drag. */
+  touch-action: none;
 }
 
 .image-view:active {
@@ -331,6 +334,8 @@ html, body, #root {
   background: #333;
   cursor: col-resize;
   z-index: 2;
+  /* Same as .image-view — keep pointermove flowing on touch input. */
+  touch-action: none;
 }
 
 .grid-splitter-col:hover {
@@ -342,6 +347,8 @@ html, body, #root {
   background: #333;
   cursor: row-resize;
   z-index: 1;
+  /* Same as .image-view — keep pointermove flowing on touch input. */
+  touch-action: none;
 }
 
 .grid-splitter-row:hover {

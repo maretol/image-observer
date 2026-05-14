@@ -102,7 +102,15 @@ export function TabBar({
             role="tab"
             aria-selected={i === activeIndex}
             tabIndex={i === activeIndex ? 0 : -1}
-            onClick={() => onSelect(i)}
+            onClick={(e) => {
+              onSelect(i);
+              // onPointerDown calls preventDefault to suppress text selection
+              // during DnD, which also blocks the default focus shift on
+              // mousedown. Without this manual focus(), DOM focus stays on
+              // the previously active tab while aria-selected / tabIndex=0
+              // move to the new one, and the next arrow key lands wrong.
+              e.currentTarget.focus();
+            }}
             onMouseDown={(e) => onTabMouseDown(e, i)}
             onPointerDown={(e) => onTabPointerDown(e, i, tab.path)}
             onKeyDown={(e) => onTabKeyDown(e, i)}
