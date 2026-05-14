@@ -50,5 +50,13 @@ export function pushBodyStyle(claim: BodyStyleClaim): () => void {
     const idx = stack.findIndex((e) => e.id === entry.id);
     if (idx >= 0) stack.splice(idx, 1);
     apply();
+    // Stack drained — drop our cached baseline so the next push re-captures
+    // whatever document.body.style looks like at that point. Without this,
+    // any cursor/userSelect change made by other code in between two drag
+    // sessions would be silently reverted to the old baseline on release.
+    if (stack.length === 0) {
+      baseCursor = null;
+      baseUserSelect = null;
+    }
   };
 }
