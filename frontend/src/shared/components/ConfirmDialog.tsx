@@ -60,6 +60,9 @@ function ConfirmDialog({ open, message, onConfirm, onCancel }: ConfirmDialogProp
       // on a stray backdrop click.
       closeOnBackdrop={false}
       initialFocusRef={cancelRef}
+      // alertdialog requires an accessible name; the message body is exposed
+      // via aria-describedby (not aria-labelledby).
+      ariaLabel="確認"
       ariaDescribedBy="confirm-dialog-message"
       overlayClassName="confirm-dialog-overlay"
       dialogClassName="confirm-dialog"

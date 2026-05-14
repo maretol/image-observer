@@ -34,7 +34,7 @@ export function MergePromptDialog({
       onClose={onCancel}
       initialFocusRef={mergeRef}
       ariaLabel="子フォルダのサイドカーをマージ"
-      overlayClassName="confirm-overlay"
+      overlayClassName="confirm-dialog-overlay"
       dialogClassName="confirm-dialog cls-merge-dialog"
     >
       <div className="confirm-message">
