@@ -3,6 +3,7 @@ import { ReadImage } from "../../../wailsjs/go/main/App";
 import { imgread } from "../../../wailsjs/go/models";
 import type { Tab } from "./useTabs";
 import { toDataURL } from "../../shared/utils/base64";
+import { pushBodyStyle } from "../../shared/utils/bodyStyles";
 import { useToastFn } from "../../shared/components/Toast";
 import { errorMessage } from "../../shared/utils/error";
 import { zoomCommandBus, type ZoomCommand } from "../../shared/utils/keybindings";
@@ -37,6 +38,8 @@ export function ImageView({
     startY: number;
     startPanX: number;
     startPanY: number;
+    pointerId: number;
+    release: () => void;
   } | null>(null);
 
   // Mirror tab/tabIndex/onUpdateTabState into refs so the zoom-command
@@ -299,20 +302,28 @@ export function ImageView({
     return () => zoomCommandBus.setListener(null);
   }, [isActivePanel]);
 
-  // Drag pan (left button only — leave right click for context menu)
-  const onMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+  // Drag pan (left button only — leave right click for context menu).
+  // Unified on PointerEvent + setPointerCapture so the same dragger that
+  // started on the container keeps receiving moves even if the cursor leaves
+  // the viewport, matching the touch/pen story too.
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.button !== 0) return;
       if (!tab.initialized) return;
       e.preventDefault();
+      const release = pushBodyStyle({
+        cursor: "grabbing",
+        userSelect: "none",
+      });
       dragRef.current = {
         startX: e.clientX,
         startY: e.clientY,
         startPanX: tab.panX,
         startPanY: tab.panY,
+        pointerId: e.pointerId,
+        release,
       };
-      document.body.style.cursor = "grabbing";
-      document.body.style.userSelect = "none";
+      e.currentTarget.setPointerCapture(e.pointerId);
     },
     [tab.panX, tab.panY, tab.initialized]
   );
@@ -320,12 +331,14 @@ export function ImageView({
   // Drag-pan move/up listeners. Refs let us attach once on mount instead of
   // re-binding on every pan update.
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!dragRef.current || !containerRef.current) return;
+    const onMove = (e: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
       const t = tabRef.current;
-      let nx = dragRef.current.startPanX + (e.clientX - dragRef.current.startX);
-      let ny = dragRef.current.startPanY + (e.clientY - dragRef.current.startY);
+      let nx = drag.startPanX + (e.clientX - drag.startX);
+      let ny = drag.startPanY + (e.clientY - drag.startY);
       const renderedW = t.imageWidth * t.zoom;
       const renderedH = t.imageHeight * t.zoom;
       ({ panX: nx, panY: ny } = clampPan(
@@ -338,18 +351,22 @@ export function ImageView({
       ));
       updateRef.current(tabIndexRef.current, { panX: nx, panY: ny });
     };
-    const onUp = () => {
-      if (dragRef.current) {
-        dragRef.current = null;
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-      }
+    const endDrag = (e: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      drag.release();
+      dragRef.current = null;
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
+      // Restore if the component unmounts mid-drag.
+      dragRef.current?.release();
+      dragRef.current = null;
     };
   }, []);
 
@@ -380,7 +397,7 @@ export function ImageView({
   }
 
   return (
-    <div className="image-view" ref={containerRef} onMouseDown={onMouseDown}>
+    <div className="image-view" ref={containerRef} onPointerDown={onPointerDown}>
       {tab.initialized && (
         <img
           className="image-view-img"

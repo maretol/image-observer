@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { SplitDirection } from "./layout";
 import { MIN_RATIO } from "./layout";
+import { pushBodyStyle } from "../../shared/utils/bodyStyles";
 
 type Props = {
   splitId: string;
@@ -19,55 +20,78 @@ export function GridSplitter({
   containerRef,
   onChangeRatio,
 }: Props) {
-  const dragRef = useRef<{ startMouse: number; startRatio: number } | null>(
-    null,
-  );
+  const dragRef = useRef<{
+    startPointer: number;
+    startRatio: number;
+    pointerId: number;
+    release: () => void;
+  } | null>(null);
 
-  const onMouseDown = (e: React.MouseEvent) => {
+  // Refs let the global pointer listeners stay stable across renders.
+  const directionRef = useRef(direction);
+  directionRef.current = direction;
+  const onChangeRatioRef = useRef(onChangeRatio);
+  onChangeRatioRef.current = onChangeRatio;
+  const splitIdRef = useRef(splitId);
+  splitIdRef.current = splitId;
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+    const release = pushBodyStyle({
+      cursor: direction === "col" ? "col-resize" : "row-resize",
+      userSelect: "none",
+    });
     dragRef.current = {
-      startMouse: direction === "col" ? e.clientX : e.clientY,
+      startPointer: direction === "col" ? e.clientX : e.clientY,
       startRatio: ratio,
+      pointerId: e.pointerId,
+      release,
     };
-    document.body.style.cursor =
-      direction === "col" ? "col-resize" : "row-resize";
-    document.body.style.userSelect = "none";
+    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!dragRef.current || !containerRef.current) return;
+    const onMove = (e: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const containerSize = direction === "col" ? rect.width : rect.height;
+      const dir = directionRef.current;
+      const containerSize = dir === "col" ? rect.width : rect.height;
       if (containerSize <= 0) return;
-      const currentMouse = direction === "col" ? e.clientX : e.clientY;
-      const deltaPx = currentMouse - dragRef.current.startMouse;
+      const currentPointer = dir === "col" ? e.clientX : e.clientY;
+      const deltaPx = currentPointer - drag.startPointer;
       const deltaRatio = deltaPx / containerSize;
       // Clamp by both 100px minimum and the absolute MIN_RATIO floor.
       const minRatioByPx = MIN_PX / containerSize;
       const minR = Math.max(MIN_RATIO, minRatioByPx);
-      let r = dragRef.current.startRatio + deltaRatio;
+      let r = drag.startRatio + deltaRatio;
       if (r < minR) r = minR;
       if (r > 1 - minR) r = 1 - minR;
-      onChangeRatio(splitId, r);
+      onChangeRatioRef.current(splitIdRef.current, r);
     };
-    const onUp = () => {
-      if (dragRef.current) {
-        dragRef.current = null;
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-      }
+    const endDrag = (e: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      drag.release();
+      dragRef.current = null;
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
+      // Best-effort restore if unmount happens mid-drag.
+      dragRef.current?.release();
+      dragRef.current = null;
     };
-  }, [direction, splitId, onChangeRatio, containerRef]);
+  }, [containerRef]);
 
   const className =
     direction === "col" ? "grid-splitter-col" : "grid-splitter-row";
-  return <div className={className} onMouseDown={onMouseDown} />;
+  return <div className={className} onPointerDown={onPointerDown} />;
 }

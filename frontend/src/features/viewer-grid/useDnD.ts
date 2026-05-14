@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logger } from "../../shared/utils/logger";
+import { pushBodyStyle } from "../../shared/utils/bodyStyles";
 import type { Edge } from "./layout";
 
 // Drop targets recognized while dragging a tab.
@@ -47,6 +48,7 @@ export function useDnD(actions: DnDActions) {
   const stateRef = useRef<DnDState | null>(null);
   stateRef.current = state;
   const startRef = useRef<{ x: number; y: number } | null>(null);
+  const releaseStyleRef = useRef<(() => void) | null>(null);
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
 
@@ -59,9 +61,13 @@ export function useDnD(actions: DnDActions) {
     ) => {
       startRef.current = { x: ev.clientX, y: ev.clientY };
       // Block text selection (user-select) and the I-beam cursor across the
-      // whole document while dragging. Restored in endDrag().
-      document.body.style.userSelect = "none";
-      document.body.style.cursor = "grabbing";
+      // whole document while dragging. Released in endDrag() via the token
+      // stack so concurrent claimants (e.g. splitter) compose cleanly.
+      releaseStyleRef.current?.();
+      releaseStyleRef.current = pushBodyStyle({
+        cursor: "grabbing",
+        userSelect: "none",
+      });
       logger.info("dnd", "start", {
         src: srcLeafId,
         idx: srcTabIdx,
@@ -143,7 +149,8 @@ export function useDnD(actions: DnDActions) {
       document.removeEventListener("pointercancel", onCancel);
       document.removeEventListener("keydown", onKey);
       // Best-effort restore in case the component unmounts mid-drag.
-      restoreBodyStyles();
+      releaseStyleRef.current?.();
+      releaseStyleRef.current = null;
     };
   }, [Boolean(state)]); // re-attach when drag starts/stops
 
@@ -152,7 +159,8 @@ export function useDnD(actions: DnDActions) {
   function endDrag() {
     setState(null);
     startRef.current = null;
-    restoreBodyStyles();
+    releaseStyleRef.current?.();
+    releaseStyleRef.current = null;
   }
 
   return { dnd: state, startDrag };
@@ -223,11 +231,6 @@ function computeTabInsertIndex(tabBar: HTMLElement, x: number): number {
     if (x < r.left + r.width / 2) return i;
   }
   return tabEls.length;
-}
-
-function restoreBodyStyles() {
-  document.body.style.userSelect = "";
-  document.body.style.cursor = "";
 }
 
 function commitDrop(state: DnDState, actions: DnDActions) {

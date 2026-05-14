@@ -64,6 +64,12 @@ Wails v2 (Go バックエンド + React/TS フロント) で実装する **Windo
    - **#10/#12 UI スケール**: `internal/settings.SettingsData` に `UIScalePercent` を additive 追加 (schema v1 のまま、per-field fallback で旧 settings.json も無痛 upgrade。具体的なレンジ / デフォルトは `internal/settings/settings.go` の定数を参照)。フロントは `App.tsx` の useLayoutEffect で `--ui-scale` CSS 変数を `<html>` にセットし (paint 前同期を保証して設定変更時のフリッカーを回避)、`App.css` の chrome コンテナ群 (`.top-tabs` / `.cls-view` / `.cls-empty-state` / `.tab-bar` / `.settings-dialog`) に `zoom: var(--ui-scale, 1)` を適用 (#39)。`.tab-context-menu` / `.tab-drag-ghost` は意図的に対象外 — それぞれ `window.innerWidth/Height` クランプ / `pointermove clientX/Y` で raw window 座標から位置決めしており、zoom がかかると transform 移動量や bounding-box が座標と非同期になりメニューの画面外はみ出し / ゴーストの追従ズレを起こすため (chrome 一貫性より位置精度を優先)。app-root と viewer canvas は zoom 1 のまま → レイアウトは常にウィンドウフィット、画像はネイティブピクセルでレンダ (ビューア zoom % が実寸に対応)。`zoom` は非標準だが WebView2 / WebKitGTK 双方サポート。ConfirmDialog は `document.body` への portal で overlay (`position:fixed; inset:0`) を等倍に保ち、内側 `.confirm-dialog` だけに inline `zoom` を当てて backdrop の full-viewport カバレッジを維持する (SettingsDialog の `.settings-backdrop` / `.settings-dialog` と同じパターン)。Toast の `.toast-host` は bottom/right anchored で content-sized なので host 自体に inline `zoom` を当てて OK (overlay と非対称な構造ゆえ)。設定 UI は新規「外観」セクションに segment タイル (具体的なタイル値は `SettingsDialog.tsx` の `UI_SCALES` を参照)、settings.json で範囲内の任意 percent を直書きすれば segment は un-highlighted で hint に現在値を表示。
    - **設定ダイアログ CSS**: `.settings-category-bar` / `.settings-category-tab` / `.settings-category-tab-active` を追加。`.settings-header` に gap を入れてタイトル / カテゴリタブ / 閉じるの 3 要素を整列。
    - **Go テスト**: settings_test の各経路 (round-trip / reject / per-field fallback / new field missing) に `UIScalePercent` 検証を追加。
+- **#30 a11y/consistency まとめ (実装完了)**: 監査メモ §12 / §13 / §14 / §16 / §20 の整合性問題を 1 束で解消。Go 側変更なし、フロントのみ。
+   - **§13 body styles token stack**: `shared/utils/bodyStyles.ts` を新設 (`pushBodyStyle({cursor, userSelect})` がスタックエントリを積み、release で外す)。`useDnD` / `GridSplitter` / `ImageView` の 3 箇所が直接 `document.body.style.{cursor,userSelect} = ...` していた箇所を全置換。複数クレーマント (drag 中に splitter…等の同時シナリオ) が `""` でユーザの元設定を潰さない。
+   - **§12 Pointer/Mouse 統一**: `GridSplitter` / `ImageView` のドラッグを `MouseEvent` から `PointerEvent` + `setPointerCapture` に置換。`window.addEventListener("pointermove" / "pointerup" / "pointercancel")` でリスナを統一し、`pointerId` でドラッガを照合。タッチ / ペンも同じ経路で動く副次効果あり (主目的は viewer-grid 内のイベント系統一)。
+   - **§14 a11y / ARIA**: (1) `Card.tsx` の `cls-card-thumb` を `role="button"` + `tabIndex={0}` + `onKeyDown` (Enter/Space) に。`:focus-visible` で枠色アウトラインを `App.css` に追加。`aria-label` は selectionMode の有無で「開く / 選択を切替」を出し分け。(2) `TabBar.tsx` を `role="tablist"` + 各タブ `role="tab"` `aria-selected` + roving tabindex (`active ? 0 : -1`) に。`ArrowLeft/Right/Home/End` でフォーカス移動 (follow-focus パターン: 移動先タブを onSelect でアクティブ化)。タブ内の閉じるボタンは `tabIndex={-1}` で Tab 順から外し、roving の主役をタブ本体に保つ。(3) `TabContextMenu.tsx` を `role="menu"` + 各項目 `role="menuitem"` に。マウント時に先頭 menuitem へ focus 移動、`ArrowUp/Down/Home/End` でラップアラウンド移動。
+   - **§16 wheel mode 設定文言**: 「マウスホイールの動作」field の hint に「ホイールでズーム / パンするのは画像領域だけ。タブバー上は常にタブ列の横スクロール」を明記し、`KEYBINDINGS` の「Shift+ホイール / Ctrl+ホイール」行の action 文言にも「画像領域のみ」を追記。実装は変えず文言で例外を可視化する方針。
+   - **§20 ModalShell 抽出**: `shared/components/ModalShell.tsx` 新設 (portal to body + overlay + Esc + Tab focus trap + initial focus + previous focus restore + 内側 dialog のみ `zoom: var(--ui-scale)`)。`closeOnBackdrop` / `closeOnEscape` / `initialFocusRef` / `overlayClassName` / `dialogClassName` / `ariaLabel/LabelledBy/DescribedBy` を prop で受ける。`ConfirmDialog` / `ConflictDialog` / `MergePromptDialog` の 3 つを ModalShell に乗せ替え、Esc / focus trap / focus restore の挙動を統一。各ダイアログの既存 CSS クラス (`confirm-dialog-overlay` / `confirm-dialog` / `confirm-overlay` / `cls-merge-dialog` 等) は `overlayClassName` / `dialogClassName` で注入することで CSS 改修不要。`SettingsDialog` は対象外 (独自 backdrop / 構造で動作中、必要時に別途検討)。
 
 ## 3. 重要ドキュメント (このディレクトリの兄弟ファイル)
 
@@ -260,7 +266,8 @@ image-observer/
         │       └── useSessionSave.ts   # 500ms debounce で SaveState (v4 schema: layout + topTab + list)
         ├── shared/                 # 機能横断ユーティリティ (どの feature からも import 可)
         │   ├── components/         # 機能横断 UI 部品
-        │   │   ├── ConfirmDialog.tsx   # 確認ダイアログ + useConfirm()
+        │   │   ├── ModalShell.tsx      # ダイアログ共通シェル (portal + overlay + Esc + focus trap + UI scale) (#30)
+        │   │   ├── ConfirmDialog.tsx   # 確認ダイアログ + useConfirm() (ModalShell 上に薄く)
         │   │   ├── ConflictDialog.tsx  # 競合解決 3 ボタン (再読み込み / 強制上書き / キャンセル)
         │   │   ├── MergePromptDialog.tsx # 子→親マージ確認 3 ボタン (v1.2)
         │   │   └── Toast.tsx           # トースト + ToastProvider + useToastFn()
@@ -278,6 +285,7 @@ image-observer/
         │   │   └── ThumbErrorIcon.tsx
         │   └── utils/
         │       ├── base64.ts           # Wails []byte の number[] / string 両対応 base64 変換
+        │       ├── bodyStyles.ts       # body の cursor / userSelect を競合なく差し替えるトークンスタック (#30)
         │       ├── debounce.ts         # useDebounce ヘルパ
         │       ├── error.ts            # errorMessage (Error/string/その他から表示用文字列を取り出す)
         │       └── path.ts             # basename (path セパレータを正規化して末尾要素を返す)
