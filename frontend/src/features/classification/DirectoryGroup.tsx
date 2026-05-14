@@ -15,6 +15,7 @@ export type DirectoryGroupProps = {
   onToggle: (key: string) => void;
   onClickThumb: (filename: string) => void;
   onClickEdit: (filename: string) => void;
+  onClickPreview: (filename: string) => void;
   onToggleSelect: (filename: string) => void;
   onExtendSelectionTo: (filename: string) => void;
 };
@@ -31,6 +32,7 @@ export function DirectoryGroup({
   onToggle,
   onClickThumb,
   onClickEdit,
+  onClickPreview,
   onToggleSelect,
   onExtendSelectionTo,
 }: DirectoryGroupProps) {
@@ -64,6 +66,7 @@ export function DirectoryGroup({
               modifierEnabled={modifierEnabled}
               onClickThumb={() => onClickThumb(entry.filename)}
               onClickEdit={() => onClickEdit(entry.filename)}
+              onClickPreview={() => onClickPreview(entry.filename)}
               onToggleSelect={() => onToggleSelect(entry.filename)}
               onExtendSelectionTo={() => onExtendSelectionTo(entry.filename)}
             />

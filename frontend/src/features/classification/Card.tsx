@@ -1,5 +1,6 @@
 import type { classification } from "../../../wailsjs/go/models";
 import { EditIcon } from "../../shared/icons/EditIcon";
+import { PreviewIcon } from "../../shared/icons/PreviewIcon";
 import { ThumbErrorIcon } from "../../shared/icons/ThumbErrorIcon";
 import { extractTags } from "./filters";
 import { readableTextColor, tagBadgeClass, tagColor } from "./colors";
@@ -20,6 +21,7 @@ export type CardProps = {
   modifierEnabled: boolean;
   onClickThumb: () => void;
   onClickEdit: () => void;
+  onClickPreview: () => void;
   onToggleSelect: () => void;
   onExtendSelectionTo: () => void;
 };
@@ -33,6 +35,7 @@ export function Card({
   modifierEnabled,
   onClickThumb,
   onClickEdit,
+  onClickPreview,
   onToggleSelect,
   onExtendSelectionTo,
 }: CardProps) {
@@ -134,6 +137,18 @@ export function Card({
           aria-label="編集"
         >
           <EditIcon size={12} />
+        </button>
+        <button
+          type="button"
+          className="cls-card-preview"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClickPreview();
+          }}
+          title="プレビュー"
+          aria-label="プレビューを表示"
+        >
+          <PreviewIcon size={12} />
         </button>
       </div>
       <div className="cls-card-info">

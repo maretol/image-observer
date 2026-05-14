@@ -5,6 +5,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import { ConflictDialog } from "../../shared/components/ConflictDialog";
 import { MergePromptDialog } from "../../shared/components/MergePromptDialog";
@@ -12,6 +13,7 @@ import { ClassificationHeader } from "./ClassificationHeader";
 import { ConfidenceSegment } from "./ConfidenceSegment";
 import { DirectoryGroup } from "./DirectoryGroup";
 import { EditPopover } from "./EditPopover";
+import { SampleModal } from "./SampleModal";
 import { SearchBox } from "./SearchBox";
 import { TagChips } from "./TagChips";
 import { tagSummary } from "./filters";
@@ -155,6 +157,20 @@ export function ClassificationView({
     if (groupsElRef.current) groupsElRef.current.scrollTop = 0;
   }, [folderPath, scrollTopRef]);
 
+  // Sample modal (#9). Filename only — paired with folderPath in render to
+  // build the IPC path. Folder change dismisses an open preview because the
+  // captured filename no longer belongs to the current view. Not persisted.
+  const [previewFilename, setPreviewFilename] = useState<string | null>(null);
+  const openPreview = useCallback((filename: string) => {
+    setPreviewFilename(filename);
+  }, []);
+  const closePreview = useCallback(() => {
+    setPreviewFilename(null);
+  }, []);
+  useLayoutEffect(() => {
+    setPreviewFilename(null);
+  }, [folderPath]);
+
   if (!folderPath) {
     return (
       <div className="cls-empty-state">
@@ -283,6 +299,7 @@ export function ClassificationView({
               onToggle={toggleGroup}
               onClickThumb={onOpenInViewer}
               onClickEdit={openEdit}
+              onClickPreview={openPreview}
               onToggleSelect={toggleSelected}
               onExtendSelectionTo={(filename) =>
                 extendSelectionTo(filename, displayedOrder)
@@ -310,6 +327,18 @@ export function ClassificationView({
         onMerge={resolveMergeMerge}
         onSkip={resolveMergeSkip}
         onCancel={resolveMergeCancel}
+      />
+      <SampleModal
+        open={previewFilename !== null}
+        imagePath={
+          previewFilename ? `${folderPath}/${previewFilename}` : null
+        }
+        filename={previewFilename}
+        onClose={closePreview}
+        onOpenInViewer={() => {
+          if (previewFilename) onOpenInViewer(previewFilename);
+          closePreview();
+        }}
       />
     </div>
   );
