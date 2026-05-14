@@ -376,12 +376,7 @@ export function ImageView({
 
   const src = useMemo(
     () =>
-      imageData
-        ? toDataURL(
-            imageData.data as unknown as number[] | string,
-            imageData.mimeType
-          )
-        : "",
+      imageData ? toDataURL(imageData.data, imageData.mimeType) : "",
     [imageData]
   );
 
