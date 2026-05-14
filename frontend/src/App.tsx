@@ -1,9 +1,9 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
-  type CSSProperties,
 } from "react";
 import {
   WindowGetSize,
@@ -305,30 +305,28 @@ function AppInner({ initialState }: AppInnerProps) {
     [classification.folderPath, viewer],
   );
 
-  // UI scale (#10 + #12): apply as CSS `zoom` on the app root so font, button,
-  // and input sizes scale uniformly. `zoom` is non-standard but supported in
-  // both WebView2 (Windows release target) and WebKitGTK (dev).
+  // UI scale (#10, #12, #39): expose the user's choice as a `--ui-scale` CSS
+  // variable on <html>; App.css then applies `zoom: var(--ui-scale)` to
+  // chrome containers only (top-tabs / settings dialog / classification view /
+  // viewer tab-bar / dialogs / toasts). The app-root and the viewer canvas
+  // stay at zoom 1 so (a) the layout always fills the window and (b) viewer
+  // zoom % corresponds to actual pixel size regardless of UI scale.
   //
-  // Note: `zoom` cascades to ALL descendants, including the <img> inside
-  // ImageView — viewer zoom and UI scale multiply. That is intentional for
-  // v1 (a uniform "make everything larger" knob); if we ever want UI-only
-  // scaling we'd need to move the zoom down to chrome-only containers
-  // (top-tabs / settings dialog / classification view) and leave ViewerGrid
-  // at zoom: 1.
+  // Setting it on <html> (not .app-toplevel) so it reaches ConfirmDialog and
+  // Toast, which portal to document.body — they read the same variable inline.
   //
-  // During the brief settings-loading window the zoom stays at 1.0 (rather
-  // than flickering) — once settings.data resolves the value snaps to user
-  // choice.
-  const uiZoom =
-    settings.data?.uiScalePercent != null
-      ? settings.data.uiScalePercent / 100
-      : 1;
+  // useLayoutEffect (not useEffect) so the variable is written before the
+  // browser paints. Otherwise a settings change would render once at the old
+  // scale and snap to the new scale on the next frame — visible flicker.
+  useLayoutEffect(() => {
+    // Briefly null during initial load; treat as 100% so nothing scales until
+    // the real value arrives.
+    const scale = (settings.data?.uiScalePercent ?? 100) / 100;
+    document.documentElement.style.setProperty("--ui-scale", String(scale));
+  }, [settings.data?.uiScalePercent]);
 
   return (
-    <div
-      className="app-toplevel"
-      style={{ zoom: uiZoom } as CSSProperties}
-    >
+    <div className="app-toplevel">
       <nav className="top-tabs" role="tablist" aria-label="トップレベルタブ">
         <button
           type="button"

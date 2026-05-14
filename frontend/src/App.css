@@ -14,6 +14,29 @@ html, body, #root {
   width: 100vw;
 }
 
+/* UI scale (#10, #12, #39). The app root stays at zoom 1 so the layout
+   always fills the window and the image canvas renders at native pixel
+   size. Scale is applied per chrome container below; --ui-scale is set on
+   <html> from App.tsx so portaled overlays (ConfirmDialog, Toast) can
+   read it too. `zoom` is non-standard but supported in WebView2 and
+   WebKitGTK — both render targets.
+
+   `.tab-context-menu` and `.tab-drag-ghost` are intentionally NOT in this
+   list: their positions are computed from raw window coordinates
+   (innerWidth/innerHeight clamp in TabContextMenu, pointermove clientX/Y
+   in TabDragGhost). Applying `zoom` to them would scale `transform` and
+   bounding-box dimensions out of sync with those coordinates, causing the
+   menu to clip off-screen at large UI scales and the drag ghost to lag
+   the cursor at any non-100% scale. They render at native size — a small
+   chrome-consistency cost in exchange for correct positioning. */
+.top-tabs,
+.tab-bar,
+.cls-view,
+.cls-empty-state,
+.settings-dialog {
+  zoom: var(--ui-scale, 1);
+}
+
 .top-tabs {
   display: flex;
   flex-direction: row;

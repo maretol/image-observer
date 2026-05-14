@@ -66,6 +66,39 @@ grep -nE "^(func|var|const|type) [A-Z]" internal/<pkg>/<file>.go
 git grep -n "<旧識別子名>" -- '*.go' '*.ts' '*.tsx' '*.md'
 ```
 
+### A-3. 実装が iterate したら context.md / コメントも追従させる
+
+レビュー対応や設計変更で実装の中身が変わったとき、関連する `.claude/context.md` の
+記述やコード内コメント / docstring が **古い実装を指したまま** になりがち。
+コンパイラ / linter はコードしか見ないので、説明だけが silent に陳腐化する。
+特に「初版実装 → レビュー対応 → 別レビュー対応」のように commit が分かれる流れでは、
+context.md / コメントが初版の前提のまま取り残されやすい。
+
+過去事例 (PR #41):
+- `useEffect` で実装 → レビュー対応で `useLayoutEffect` に切り替えたが、context.md の
+  記述は `useEffect` のまま残った (初版コミットで context.md を更新したきり再同期せず)
+- ConfirmDialog で zoom を overlay から内側ダイアログに移動した際、Toast.tsx の
+  コメント "See App.css UI scale block" が App.css に存在しないルール (`.toast-host`)
+  を指す misleading な状態になった (元々は ConfirmDialog/Toast を同じ書きぶりで
+  説明していたが、ConfirmDialog だけ非対称パターンになって参照が壊れた)
+
+**実装を変えたら必ず以下を確認**:
+
+1. **`.claude/context.md`** — 変更した issue / セクション全体を読み直し、関数名 /
+   フック名 / 制御フロー / 設計説明が現在のコードと一致するか目視確認
+2. **変更したファイル + そこから参照されるコメント** — 「See X」「同 X パターン」
+   「同じ理屈」のような cross-reference が、参照先 (X の rename / 削除 / 構造変更)
+   で破綻していないか grep:
+
+```bash
+git grep -nE "(See |see |参照|同様|同じ)" -- '*.ts' '*.tsx' '*.go' \
+  | grep -i "<変更した識別子 / クラス名>"
+```
+
+3. **複数 commit に跨る PR では、最終 commit 直前に context.md / コメントを diff で再読**
+   — `git diff main...HEAD -- .claude/context.md '*.tsx' '*.ts'` で「説明文と実装の
+   時系列がズレていないか」を確認するのが確実。
+
 ---
 
 ## B. 参照型データの公開境界
@@ -236,3 +269,4 @@ git grep -nE "(:hover|cursor: pointer)" frontend/src/App.css
 - React の inputstate / DOM 操作 (C-1, C-2) → 過去のバグパターンを思い出す
 - export 公開の追加 (B-1, B-2) → 参照型なら必ず clone
 - ドキュメント更新 (A-1, A-2) → 実体と突き合わせる
+- 実装 iterate / レビュー対応 (A-3) → 変更後に context.md / コメントが追従しているか再確認
