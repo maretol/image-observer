@@ -588,11 +588,16 @@ html, body, #root {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
+  /* Cap so we don't stretch edge-to-edge on ultra-wide / ultra-tall displays. */
   max-width: 90vw;
   max-height: 90vh;
-  /* Cap width so a very wide image doesn't make the modal stretch edge to
-     edge on ultra-wide displays. */
   width: min(1100px, 90vw);
+  /* DEFINITE height (not just max-height) so the body's `flex: 1` resolves
+     against a known value and the image's `max-height: 100%` actually clamps.
+     With only max-height set, the modal would be content-sized and the
+     percentage chain falls back to `auto`, leaving a tall portrait image at
+     its natural height (PR #46 regression: image overflowed the viewport). */
+  height: min(800px, 90vh);
   overflow: hidden;
 }
 
@@ -649,6 +654,12 @@ html, body, #root {
 .sample-modal-img {
   max-width: 100%;
   max-height: 100%;
+  /* Flex items default to `min-width / min-height: auto`, which equals the
+     image's natural pixel dimensions and prevents the max-* rules above from
+     shrinking the box. Reset to 0 so the image actually fits inside the
+     bounded body when the natural size exceeds the viewport. */
+  min-width: 0;
+  min-height: 0;
   object-fit: contain;
   display: block;
   /* Disable native drag — same rationale as the viewer's <img>. */
