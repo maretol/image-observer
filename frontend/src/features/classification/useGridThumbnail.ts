@@ -47,7 +47,7 @@ function load(path: string): Promise<ThumbCacheValue> {
   const p = (async () => {
     try {
       const res = await GetThumbnail(path, thumbSize, thumbMode);
-      const bytes = toBytes(res.data as unknown as string | number[]);
+      const bytes = toBytes(res.data);
       const blob = new Blob([bytes], { type: res.mimeType });
       const url = URL.createObjectURL(blob);
       const value: ThumbCacheValue = { url, state: "ok" };

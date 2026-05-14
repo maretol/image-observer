@@ -19,9 +19,8 @@ import {
   useViewerGrid,
 } from "./features/viewer-grid/useViewerGrid";
 import {
-  deserializeLayout,
-  type Layout,
-  type LayoutNodeState,
+  findLeaf,
+  layoutFromPersisted,
 } from "./features/viewer-grid/layout";
 import { useSessionLoad } from "./features/session/useSessionLoad";
 import { useSessionSave } from "./features/session/useSessionSave";
@@ -36,7 +35,6 @@ import {
   isPrimaryModifier,
   zoomCommandBus,
 } from "./shared/utils/keybindings";
-import { findLeaf } from "./features/viewer-grid/layout";
 import { GetLogPath } from "../wailsjs/go/main/App";
 import { state } from "../wailsjs/go/models";
 import "./App.css";
@@ -63,7 +61,7 @@ type AppInnerProps = {
 
 function AppInner({ initialState }: AppInnerProps) {
   const initLayout = initialState?.layout
-    ? layoutFromState(initialState.layout)
+    ? layoutFromPersisted(initialState.layout)
     : undefined;
 
   const initTopTab: TopTab =
@@ -402,16 +400,6 @@ function AppInner({ initialState }: AppInnerProps) {
       {confirmDialog}
     </div>
   );
-}
-
-// Convert Wails-generated LayoutState (persisted shape) to the runtime Layout.
-// The Wails `state.LayoutState` shape matches our `LayoutNodeState`, so we
-// can hand it straight to `deserializeLayout`.
-function layoutFromState(ls: state.LayoutState): Layout {
-  return deserializeLayout({
-    root: ls.root as unknown as LayoutNodeState,
-    activeId: ls.activeId,
-  });
 }
 
 export default App;

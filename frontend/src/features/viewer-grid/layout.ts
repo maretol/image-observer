@@ -6,6 +6,7 @@
 // (split / move / collapse / reorder) are pure functions over the tree;
 // `useViewerGrid` does the React glue.
 
+import type { state } from "../../../wailsjs/go/models";
 import { newTab, type Tab } from "./useTabs";
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -266,6 +267,39 @@ export function serializeLayout(layout: Layout): LayoutState {
   return {
     root: serializeNode(layout.root),
     activeId: layout.activeId,
+  };
+}
+
+// Hydrate Layout from the Wails-generated persistence shape (state.LayoutState).
+// The generated TS types are wider than our domain types — `kind` and
+// `direction` are `string` instead of narrow unions, `activeIndex` is required
+// instead of optional, and tabs are TabState class instances rather than
+// plain objects. Runtime fields match 1:1 (Go only writes "split"/"leaf" and
+// "row"/"col"); the recursion below exists to produce TS-narrow values
+// without a blanket `as unknown as` cast at every boundary.
+export function layoutFromPersisted(ls: state.LayoutState): Layout {
+  return deserializeLayout({
+    root: narrowPersistedNode(ls.root),
+    activeId: ls.activeId,
+  });
+}
+
+function narrowPersistedNode(n: state.LayoutNodeState): LayoutNodeState {
+  return {
+    kind: n.kind === "split" ? "split" : "leaf",
+    id: n.id,
+    direction:
+      n.direction === "row" || n.direction === "col" ? n.direction : undefined,
+    ratio: n.ratio,
+    a: n.a ? narrowPersistedNode(n.a) : undefined,
+    b: n.b ? narrowPersistedNode(n.b) : undefined,
+    tabs: n.tabs?.map((t) => ({
+      path: t.path,
+      zoom: t.zoom,
+      panX: t.panX,
+      panY: t.panY,
+    })),
+    activeIndex: n.activeIndex,
   };
 }
 
