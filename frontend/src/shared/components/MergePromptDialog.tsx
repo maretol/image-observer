@@ -32,6 +32,10 @@ export function MergePromptDialog({
     <ModalShell
       open={open}
       onClose={onCancel}
+      // Three explicit actions (merge / skip / cancel) — a stray backdrop
+      // click shouldn't be treated as cancel, since it conflates "I didn't
+      // mean to click" with a real decision to ignore the children.
+      closeOnBackdrop={false}
       initialFocusRef={mergeRef}
       ariaLabel="子フォルダのサイドカーをマージ"
       overlayClassName="confirm-dialog-overlay"
