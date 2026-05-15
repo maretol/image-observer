@@ -590,18 +590,32 @@ function ViewerTab({
     );
   }
 
+  // #53: 一覧タブはタブ全体が <button> なのでタブ chrome のどこでも反応するが、
+  // ビューアタブは内側の name <button> だけがクリックターゲットなため、
+  // wrapper の padding (上下 4px / 左 22px / 右 10px) や close ボタン非表示時の
+  // 右側スペースをクリックしても無反応だった。wrapper 側で click / dblclick を
+  // 受け、close ボタン由来のイベントだけ除外することで一覧タブと当たり判定を揃える。
+  const isFromClose = (e: React.MouseEvent) =>
+    (e.target as HTMLElement | null)?.closest(".top-tab-viewer-close") != null;
+
   return (
-    <span className={`top-tab top-tab-viewer ${isActive ? "active" : ""}`}>
+    <span
+      className={`top-tab top-tab-viewer ${isActive ? "active" : ""}`}
+      onClick={(e) => {
+        if (isFromClose(e)) return;
+        onActivate();
+      }}
+      onDoubleClick={(e) => {
+        if (isFromClose(e)) return;
+        e.preventDefault();
+        onStartRename();
+      }}
+    >
       <button
         type="button"
         role="tab"
         aria-selected={isActive}
         className="top-tab-viewer-name"
-        onClick={onActivate}
-        onDoubleClick={(e) => {
-          e.preventDefault();
-          onStartRename();
-        }}
         title={viewer.name}
       >
         {viewer.name}
