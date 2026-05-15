@@ -1,6 +1,5 @@
 import type { classification } from "../../../wailsjs/go/models";
 import { EditIcon } from "../../shared/icons/EditIcon";
-import { PreviewIcon } from "../../shared/icons/PreviewIcon";
 import { ThumbErrorIcon } from "../../shared/icons/ThumbErrorIcon";
 import { extractTags } from "./filters";
 import { readableTextColor, tagBadgeClass, tagColor } from "./colors";
@@ -19,7 +18,9 @@ export type CardProps = {
   showCheckbox: boolean;
   // Whether Ctrl-click and Shift-click change behavior (modes: modifier / both).
   modifierEnabled: boolean;
-  onClickThumb: () => void;
+  // Multi-viewer (#11): Card thumb clicks now open the SampleModal (which
+  // hosts the viewer-picker). The dedicated PreviewIcon button was removed
+  // because it became a redundant second entry to the same modal.
   onClickEdit: () => void;
   onClickPreview: () => void;
   onToggleSelect: () => void;
@@ -33,7 +34,6 @@ export function Card({
   selectionMode,
   showCheckbox,
   modifierEnabled,
-  onClickThumb,
   onClickEdit,
   onClickPreview,
   onToggleSelect,
@@ -46,12 +46,13 @@ export function Card({
 
   // Primary action depends on the current mode (mirror of onClick logic, but
   // keyboard activation doesn't carry shift/ctrl meaning — Space/Enter on a
-  // selection-mode thumb toggles selection, otherwise it opens the image).
+  // selection-mode thumb toggles selection, otherwise opens the preview
+  // modal where the user picks a destination viewer).
   const activate = () => {
     if (showCheckbox && selectionMode) {
       onToggleSelect();
     } else {
-      onClickThumb();
+      onClickPreview();
     }
   };
 
@@ -78,12 +79,12 @@ export function Card({
           }
           // Plain click. With a visible checkbox + an existing selection we
           // treat clicks as "extend the selection set" (Finder-like). Modifier
-          // mode skips this branch and always opens the image.
+          // mode skips this branch and always opens the preview modal.
           if (showCheckbox && selectionMode) {
             onToggleSelect();
             return;
           }
-          onClickThumb();
+          onClickPreview();
         }}
         onKeyDown={(e) => {
           // Only react when the thumb itself is focused — without this, an
@@ -137,18 +138,6 @@ export function Card({
           aria-label="編集"
         >
           <EditIcon size={12} />
-        </button>
-        <button
-          type="button"
-          className="cls-card-preview"
-          onClick={(e) => {
-            e.stopPropagation();
-            onClickPreview();
-          }}
-          title="プレビュー"
-          aria-label="プレビューを表示"
-        >
-          <PreviewIcon size={12} />
         </button>
       </div>
       <div className="cls-card-info">

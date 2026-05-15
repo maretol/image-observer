@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -16,18 +17,24 @@ import { setThumbnailParams } from "./features/classification/useGridThumbnail";
 import { ViewerGrid } from "./features/viewer-grid/ViewerGrid";
 import {
   DEFAULT_MAX_PIXELS,
-  useViewerGrid,
-} from "./features/viewer-grid/useViewerGrid";
+  MAX_VIEWERS,
+  useViewerSet,
+} from "./features/viewer-grid/useViewerSet";
+import { findLeaf, layoutFromPersisted } from "./features/viewer-grid/layout";
 import {
-  findLeaf,
-  layoutFromPersisted,
-} from "./features/viewer-grid/layout";
+  initialViewerSet,
+  sanitizeName,
+  type Viewer,
+  type ViewerSet,
+} from "./features/viewer-grid/viewers";
 import { useSessionLoad } from "./features/session/useSessionLoad";
 import { useSessionSave } from "./features/session/useSessionSave";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { useSettings } from "./features/settings/useSettings";
 import { useConfirm } from "./shared/components/ConfirmDialog";
 import { ToastProvider } from "./shared/components/Toast";
+import { CloseIcon } from "./shared/icons/CloseIcon";
+import { PlusIcon } from "./shared/icons/PlusIcon";
 import { SettingsIcon } from "./shared/icons/SettingsIcon";
 import { installGlobalErrorHandlers, logger } from "./shared/utils/logger";
 import {
@@ -60,9 +67,26 @@ type AppInnerProps = {
 };
 
 function AppInner({ initialState }: AppInnerProps) {
-  const initLayout = initialState?.layout
-    ? layoutFromPersisted(initialState.layout)
-    : undefined;
+  // Hydrate the initial ViewerSet from the persisted state. Empty / missing
+  // viewers fall back to a fresh single-viewer set (validateState on the Go
+  // side already enforces this, but we guard the hydration too in case of
+  // first-launch before any save).
+  const initialSet = useMemo<ViewerSet>(() => {
+    if (!initialState?.viewers || initialState.viewers.length === 0) {
+      return initialViewerSet();
+    }
+    const viewers: Viewer[] = initialState.viewers.map((v) => ({
+      id: v.id,
+      name: v.name,
+      layout: layoutFromPersisted(v.layout),
+    }));
+    const activeViewerId =
+      initialState.activeViewerId &&
+      viewers.some((v) => v.id === initialState.activeViewerId)
+        ? initialState.activeViewerId
+        : viewers[0].id;
+    return { viewers, activeViewerId };
+  }, [initialState]);
 
   const initTopTab: TopTab =
     initialState?.topTab === "viewer" ? "viewer" : "list";
@@ -90,18 +114,16 @@ function AppInner({ initialState }: AppInnerProps) {
   }, [settings.data]);
 
   // maxImagePixelsMP is stored as MP (200 = 200_000_000 px). Convert once and
-  // hand the raw pixel count to useViewerGrid, which clamps via a ref so
+  // hand the raw pixel count to useViewerSet, which clamps via a ref so
   // settings updates take effect on the next image open. Falls back to
-  // DEFAULT_MAX_PIXELS (the canonical constant) during the brief settings-
-  // loading window — keeping the fallback wired to a single source avoids
-  // drift against useViewerGrid / Go's defaultMaxImagePixelsMP.
+  // DEFAULT_MAX_PIXELS during the brief settings-loading window.
   const maxImagePixels =
     settings.data?.maxImagePixelsMP != null
       ? settings.data.maxImagePixelsMP * 1_000_000
       : DEFAULT_MAX_PIXELS;
 
-  const viewer = useViewerGrid({
-    initialLayout: initLayout,
+  const viewer = useViewerSet({
+    initialSet,
     confirm,
     maxImagePixels,
   });
@@ -165,22 +187,15 @@ function AppInner({ initialState }: AppInnerProps) {
 
   useSessionSave({
     window: windowState,
-    layout: viewer.layout,
+    viewers: viewer.viewers,
+    activeViewerId: viewer.activeViewerId,
     topTab,
     list: classification.persistableState,
   });
 
-  // Global keybindings (Phase H4 + #7). Some are global (top-tab switch),
-  // others are viewer-only. We bail early for editable targets / settings
-  // dialog regardless of scope.
-  //
-  // We register the window listener exactly once and read live state through
-  // refs. The previous design listed `[topTab, settingsOpen, viewer]` as
-  // deps, but `viewer` (the object returned by `useViewerGrid`) gets a new
-  // identity on every layout change — so the listener was being torn down
-  // and re-added on every tab open / close / split. That churn risks
-  // dropping a keydown that arrives between the removal and the next add.
-  // Refs let us keep one stable listener and always read the latest values.
+  // Global keybindings (Phase H4 + #7 + #11). We register the window listener
+  // exactly once and read live state through refs; otherwise the listener
+  // would tear down + re-add on every layout change, risking a dropped key.
   const topTabRef = useRef(topTab);
   const settingsOpenRef = useRef(settingsOpen);
   const viewerRef = useRef(viewer);
@@ -192,24 +207,25 @@ function AppInner({ initialState }: AppInnerProps) {
       if (isEditableTarget(e.target)) return;
       if (settingsOpenRef.current) return; // dialog has its own Esc handler
 
-      // Global top-tab switching (#7): Ctrl+Shift+1 → list, Ctrl+Shift+2 → viewer.
-      // Works regardless of which tab is active so the user can return to either.
-      // Picked Ctrl+Shift+<digit> to avoid colliding with Ctrl+0/1 (zoom) and
-      // browser-instinct Ctrl+Tab (in-viewer tab cycling).
-      //
-      // We match on `e.code` (layout-independent physical key) rather than
-      // `e.key` because Shift modifies the latter to the shifted character
-      // ("!" / "@" on US, "!" / "\"" on JIS), so `e.key === "1"` would never
-      // fire here.
+      // Global top-tab switching (#7 + #11). Ctrl+Shift+1 → list, Ctrl+Shift+2..9
+      // → N-1th viewer (so Ctrl+Shift+2 still means "first viewer", preserving
+      // the old single-viewer keybinding's meaning). e.code is layout-
+      // independent; e.key would be the shifted character on most layouts.
       if (isPrimaryModifier(e) && e.shiftKey) {
         if (e.code === "Digit1") {
           e.preventDefault();
           setTopTab("list");
           return;
         }
-        if (e.code === "Digit2") {
-          e.preventDefault();
-          setTopTab("viewer");
+        const digitMatch = /^Digit([2-9])$/.exec(e.code);
+        if (digitMatch) {
+          const idx = Number(digitMatch[1]) - 2; // Digit2 → viewer index 0
+          const viewerLive = viewerRef.current;
+          if (idx >= 0 && idx < viewerLive.viewers.length) {
+            e.preventDefault();
+            viewerLive.setActiveViewer(viewerLive.viewers[idx].id);
+            setTopTab("viewer");
+          }
           return;
         }
       }
@@ -271,40 +287,108 @@ function AppInner({ initialState }: AppInnerProps) {
   }, []);
 
   const onSelectList = useCallback(() => setTopTab("list"), []);
-  const onSelectViewer = useCallback(() => setTopTab("viewer"), []);
+  const onSelectViewer = useCallback(
+    (viewerId: string) => {
+      viewer.setActiveViewer(viewerId);
+      setTopTab("viewer");
+    },
+    [viewer],
+  );
 
-  // Open a list-tab image in the viewer's active panel and switch tabs.
-  // The list view stays scrolled where it was so the user can come back.
+  // Stable id+name list for child props; recomputed only when the underlying
+  // viewer set changes shape, not on every layout-only mutation. Keeps the
+  // memo stable enough to skip needless re-renders in ClassificationView /
+  // ViewerGrid / SampleModal.
+  const viewerList = useMemo(
+    () => viewer.viewers.map((v) => ({ id: v.id, name: v.name })),
+    [viewer.viewers],
+  );
+
+  // ─── viewer add/close/rename ───────────────────────────────────────
+
+  const onAddViewer = useCallback(() => {
+    viewer.addViewer();
+    setTopTab("viewer");
+  }, [viewer]);
+
+  // closeViewerWithConfirm gates the close on a user confirm dialog when the
+  // viewer has any image tabs. Empty viewers (root leaf with 0 tabs) close
+  // immediately. Always refuses the last-remaining viewer.
+  const closeViewerWithConfirm = useCallback(
+    async (viewerId: string) => {
+      if (viewer.viewers.length <= 1) return;
+      const target = viewer.viewers.find((v) => v.id === viewerId);
+      if (!target) return;
+      const tabCount = countLeafTabs(target);
+      if (tabCount > 0) {
+        const ok = await confirm(
+          `ビューア "${target.name}" を閉じますか?\n${tabCount} 個のタブが破棄されます。`,
+        );
+        if (!ok) return;
+      }
+      viewer.closeViewer(viewerId);
+    },
+    [confirm, viewer],
+  );
+
+  // ─── inline rename state (top-tab) ─────────────────────────────────
+
+  const [editingViewerId, setEditingViewerId] = useState<string | null>(null);
+  const startRename = useCallback((viewerId: string) => {
+    setEditingViewerId(viewerId);
+  }, []);
+  const stopRename = useCallback(() => {
+    setEditingViewerId(null);
+  }, []);
+  const commitRename = useCallback(
+    (viewerId: string, name: string) => {
+      const sanitized = sanitizeName(name);
+      if (sanitized === null) {
+        // Empty/whitespace → keep editing so the user can correct. Hook will
+        // surface the toast.
+        viewer.renameViewer(viewerId, name);
+        return;
+      }
+      viewer.renameViewer(viewerId, sanitized);
+      setEditingViewerId(null);
+    },
+    [viewer],
+  );
+
+  // ─── list → viewer wiring (single + bulk) ──────────────────────────
+
+  // openInViewer: from SampleModal's viewer-picker. We switch top-tab and
+  // active viewer to the chosen one before delegating the actual open.
   const onOpenInViewer = useCallback(
-    (filename: string) => {
+    (viewerId: string, filename: string) => {
       const folder = classification.folderPath;
       if (!folder) return;
-      void viewer.openInActive(`${folder}/${filename}`);
+      void viewer.openInViewer(viewerId, `${folder}/${filename}`);
+      viewer.setActiveViewer(viewerId);
       setTopTab("viewer");
     },
     [classification.folderPath, viewer],
   );
 
-  // Bulk-open: append all selected images as new tabs in the active panel.
   const onOpenManyInTabs = useCallback(
-    (filenames: string[]) => {
+    (viewerId: string, filenames: string[]) => {
       const folder = classification.folderPath;
       if (!folder || filenames.length === 0) return;
       const paths = filenames.map((f) => `${folder}/${f}`);
-      void viewer.openManyInActive(paths);
+      void viewer.openManyInViewer(viewerId, paths);
+      viewer.setActiveViewer(viewerId);
       setTopTab("viewer");
     },
     [classification.folderPath, viewer],
   );
 
-  // Bulk-open: split the active panel for each selected image so each gets
-  // its own panel. Skips oversized images and stops at MAX_PANELS.
   const onOpenManyAsSplit = useCallback(
-    (filenames: string[]) => {
+    (viewerId: string, filenames: string[]) => {
       const folder = classification.folderPath;
       if (!folder || filenames.length === 0) return;
       const paths = filenames.map((f) => `${folder}/${f}`);
-      void viewer.openManyAsSplit(paths);
+      void viewer.openManyAsSplitInViewer(viewerId, paths);
+      viewer.setActiveViewer(viewerId);
       setTopTab("viewer");
     },
     [classification.folderPath, viewer],
@@ -312,20 +396,8 @@ function AppInner({ initialState }: AppInnerProps) {
 
   // UI scale (#10, #12, #39): expose the user's choice as a `--ui-scale` CSS
   // variable on <html>; App.css then applies `zoom: var(--ui-scale)` to
-  // chrome containers only (top-tabs / settings dialog / classification view /
-  // viewer tab-bar / dialogs / toasts). The app-root and the viewer canvas
-  // stay at zoom 1 so (a) the layout always fills the window and (b) viewer
-  // zoom % corresponds to actual pixel size regardless of UI scale.
-  //
-  // Setting it on <html> (not .app-toplevel) so it reaches ConfirmDialog and
-  // Toast, which portal to document.body — they read the same variable inline.
-  //
-  // useLayoutEffect (not useEffect) so the variable is written before the
-  // browser paints. Otherwise a settings change would render once at the old
-  // scale and snap to the new scale on the next frame — visible flicker.
+  // chrome containers only.
   useLayoutEffect(() => {
-    // Briefly null during initial load; treat as 100% so nothing scales until
-    // the real value arrives.
     const scale = (settings.data?.uiScalePercent ?? 100) / 100;
     document.documentElement.style.setProperty("--ui-scale", String(scale));
   }, [settings.data?.uiScalePercent]);
@@ -337,19 +409,40 @@ function AppInner({ initialState }: AppInnerProps) {
           type="button"
           role="tab"
           aria-selected={topTab === "list"}
-          className={`top-tab ${topTab === "list" ? "active" : ""}`}
+          className={`top-tab top-tab-list ${topTab === "list" ? "active" : ""}`}
           onClick={onSelectList}
         >
           一覧
         </button>
+        <div className="top-tabs-viewers" role="group" aria-label="ビューア一覧">
+          {viewer.viewers.map((v) => (
+            <ViewerTab
+              key={v.id}
+              viewer={v}
+              isActive={topTab === "viewer" && v.id === viewer.activeViewerId}
+              isEditing={editingViewerId === v.id}
+              canClose={viewer.viewers.length > 1}
+              onActivate={() => onSelectViewer(v.id)}
+              onStartRename={() => startRename(v.id)}
+              onCommitRename={(name) => commitRename(v.id, name)}
+              onCancelRename={stopRename}
+              onClose={() => void closeViewerWithConfirm(v.id)}
+            />
+          ))}
+        </div>
         <button
           type="button"
-          role="tab"
-          aria-selected={topTab === "viewer"}
-          className={`top-tab ${topTab === "viewer" ? "active" : ""}`}
-          onClick={onSelectViewer}
+          className="top-tab-add"
+          onClick={onAddViewer}
+          disabled={viewer.viewers.length >= MAX_VIEWERS}
+          title={
+            viewer.viewers.length >= MAX_VIEWERS
+              ? `ビューア数の上限 (${MAX_VIEWERS}) に達しています`
+              : "新しいビューアを追加"
+          }
+          aria-label="ビューアを追加"
         >
-          ビューア
+          <PlusIcon />
         </button>
         <button
           type="button"
@@ -367,14 +460,24 @@ function AppInner({ initialState }: AppInnerProps) {
             state={classification}
             multiSelectMode={settings.data?.multiSelectMode}
             scrollTopRef={listScrollTopRef}
+            viewers={viewerList}
+            activeViewerId={viewer.activeViewerId}
             onOpenInViewer={onOpenInViewer}
             onOpenManyInTabs={onOpenManyInTabs}
             onOpenManyAsSplit={onOpenManyAsSplit}
           />
         ) : (
           <ViewerGrid
+            // The key forces unmount/remount when the active viewer
+            // changes, which gives ImageView's effect cleanup a chance to
+            // de-register from zoomCommandBus and clears any per-panel
+            // local state. Keeps the listener takeover deterministic
+            // (spec-multi-viewer.md §6.2).
+            key={viewer.activeViewerId}
             layout={viewer.layout}
             wheelMode={settings.data?.wheelMode}
+            viewers={viewerList}
+            currentViewerId={viewer.activeViewerId}
             onActivatePanel={viewer.setActivePanel}
             onSelectTab={viewer.setActiveTab}
             onCloseTab={viewer.closeTab}
@@ -384,6 +487,7 @@ function AppInner({ initialState }: AppInnerProps) {
             onSplitTab={viewer.splitTab}
             onSplitFromContext={viewer.splitFromContext}
             onSetSplitRatio={viewer.setSplitRatio}
+            onMoveTabToViewer={viewer.moveTabToViewer}
           />
         )}
       </div>
@@ -403,3 +507,115 @@ function AppInner({ initialState }: AppInnerProps) {
 }
 
 export default App;
+
+// ─── ViewerTab (top-tab UI per viewer) ───────────────────────────────
+
+type ViewerTabProps = {
+  viewer: Viewer;
+  isActive: boolean;
+  isEditing: boolean;
+  canClose: boolean;
+  onActivate: () => void;
+  onStartRename: () => void;
+  onCommitRename: (name: string) => void;
+  onCancelRename: () => void;
+  onClose: () => void;
+};
+
+function ViewerTab({
+  viewer,
+  isActive,
+  isEditing,
+  canClose,
+  onActivate,
+  onStartRename,
+  onCommitRename,
+  onCancelRename,
+  onClose,
+}: ViewerTabProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // On entering edit mode, focus + select the input. Run on transitions only
+  // (when isEditing flips true), which is what the dependency array gives us.
+  useEffect(() => {
+    if (isEditing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [isEditing]);
+
+  if (isEditing) {
+    return (
+      <span className={`top-tab top-tab-viewer ${isActive ? "active" : ""}`}>
+        <input
+          ref={inputRef}
+          type="text"
+          className="top-tab-rename-input"
+          defaultValue={viewer.name}
+          maxLength={32}
+          onBlur={(e) => onCommitRename(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onCommitRename((e.target as HTMLInputElement).value);
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onCancelRename();
+            }
+          }}
+          aria-label={`ビューア名を編集: ${viewer.name}`}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span className={`top-tab top-tab-viewer ${isActive ? "active" : ""}`}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={isActive}
+        className="top-tab-viewer-name"
+        onClick={onActivate}
+        onDoubleClick={(e) => {
+          e.preventDefault();
+          onStartRename();
+        }}
+        title={viewer.name}
+      >
+        {viewer.name}
+      </button>
+      {canClose ? (
+        <button
+          type="button"
+          className="top-tab-viewer-close"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          title={`ビューア "${viewer.name}" を閉じる`}
+          aria-label={`ビューア "${viewer.name}" を閉じる`}
+          tabIndex={-1}
+        >
+          <CloseIcon size={14} />
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+// countLeafTabs — total tab count across the viewer's layout. Used only by
+// the close-confirm prompt ("how much will the user lose").
+function countLeafTabs(v: Viewer): number {
+  let n = 0;
+  walk(v.layout.root);
+  return n;
+  function walk(node: Viewer["layout"]["root"]) {
+    if (node.kind === "leaf") {
+      n += node.tabs.length;
+      return;
+    }
+    walk(node.a);
+    walk(node.b);
+  }
+}

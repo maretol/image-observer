@@ -698,7 +698,16 @@ function isOverrideValue(
 const KEYBINDINGS: Array<{ keys: string; action: string; scope: string }> = [
   { keys: "Esc", action: "ドラッグ中の操作をキャンセル", scope: "DnD 中" },
   { keys: "Ctrl+Shift+1", action: "一覧タブに切替", scope: "全体" },
-  { keys: "Ctrl+Shift+2", action: "ビューアタブに切替", scope: "全体" },
+  {
+    keys: "Ctrl+Shift+2 〜 9",
+    action: "N 番目 (1〜8) のビューアタブに切替",
+    scope: "全体",
+  },
+  {
+    keys: "ダブルクリック (タブ名)",
+    action: "ビューア名を編集 (Enter で確定 / Esc で破棄)",
+    scope: "全体",
+  },
   { keys: "Ctrl+W", action: "アクティブパネルのアクティブタブを閉じる", scope: "ビューア" },
   { keys: "Ctrl+Tab", action: "アクティブパネルの次のタブに切替", scope: "ビューア" },
   { keys: "Ctrl+Shift+Tab", action: "アクティブパネルの前のタブに切替", scope: "ビューア" },
