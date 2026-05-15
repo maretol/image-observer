@@ -116,10 +116,12 @@ export function TabContextMenu({
     }
   };
 
-  // Position clamped within viewport. Submenu placement is computed inside
+  // Position clamped within viewport. Math.max(0, ...) floors the result so
+  // a window narrower / shorter than the menu doesn't push it off-screen
+  // into negative coordinates. Submenu placement is computed inside
   // MoveToViewerSubmenu so it can read the parent menuitem's bounding rect.
-  const left = Math.min(x, window.innerWidth - APPROX_PARENT_WIDTH);
-  const top = Math.min(y, window.innerHeight - APPROX_PARENT_HEIGHT);
+  const left = Math.max(0, Math.min(x, window.innerWidth - APPROX_PARENT_WIDTH));
+  const top = Math.max(0, Math.min(y, window.innerHeight - APPROX_PARENT_HEIGHT));
 
   const openSubmenu = () => {
     if (submenuCloseTimerRef.current) {
@@ -293,9 +295,14 @@ function MoveToViewerSubmenu({
     const fitsRight =
       wantRight + APPROX_SUBMENU_WIDTH <= window.innerWidth;
     const left = fitsRight
-      ? wantRight
+      ? Math.max(0, wantRight)
       : Math.max(0, r.left - APPROX_SUBMENU_WIDTH + 4);
-    const top = Math.min(r.top, window.innerHeight - APPROX_PARENT_HEIGHT);
+    // Floor with Math.max(0, ...) so a viewport shorter than the submenu
+    // doesn't push `top` negative.
+    const top = Math.max(
+      0,
+      Math.min(r.top, window.innerHeight - APPROX_PARENT_HEIGHT),
+    );
     setPos({ left, top });
   }, [parentRef]);
 

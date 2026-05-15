@@ -294,13 +294,20 @@ function AppInner({ initialState }: AppInnerProps) {
     [viewer],
   );
 
-  // Stable id+name list for child props; recomputed only when the underlying
-  // viewer set changes shape, not on every layout-only mutation. Keeps the
-  // memo stable enough to skip needless re-renders in ClassificationView /
-  // ViewerGrid / SampleModal.
+  // Stable id+name list for child props. `viewer.viewers` gets a fresh array
+  // identity on every layout-only mutation (updateViewerLayout maps over the
+  // array even when only one viewer's layout changed), so memoizing on its
+  // reference would recompute every render and hand a new list to children.
+  // Memo on a primitive content signature instead so the result is stable
+  // across pure layout changes — picked up automatically by any future
+  // React.memo-wrapped consumer.
+  const viewerSig = viewer.viewers.map((v) => `${v.id}:${v.name}`).join("|");
   const viewerList = useMemo(
     () => viewer.viewers.map((v) => ({ id: v.id, name: v.name })),
-    [viewer.viewers],
+    // viewerSig is recomputed every render but cheap (≤8 viewers). useMemo
+    // sees the same string and reuses the cached array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [viewerSig],
   );
 
   // ─── viewer add/close/rename ───────────────────────────────────────

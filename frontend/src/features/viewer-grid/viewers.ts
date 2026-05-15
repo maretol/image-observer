@@ -1,8 +1,9 @@
 // Multi-viewer pure-function layer (#11). A `ViewerSet` holds N viewers, each
 // with its own BSP `Layout` (spec-viewer-flexlayout.md). All mutations here
 // are pure: take a ViewerSet, return a new one. The React glue lives in
-// useViewerSet.ts (which re-uses useViewerGrid's mutation set against the
-// active viewer's layout).
+// useViewerSet.ts, which applies the layout-level pure functions from
+// layout.ts to the active viewer's `Layout` and exposes both viewer-level
+// (add/close/rename) and panel-level (open/split/move/...) operations.
 
 import {
   appendOrFocusInActive,
