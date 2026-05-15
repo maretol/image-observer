@@ -41,7 +41,9 @@ html, body, #root {
   display: flex;
   flex-direction: row;
   align-items: flex-end;
-  background: #1f1f1f;
+  /* #49: chrome は active タブ (#1e1e1e) と十分差が出る暗色にして、
+     選択中のタブが浮き上がって見えるようにする。 */
+  background: #141414;
   border-bottom: 1px solid #1a1a1a;
   height: 38px;
   padding: 4px 6px 0;
