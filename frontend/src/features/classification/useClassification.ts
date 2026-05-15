@@ -12,7 +12,7 @@ import { state as wstate } from "../../../wailsjs/go/models";
 import { useToastFn } from "../../shared/components/Toast";
 import { errorMessage } from "../../shared/utils/error";
 import { logger } from "../../shared/utils/logger";
-import type { ConfirmFn } from "../viewer-grid/useViewerGrid";
+import type { ConfirmFn } from "../viewer-grid/useViewerSet";
 import { applyFilter, type Confidence, type ListTabFilter } from "./filters";
 import { useDirectoryGroups } from "./useDirectoryGroups";
 

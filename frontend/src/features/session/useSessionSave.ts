@@ -4,7 +4,8 @@ import { state } from "../../../wailsjs/go/models";
 import { useDebounce } from "../../shared/utils/debounce";
 import { errorMessage } from "../../shared/utils/error";
 import { logger } from "../../shared/utils/logger";
-import { serializeLayout, type Layout } from "../viewer-grid/layout";
+import { serializeLayout } from "../viewer-grid/layout";
+import type { Viewer } from "../viewer-grid/viewers";
 
 export type ListPersist = {
   folderPath: string;
@@ -18,18 +19,32 @@ export type ListPersist = {
 
 export type SessionInput = {
   window: { width: number; height: number; x: number; y: number };
-  layout: Layout;
+  // Viewer set (#11). Each viewer holds an independent BSP layout; persistence
+  // serializes the layouts together so re-launch restores both content and
+  // active selection.
+  viewers: Viewer[];
+  activeViewerId: string;
   topTab: "list" | "viewer";
   list: ListPersist;
 };
 
 const SAVE_DEBOUNCE_MS = 500;
-const STATE_SCHEMA_VERSION = 5;
+const STATE_SCHEMA_VERSION = 6;
 
 export function useSessionSave(input: SessionInput) {
+  // The serialized form goes through JSON.stringify so the debounce only
+  // fires when something actually changed (ignoring object identity churn).
+  // Layouts serialize per-viewer so a structural change in viewer 2 doesn't
+  // require touching viewer 1's payload — but the debounce still operates
+  // on the whole-state JSON, which is fine for the tens-of-KB scale we have.
   const serialized = JSON.stringify({
     window: input.window,
-    layout: serializeLayout(input.layout),
+    viewers: input.viewers.map((v) => ({
+      id: v.id,
+      name: v.name,
+      layout: serializeLayout(v.layout),
+    })),
+    activeViewerId: input.activeViewerId,
     topTab: input.topTab,
     list: input.list,
   });
@@ -43,7 +58,8 @@ export function useSessionSave(input: SessionInput) {
     }
     let parsed: {
       window: SessionInput["window"];
-      layout: ReturnType<typeof serializeLayout>;
+      viewers: { id: string; name: string; layout: ReturnType<typeof serializeLayout> }[];
+      activeViewerId: string;
       topTab: SessionInput["topTab"];
       list: ListPersist;
     };
@@ -61,14 +77,20 @@ export function useSessionSave(input: SessionInput) {
 
 function buildStateData(input: {
   window: SessionInput["window"];
-  layout: ReturnType<typeof serializeLayout>;
+  viewers: { id: string; name: string; layout: ReturnType<typeof serializeLayout> }[];
+  activeViewerId: string;
   topTab: SessionInput["topTab"];
   list: ListPersist;
 }) {
   return {
     version: STATE_SCHEMA_VERSION,
     window: input.window,
-    layout: input.layout,
+    viewers: input.viewers.map((v) => ({
+      id: v.id,
+      name: v.name,
+      layout: v.layout,
+    })),
+    activeViewerId: input.activeViewerId,
     topTab: input.topTab,
     list: {
       folderPath: input.list.folderPath,
