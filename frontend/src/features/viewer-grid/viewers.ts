@@ -11,8 +11,9 @@ import {
   initialLayout,
   recomputeActiveAfterClose,
   replaceNode,
-  type LeafNode,
   type Layout,
+  type LayoutNode,
+  type LeafNode,
 } from "./layout";
 import { newTab, type Tab } from "./useTabs";
 
@@ -276,8 +277,9 @@ export function moveTabAcrossViewers(
 }
 
 // pickFirstLeafId — local helper for activeId fallback after a collapse.
-// Avoids importing enumerateLeaves from layout.ts twice in the same file.
-function pickFirstLeafId(node: ReturnType<typeof initialLayout>["root"]): string | null {
+// Avoids importing enumerateLeaves from layout.ts (which would allocate
+// the full leaf list when we only need the first one).
+function pickFirstLeafId(node: LayoutNode): string | null {
   if (node.kind === "leaf") return node.id;
   return pickFirstLeafId(node.a) ?? pickFirstLeafId(node.b);
 }

@@ -65,9 +65,13 @@ export const DEFAULT_MAX_PIXELS = 200_000_000;
 export { MAX_PANELS, MAX_VIEWERS };
 export type { Edge, Layout, SplitDirection };
 
+// Note: this hook intentionally does NOT take a `confirm` callback. Viewer-
+// close confirmation lives in App.tsx (see `closeViewerWithConfirm`) because
+// the dialog message needs context (target name + tab count) that the hook
+// doesn't own. ConfirmFn is still exported as a type because useClassification
+// imports it from here for its own confirm-driven flows.
 export function useViewerSet(opts?: {
   initialSet?: ViewerSet;
-  confirm?: ConfirmFn;
   maxImagePixels?: number;
 }) {
   const [set, setSet] = useState<ViewerSet>(

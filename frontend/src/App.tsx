@@ -124,7 +124,6 @@ function AppInner({ initialState }: AppInnerProps) {
 
   const viewer = useViewerSet({
     initialSet,
-    confirm,
     maxImagePixels,
   });
   const classification = useClassification({
@@ -534,11 +533,18 @@ function ViewerTab({
   onClose,
 }: ViewerTabProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  // Esc cancellation suppresses the blur-commit that would otherwise fire
+  // when isEditing flips false → the input unmounts while focused → React
+  // dispatches blur synchronously on the unmounting node, calling
+  // onCommitRename with the (unwanted) draft value. The flag is set in the
+  // Esc keydown handler before we trigger the unmount path.
+  const suppressBlurRef = useRef(false);
 
   // On entering edit mode, focus + select the input. Run on transitions only
   // (when isEditing flips true), which is what the dependency array gives us.
   useEffect(() => {
     if (isEditing) {
+      suppressBlurRef.current = false; // reset for the new edit session
       inputRef.current?.focus();
       inputRef.current?.select();
     }
@@ -553,13 +559,21 @@ function ViewerTab({
           className="top-tab-rename-input"
           defaultValue={viewer.name}
           maxLength={32}
-          onBlur={(e) => onCommitRename(e.currentTarget.value)}
+          onBlur={(e) => {
+            if (suppressBlurRef.current) {
+              // Esc-triggered teardown — keep the original name.
+              suppressBlurRef.current = false;
+              return;
+            }
+            onCommitRename(e.currentTarget.value);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
               onCommitRename((e.target as HTMLInputElement).value);
             } else if (e.key === "Escape") {
               e.preventDefault();
+              suppressBlurRef.current = true;
               onCancelRename();
             }
           }}

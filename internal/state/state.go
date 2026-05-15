@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
+	"time"
 	"unicode/utf8"
 )
 
@@ -170,17 +172,27 @@ func defaultLayoutState() LayoutState {
 	return LayoutState{Root: root, ActiveID: defaultRootKey}
 }
 
-// newViewerID returns a stable per-viewer identifier. Frontend uses
+// fallbackViewerIDCounter monotonically tags `crypto/rand`-failure fallback
+// IDs so that even in that exceedingly rare case (entropy unavailable) we
+// don't hand out colliding viewer IDs — `validateState` rejects duplicate
+// IDs as corrupt and would drop the user's entire viewer set to defaults.
+var fallbackViewerIDCounter atomic.Uint64
+
+// newViewerID returns a per-viewer identifier. Frontend uses
 // `crypto.randomUUID()`; on the Go side (DefaultData / v5 migration) we
-// generate a UUID-v4-shaped 16-byte hex string so the wire format is
-// indistinguishable. The spec only requires uniqueness, not RFC-4122
-// compliance.
+// produce a 16-byte UUID-v4-shaped hex string with a `v-` prefix so the
+// origin is greppable in logs / state.json. The spec only requires
+// uniqueness, not RFC-4122 wire compliance — both forms ride the same
+// `string` JSON field and validateState only checks emptiness + uniqueness.
 func newViewerID() string {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {
-		// crypto/rand failure is exceedingly rare; fall back to a static
-		// prefix + nanos so the app stays usable.
-		return "viewer-fallback"
+		// Extremely rare path. Mix wall-clock nanoseconds with a
+		// process-local counter so successive fallback IDs stay unique
+		// (a static "viewer-fallback" string would collide on the second
+		// call and trigger a defaults-fallback validateState rejection).
+		c := fallbackViewerIDCounter.Add(1)
+		return fmt.Sprintf("v-fallback-%d-%d", time.Now().UnixNano(), c)
 	}
 	// Set version (4) and variant (10xx) bits so the string is recognizable
 	// as a UUID even though we skip RFC dashes.

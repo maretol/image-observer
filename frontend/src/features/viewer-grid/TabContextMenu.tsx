@@ -282,27 +282,29 @@ function MoveToViewerSubmenu({
   const itemsRef = useRef<Array<HTMLButtonElement | null>>([]);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
+  // Compute submenu position once on mount. The first render returns null
+  // (pos === null) until this effect resolves, so we cannot focus here —
+  // itemsRef is empty at that point.
   useEffect(() => {
-    // Position next to parent menuitem. Defer one tick so parentRef.current
-    // sees the open state's effects (the menuitem is mounted regardless;
-    // this is just defensive against renderer ordering).
-    const compute = () => {
-      const el = parentRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const wantRight = r.right - 4;
-      const fitsRight =
-        wantRight + APPROX_SUBMENU_WIDTH <= window.innerWidth;
-      const left = fitsRight
-        ? wantRight
-        : Math.max(0, r.left - APPROX_SUBMENU_WIDTH + 4);
-      const top = Math.min(r.top, window.innerHeight - APPROX_PARENT_HEIGHT);
-      setPos({ left, top });
-    };
-    compute();
-    // Focus the first submenu item.
-    itemsRef.current[0]?.focus();
+    const el = parentRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const wantRight = r.right - 4;
+    const fitsRight =
+      wantRight + APPROX_SUBMENU_WIDTH <= window.innerWidth;
+    const left = fitsRight
+      ? wantRight
+      : Math.max(0, r.left - APPROX_SUBMENU_WIDTH + 4);
+    const top = Math.min(r.top, window.innerHeight - APPROX_PARENT_HEIGHT);
+    setPos({ left, top });
   }, [parentRef]);
+
+  // Focus the first menu item AFTER pos is set and the items have actually
+  // mounted. Splitting this from the position effect avoids the race where
+  // focus() runs against an empty itemsRef (return null on first render).
+  useEffect(() => {
+    if (pos) itemsRef.current[0]?.focus();
+  }, [pos]);
 
   const focusItem = (idx: number) => {
     const items = itemsRef.current.filter(
