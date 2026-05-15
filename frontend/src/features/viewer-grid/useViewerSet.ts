@@ -48,6 +48,7 @@ import {
   moveTabAcrossViewers,
   openPathInViewer,
   renameViewer,
+  sanitizeName,
   setActiveViewer,
   updateViewerLayout,
   type Viewer,
@@ -139,23 +140,33 @@ export function useViewerSet(opts?: {
   );
 
   const renameViewerCb = useCallback((id: string, name: string) => {
+    // Distinguish the two reasons renameViewer can return the same set:
+    //   (a) sanitize → null (empty / whitespace-only) — a real rejection
+    //       that deserves a toast + warn log.
+    //   (b) sanitized name equals the existing name — silent no-op (the
+    //       user just blurred / Enter'd without changing anything).
+    // Pre-sanitizing here lets us branch cleanly; without it both paths
+    // collapsed onto the same `next === cur` check and fired a misleading
+    // "名前を空にできません" toast on every unchanged commit.
+    const sanitized = sanitizeName(name);
+    if (sanitized === null) {
+      toast("名前を空にできません", "warn");
+      logger.warn("viewer-set", "rename refused", {
+        id,
+        attempted: name,
+      });
+      return;
+    }
     setSet((cur) => {
       const target = cur.viewers.find((v) => v.id === id);
       if (!target) return cur;
-      const next = renameViewer(cur, id, name);
-      if (next === cur) {
-        logger.warn("viewer-set", "rename refused", {
-          id,
-          attempted: name,
-        });
-        toast("名前を空にできません", "warn");
-        return cur;
-      }
-      const newName = next.viewers.find((v) => v.id === id)?.name ?? "";
+      if (target.name === sanitized) return cur; // (b) — silent no-op
+      const next = renameViewer(cur, id, sanitized);
+      if (next === cur) return cur; // defensive; sanitize already passed
       logger.info("viewer-set", "rename", {
         id,
         oldName: target.name,
-        newName,
+        newName: sanitized,
       });
       return next;
     });
