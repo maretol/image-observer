@@ -15,6 +15,10 @@ import type { Tab } from "./useTabs";
 type Props = {
   layout: Layout;
   wheelMode?: string;
+  // Multi-viewer (#11): identify which viewer this grid belongs to + the
+  // sibling viewers so the tab right-click menu can offer "ビューアへ移動".
+  viewers: { id: string; name: string }[];
+  currentViewerId: string;
   onActivatePanel: (leafId: string) => void;
   onSelectTab: (leafId: string, tabIndex: number) => void;
   onCloseTab: (leafId: string, tabIndex: number) => void;
@@ -42,6 +46,11 @@ type Props = {
     direction: SplitDirection,
   ) => boolean;
   onSetSplitRatio: (splitId: string, ratio: number) => void;
+  onMoveTabToViewer: (
+    srcLeafId: string,
+    srcIdx: number,
+    dstViewerId: string,
+  ) => void;
 };
 
 type ContextState = {
@@ -93,6 +102,8 @@ export function ViewerGrid(props: Props) {
           tabIndex={ctx.tabIndex}
           x={ctx.x}
           y={ctx.y}
+          viewers={props.viewers}
+          currentViewerId={props.currentViewerId}
           onClose={() => setCtx(null)}
           onCloseTab={() => {
             props.onCloseTab(ctx.leafId, ctx.tabIndex);
@@ -100,6 +111,10 @@ export function ViewerGrid(props: Props) {
           }}
           onSplit={(direction) => {
             props.onSplitFromContext(ctx.leafId, ctx.tabIndex, direction);
+            setCtx(null);
+          }}
+          onMoveToViewer={(dstViewerId) => {
+            props.onMoveTabToViewer(ctx.leafId, ctx.tabIndex, dstViewerId);
             setCtx(null);
           }}
         />

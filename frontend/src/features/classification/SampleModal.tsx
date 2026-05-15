@@ -26,7 +26,13 @@ type SampleModalProps = {
   // has already decided how it wants to label that.
   filename: string | null;
   onClose: () => void;
-  onOpenInViewer: () => void;
+  // Multi-viewer (#11): the modal renders a viewer-selector in its footer.
+  // Caller passes the current viewer set (id + name) and which one is active
+  // (used for highlighting the default choice). On click, the modal calls
+  // onOpenInViewer(viewerId) with the chosen target.
+  viewers: { id: string; name: string }[];
+  activeViewerId: string;
+  onOpenInViewer: (viewerId: string) => void;
 };
 
 export function SampleModal({
@@ -34,6 +40,8 @@ export function SampleModal({
   imagePath,
   filename,
   onClose,
+  viewers,
+  activeViewerId,
   onOpenInViewer,
 }: SampleModalProps) {
   const [url, setUrl] = useState<string | null>(null);
@@ -114,14 +122,45 @@ export function SampleModal({
           />
         ) : null}
       </div>
-      <div className="sample-modal-footer">
-        <button
-          type="button"
-          className="sample-modal-open-viewer"
-          onClick={onOpenInViewer}
-        >
-          ビューアで開く
-        </button>
+      <div
+        className="sample-modal-footer"
+        role={viewers.length > 1 ? "group" : undefined}
+        aria-label={viewers.length > 1 ? "ビューアを選んで開く" : undefined}
+      >
+        {viewers.length === 0 ? null : viewers.length === 1 ? (
+          // Single-viewer fast path: keep the original "ビューアで開く"
+          // wording so the simple-case UX is unchanged.
+          <button
+            type="button"
+            className="sample-modal-open-viewer"
+            onClick={() => onOpenInViewer(viewers[0].id)}
+            autoFocus
+          >
+            ビューア「{viewers[0].name}」で開く
+          </button>
+        ) : (
+          viewers.map((v) => {
+            const isActive = v.id === activeViewerId;
+            return (
+              <button
+                key={v.id}
+                type="button"
+                className={
+                  isActive
+                    ? "sample-modal-open-viewer sample-modal-open-viewer-active"
+                    : "sample-modal-open-viewer"
+                }
+                onClick={() => onOpenInViewer(v.id)}
+                title={v.name}
+                aria-label={`ビューア「${v.name}」で開く${isActive ? " (現在アクティブ)" : ""}`}
+                autoFocus={isActive}
+              >
+                {isActive ? "✓ " : ""}
+                {v.name}
+              </button>
+            );
+          })
+        )}
       </div>
     </ModalShell>
   );

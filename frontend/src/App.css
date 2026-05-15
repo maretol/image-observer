@@ -47,6 +47,9 @@ html, body, #root {
   padding: 4px 6px 0;
   gap: 2px;
   flex-shrink: 0;
+  /* Multi-viewer (#11): "+" and gear stay flex-shrink:0 (right side), the
+     viewer-tabs container in between scrolls horizontally if it overflows. */
+  min-width: 0;
 }
 
 .top-tab {
@@ -60,6 +63,10 @@ html, body, #root {
   font-size: 13px;
   height: 100%;
   user-select: none;
+  /* Used as both <button> and <span> wrapper (the latter for ViewerTab). */
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .top-tab:hover {
@@ -79,6 +86,136 @@ html, body, #root {
   outline-offset: -3px;
 }
 
+/* Multi-viewer (#11). Layout: [一覧] · gap · [viewers...] [+] · spacer · [⚙]
+   - The 一覧 tab has a margin-right that creates the visible gap before
+     the viewer tabs.
+   - .top-tabs-viewers sizes to its content (flex: 0 1 auto) so the "+" is
+     always immediately after the rightmost viewer. min-width: 0 +
+     overflow-x: auto take over only when the row would overflow.
+   - The "+" button sits as a flex sibling right after .top-tabs-viewers.
+   - .top-tab-settings is pushed to the far right with margin-left: auto. */
+.top-tab-list {
+  margin-right: 16px;
+}
+
+.top-tabs-viewers {
+  display: flex;
+  flex-direction: row;
+  /* Stretch to .top-tabs' content-area height so children's `height: 100%`
+     resolves to the same 34px the 一覧 tab uses. Without this the container
+     defaults to auto-height (= content of children) and `.top-tab` inside
+     would collapse to text height while the 一覧 sibling stays tall. */
+  align-self: stretch;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  /* Hide the scrollbar visually — the user scrolls with mouse wheel. */
+  scrollbar-width: none;
+}
+.top-tabs-viewers::-webkit-scrollbar {
+  display: none;
+}
+
+/* Per-viewer top tab.
+   Wrapper inherits .top-tab's chrome (background/border/radius) but overrides
+   padding so the close (×) button can sit inline as a flex sibling of the
+   name. Inline placement (vs absolute top-right) keeps the close button
+   vertically centered with the name and gives a consistent (name-end → 6px
+   gap → ×) layout on every tab — no per-tab corner-position drift.
+   The right padding is reduced so the chrome stays balanced once the close
+   button takes its slot.
+   Reserves space for the close via `visibility: hidden` (vs display: none)
+   so hovering doesn't shift the name horizontally. */
+.top-tab-viewer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 22px;
+  max-width: 260px;
+}
+
+.top-tab-viewer-name {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.top-tab-viewer-name:focus-visible {
+  outline: 1px solid #d97a3c;
+  outline-offset: -3px;
+}
+
+.top-tab-viewer-close {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  padding: 0;
+  flex-shrink: 0;
+  /* Hidden but keeps its 20px slot so the name doesn't slide on hover. */
+  visibility: hidden;
+}
+.top-tab-viewer:hover .top-tab-viewer-close,
+.top-tab-viewer.active .top-tab-viewer-close {
+  visibility: visible;
+}
+.top-tab-viewer-close:hover {
+  color: #fff;
+  background: #4a4a4a;
+}
+
+.top-tab-rename-input {
+  background: #1e1e1e;
+  color: #fff;
+  border: 1px solid #d97a3c;
+  border-radius: 3px;
+  font-size: 13px;
+  padding: 2px 6px;
+  width: 160px;
+  outline: none;
+}
+
+.top-tab-add {
+  background: transparent;
+  border: 1px dashed #555;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  color: #888;
+  cursor: pointer;
+  width: 28px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.top-tab-add:hover:not(:disabled) {
+  color: #fff;
+  background: #2d2d30;
+  border-color: #777;
+}
+.top-tab-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
 .top-tab-settings {
   margin-left: auto;
   background: transparent;
@@ -92,6 +229,7 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   border-radius: 6px 6px 0 0;
+  flex-shrink: 0;
 }
 
 .top-tab-settings:hover {
@@ -500,6 +638,44 @@ html, body, #root {
   letter-spacing: 0.05em;
 }
 
+/* Multi-viewer (#11) — TabContextMenu submenu styling.
+   tab-context-menu-root wraps both the parent menu and the submenu so the
+   click-outside listener can scope its target check via .closest(). */
+.tab-context-menu-root {
+  /* No visual style — pure positioning wrapper. */
+  pointer-events: auto;
+}
+
+.ctx-item-submenu-parent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ctx-submenu-arrow {
+  color: #888;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.ctx-item-submenu-parent[aria-expanded="true"] {
+  background: #4a2a16;
+  color: #fff;
+}
+
+.tab-context-submenu {
+  /* Same chrome as the parent menu but with a longer max-width to fit
+     viewer names up to 32 chars at typical font size. */
+  max-width: 280px;
+}
+
+.ctx-item-viewer {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Confirm Dialog */
 
 .confirm-dialog-overlay {
@@ -683,25 +859,49 @@ html, body, #root {
   padding: 10px 14px;
   border-top: 1px solid #3f3f46;
   flex-shrink: 0;
+  /* Multi-viewer (#11): when there are multiple viewer choices, wrap the
+     button group instead of stretching the modal horizontally. */
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .sample-modal-open-viewer {
-  padding: 6px 18px;
+  padding: 6px 14px;
   font-size: 13px;
-  background: #d97a3c;
-  color: #fff;
-  border: 1px solid #d97a3c;
+  background: #2d2d30;
+  color: #ccc;
+  border: 1px solid #3f3f46;
   border-radius: 6px;
   cursor: pointer;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sample-modal-open-viewer:hover {
-  background: #e88f4d;
+  background: #37373a;
+  color: #fff;
+  border-color: #555;
 }
 
 .sample-modal-open-viewer:focus-visible {
   outline: 1px solid #d97a3c;
   outline-offset: 2px;
+}
+
+/* Active viewer choice — terracotta accent so the user can find the default
+   target instantly. The single-viewer fast-path also gets this style because
+   the lone button always represents the active viewer. */
+.sample-modal-open-viewer-active,
+.sample-modal-footer > .sample-modal-open-viewer:only-child {
+  background: #d97a3c;
+  color: #fff;
+  border-color: #d97a3c;
+}
+.sample-modal-open-viewer-active:hover,
+.sample-modal-footer > .sample-modal-open-viewer:only-child:hover {
+  background: #e88f4d;
 }
 
 /* Toast */
@@ -938,6 +1138,28 @@ html, body, #root {
   border-bottom: 1px solid #2e1a0d;
   flex-shrink: 0;
   font-size: 12px;
+}
+
+/* Multi-viewer (#11): "open in viewer X" dropdown that sits between the
+   selection count and the action buttons. Only rendered when >1 viewer
+   exists. */
+.cls-bulk-viewer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cls-bulk-viewer-label {
+  color: #fbeadb;
+  font-size: 11px;
+}
+.cls-bulk-viewer-select {
+  background: #2d1b0e;
+  color: #fff;
+  border: 1px solid #6f4225;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  max-width: 200px;
 }
 
 .cls-bulk-count {

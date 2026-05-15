@@ -13,7 +13,8 @@ export type DirectoryGroupProps = {
   showCheckbox: boolean;
   modifierEnabled: boolean;
   onToggle: (key: string) => void;
-  onClickThumb: (filename: string) => void;
+  // Multi-viewer (#11): Card thumb clicks now route to onClickPreview (single
+  // path); the previous onClickThumb prop has been removed.
   onClickEdit: (filename: string) => void;
   onClickPreview: (filename: string) => void;
   onToggleSelect: (filename: string) => void;
@@ -30,7 +31,6 @@ export function DirectoryGroup({
   showCheckbox,
   modifierEnabled,
   onToggle,
-  onClickThumb,
   onClickEdit,
   onClickPreview,
   onToggleSelect,
@@ -64,7 +64,6 @@ export function DirectoryGroup({
               selectionMode={selectionMode}
               showCheckbox={showCheckbox}
               modifierEnabled={modifierEnabled}
-              onClickThumb={() => onClickThumb(entry.filename)}
               onClickEdit={() => onClickEdit(entry.filename)}
               onClickPreview={() => onClickPreview(entry.filename)}
               onToggleSelect={() => onToggleSelect(entry.filename)}

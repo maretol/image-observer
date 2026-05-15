@@ -2,6 +2,7 @@ import {
   type MutableRefObject,
   type UIEvent,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -29,9 +30,14 @@ export type ClassificationViewProps = {
   // unmount when the top tab switches away from "list". Folder changes reset
   // it to 0 (handled below). Not persisted to settings/state.json.
   scrollTopRef: MutableRefObject<number>;
-  onOpenInViewer: (filename: string) => void;
-  onOpenManyInTabs: (filenames: string[]) => void;
-  onOpenManyAsSplit: (filenames: string[]) => void;
+  // Multi-viewer (#11): the parent passes the current viewer set + active
+  // viewer id so the SampleModal viewer-picker and bulk-actions dropdown can
+  // render their options. The open callbacks now take a destination viewer id.
+  viewers: { id: string; name: string }[];
+  activeViewerId: string;
+  onOpenInViewer: (viewerId: string, filename: string) => void;
+  onOpenManyInTabs: (viewerId: string, filenames: string[]) => void;
+  onOpenManyAsSplit: (viewerId: string, filenames: string[]) => void;
 };
 
 // Visual sanity ceiling for the "split-open" path. 8 panels in a row already
@@ -42,6 +48,8 @@ export function ClassificationView({
   state,
   multiSelectMode = "checkbox",
   scrollTopRef,
+  viewers,
+  activeViewerId,
   onOpenInViewer,
   onOpenManyInTabs,
   onOpenManyAsSplit,
@@ -171,6 +179,22 @@ export function ClassificationView({
     setPreviewFilename(null);
   }, [folderPath]);
 
+  // Bulk-actions destination viewer (#11). Per spec §5.6.2 the default is
+  // always "the most recently active viewer" — so we always sync to
+  // activeViewerId whenever the parent reports a change, overriding any
+  // explicit user pick. This keeps "open" intuitive after the user switches
+  // viewers in the viewer tab and returns. Defensive: fall back to active if
+  // the currently picked viewer was closed.
+  const [bulkDstViewerId, setBulkDstViewerId] = useState(activeViewerId);
+  useEffect(() => {
+    setBulkDstViewerId(activeViewerId);
+  }, [activeViewerId]);
+  useEffect(() => {
+    if (!viewers.some((v) => v.id === bulkDstViewerId)) {
+      setBulkDstViewerId(activeViewerId);
+    }
+  }, [viewers, activeViewerId, bulkDstViewerId]);
+
   if (!folderPath) {
     return (
       <div className="cls-empty-state">
@@ -240,11 +264,29 @@ export function ClassificationView({
           <span className="cls-bulk-count">
             {selectedFilenames.length} 件選択中
           </span>
+          {viewers.length > 1 ? (
+            <label className="cls-bulk-viewer">
+              <span className="cls-bulk-viewer-label">開く先</span>
+              <select
+                className="cls-bulk-viewer-select"
+                value={bulkDstViewerId}
+                onChange={(e) => setBulkDstViewerId(e.target.value)}
+                aria-label="開く先のビューア"
+              >
+                {viewers.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                    {v.id === activeViewerId ? " (現在)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <button
             type="button"
             className="cls-bulk-btn"
             onClick={() => {
-              onOpenManyInTabs(selectedFilenames);
+              onOpenManyInTabs(bulkDstViewerId, selectedFilenames);
               clearSelected();
             }}
           >
@@ -254,7 +296,7 @@ export function ClassificationView({
             type="button"
             className="cls-bulk-btn"
             onClick={() => {
-              onOpenManyAsSplit(selectedFilenames);
+              onOpenManyAsSplit(bulkDstViewerId, selectedFilenames);
               clearSelected();
             }}
             disabled={selectedFilenames.length > SPLIT_OPEN_LIMIT}
@@ -297,7 +339,6 @@ export function ClassificationView({
               showCheckbox={showCheckbox}
               modifierEnabled={modifierEnabled}
               onToggle={toggleGroup}
-              onClickThumb={onOpenInViewer}
               onClickEdit={openEdit}
               onClickPreview={openPreview}
               onToggleSelect={toggleSelected}
@@ -335,8 +376,10 @@ export function ClassificationView({
         }
         filename={previewFilename}
         onClose={closePreview}
-        onOpenInViewer={() => {
-          if (previewFilename) onOpenInViewer(previewFilename);
+        viewers={viewers}
+        activeViewerId={activeViewerId}
+        onOpenInViewer={(viewerId) => {
+          if (previewFilename) onOpenInViewer(viewerId, previewFilename);
           closePreview();
         }}
       />

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,17 +16,35 @@ func setStateFile(t *testing.T) string {
 	return p
 }
 
+// firstLayout returns the layout of the first viewer in s. Tests covering
+// per-viewer layout invariants use this to keep the assertion paths short.
+func firstLayout(s StateData) LayoutState {
+	if len(s.Viewers) == 0 {
+		return LayoutState{}
+	}
+	return s.Viewers[0].Layout
+}
+
 func TestLoadState_Missing_ReturnsDefaults(t *testing.T) {
 	setStateFile(t)
 	s := Load()
 	if s.Version != StateSchemaVersion {
 		t.Errorf("version: got %d, want %d", s.Version, StateSchemaVersion)
 	}
-	if s.Layout.Root.Kind != "leaf" {
-		t.Errorf("default root kind: got %q, want leaf", s.Layout.Root.Kind)
+	if len(s.Viewers) != 1 {
+		t.Fatalf("expected 1 default viewer, got %d", len(s.Viewers))
 	}
-	if s.Layout.ActiveID != s.Layout.Root.ID {
-		t.Errorf("default activeId: got %q, want %q", s.Layout.ActiveID, s.Layout.Root.ID)
+	if firstLayout(s).Root.Kind != "leaf" {
+		t.Errorf("default root kind: got %q, want leaf", firstLayout(s).Root.Kind)
+	}
+	if firstLayout(s).ActiveID != firstLayout(s).Root.ID {
+		t.Errorf("default activeId: got %q, want %q", firstLayout(s).ActiveID, firstLayout(s).Root.ID)
+	}
+	if s.ActiveViewerID != s.Viewers[0].ID {
+		t.Errorf("activeViewerID: got %q, want %q", s.ActiveViewerID, s.Viewers[0].ID)
+	}
+	if s.Viewers[0].Name != defaultViewerName {
+		t.Errorf("default viewer name: got %q, want %q", s.Viewers[0].Name, defaultViewerName)
 	}
 }
 
@@ -33,7 +52,7 @@ func TestSaveLoadState_RoundTripLeafRoot(t *testing.T) {
 	setStateFile(t)
 	in := DefaultData()
 	in.Window = WindowState{Width: 1600, Height: 900, X: 100, Y: 50}
-	in.Layout = LayoutState{
+	in.Viewers[0].Layout = LayoutState{
 		Root: LayoutNodeState{
 			Kind: "leaf", ID: "L1",
 			Tabs: []TabState{
@@ -52,21 +71,21 @@ func TestSaveLoadState_RoundTripLeafRoot(t *testing.T) {
 	if out.Window.Width != 1600 || out.Window.Height != 900 {
 		t.Errorf("Window size mismatch")
 	}
-	if out.Layout.ActiveID != "L1" {
-		t.Errorf("ActiveID roundtrip: got %q", out.Layout.ActiveID)
+	if firstLayout(out).ActiveID != "L1" {
+		t.Errorf("ActiveID roundtrip: got %q", firstLayout(out).ActiveID)
 	}
-	if len(out.Layout.Root.Tabs) != 2 || out.Layout.Root.Tabs[0].Zoom != 1.5 {
-		t.Errorf("Tab data mismatch: %+v", out.Layout.Root.Tabs)
+	if len(firstLayout(out).Root.Tabs) != 2 || firstLayout(out).Root.Tabs[0].Zoom != 1.5 {
+		t.Errorf("Tab data mismatch: %+v", firstLayout(out).Root.Tabs)
 	}
-	if out.Layout.Root.ActiveIndex != 1 {
-		t.Errorf("ActiveIndex roundtrip: got %d", out.Layout.Root.ActiveIndex)
+	if firstLayout(out).Root.ActiveIndex != 1 {
+		t.Errorf("ActiveIndex roundtrip: got %d", firstLayout(out).Root.ActiveIndex)
 	}
 }
 
 func TestSaveLoadState_RoundTripSplitTree(t *testing.T) {
 	setStateFile(t)
 	in := DefaultData()
-	in.Layout = LayoutState{
+	in.Viewers[0].Layout = LayoutState{
 		Root: LayoutNodeState{
 			Kind: "split", ID: "S1", Direction: "col", Ratio: 0.4,
 			A: &LayoutNodeState{
@@ -93,18 +112,18 @@ func TestSaveLoadState_RoundTripSplitTree(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 	out := Load()
-	if out.Layout.Root.Kind != "split" || out.Layout.Root.Direction != "col" {
-		t.Errorf("Split root mismatch: %+v", out.Layout.Root)
+	if firstLayout(out).Root.Kind != "split" || firstLayout(out).Root.Direction != "col" {
+		t.Errorf("Split root mismatch: %+v", firstLayout(out).Root)
 	}
-	if out.Layout.Root.Ratio != 0.4 {
-		t.Errorf("Split ratio mismatch: %v", out.Layout.Root.Ratio)
+	if firstLayout(out).Root.Ratio != 0.4 {
+		t.Errorf("Split ratio mismatch: %v", firstLayout(out).Root.Ratio)
 	}
-	if out.Layout.ActiveID != "L3" {
-		t.Errorf("ActiveID mismatch: %q", out.Layout.ActiveID)
+	if firstLayout(out).ActiveID != "L3" {
+		t.Errorf("ActiveID mismatch: %q", firstLayout(out).ActiveID)
 	}
 	// Drill down: A->A is L1
-	if out.Layout.Root.A.A.ID != "L1" || len(out.Layout.Root.A.A.Tabs) != 1 {
-		t.Errorf("Deep node mismatch: %+v", out.Layout.Root.A.A)
+	if firstLayout(out).Root.A.A.ID != "L1" || len(firstLayout(out).Root.A.A.Tabs) != 1 {
+		t.Errorf("Deep node mismatch: %+v", firstLayout(out).Root.A.A)
 	}
 }
 
@@ -117,7 +136,7 @@ func TestLoadState_CorruptJSON_FallsBackToDefault(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	s := Load()
-	if s.Version != StateSchemaVersion || s.Layout.Root.Kind != "leaf" {
+	if s.Version != StateSchemaVersion || firstLayout(s).Root.Kind != "leaf" {
 		t.Errorf("expected defaults on corrupt JSON, got %+v", s)
 	}
 }
@@ -129,7 +148,7 @@ func TestLoadState_VersionMismatch_FallsBackToDefault(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	s := Load()
-	if s.Version != StateSchemaVersion || s.Layout.Root.Kind != "leaf" {
+	if s.Version != StateSchemaVersion || firstLayout(s).Root.Kind != "leaf" {
 		t.Errorf("expected defaults on version mismatch, got %+v", s)
 	}
 }
@@ -152,7 +171,7 @@ func TestValidateState_ClampLeafActiveIndex(t *testing.T) {
 	p := setStateFile(t)
 	os.MkdirAll(filepath.Dir(p), 0o755)
 	bad := DefaultData()
-	bad.Layout = LayoutState{
+	bad.Viewers[0].Layout = LayoutState{
 		Root: LayoutNodeState{
 			Kind: "leaf", ID: "L",
 			Tabs:        []TabState{{Path: "/a", Zoom: 1, PanX: 0, PanY: 0}},
@@ -163,8 +182,8 @@ func TestValidateState_ClampLeafActiveIndex(t *testing.T) {
 	data, _ := json.Marshal(bad)
 	os.WriteFile(p, data, 0o644)
 	s := Load()
-	if s.Layout.Root.ActiveIndex != 0 {
-		t.Errorf("expected activeIndex clamped to 0, got %d", s.Layout.Root.ActiveIndex)
+	if firstLayout(s).Root.ActiveIndex != 0 {
+		t.Errorf("expected activeIndex clamped to 0, got %d", firstLayout(s).Root.ActiveIndex)
 	}
 }
 
@@ -172,7 +191,7 @@ func TestValidateState_ResetTinyZoom(t *testing.T) {
 	p := setStateFile(t)
 	os.MkdirAll(filepath.Dir(p), 0o755)
 	bad := DefaultData()
-	bad.Layout = LayoutState{
+	bad.Viewers[0].Layout = LayoutState{
 		Root: LayoutNodeState{
 			Kind: "leaf", ID: "L",
 			Tabs:        []TabState{{Path: "/a", Zoom: 0.001, PanX: 9999, PanY: 9999}},
@@ -183,8 +202,8 @@ func TestValidateState_ResetTinyZoom(t *testing.T) {
 	data, _ := json.Marshal(bad)
 	os.WriteFile(p, data, 0o644)
 	s := Load()
-	if s.Layout.Root.Tabs[0].Zoom != 1.0 {
-		t.Errorf("tiny zoom should be reset to 1.0, got %v", s.Layout.Root.Tabs[0].Zoom)
+	if firstLayout(s).Root.Tabs[0].Zoom != 1.0 {
+		t.Errorf("tiny zoom should be reset to 1.0, got %v", firstLayout(s).Root.Tabs[0].Zoom)
 	}
 }
 
@@ -192,7 +211,7 @@ func TestValidateState_ClampSplitRatio(t *testing.T) {
 	p := setStateFile(t)
 	os.MkdirAll(filepath.Dir(p), 0o755)
 	bad := DefaultData()
-	bad.Layout = LayoutState{
+	bad.Viewers[0].Layout = LayoutState{
 		Root: LayoutNodeState{
 			Kind: "split", ID: "S", Direction: "col", Ratio: 0.001,
 			A: &LayoutNodeState{Kind: "leaf", ID: "L1", Tabs: []TabState{}, ActiveIndex: -1},
@@ -203,8 +222,8 @@ func TestValidateState_ClampSplitRatio(t *testing.T) {
 	data, _ := json.Marshal(bad)
 	os.WriteFile(p, data, 0o644)
 	s := Load()
-	if s.Layout.Root.Ratio != 0.05 {
-		t.Errorf("ratio should be clamped to 0.05, got %v", s.Layout.Root.Ratio)
+	if firstLayout(s).Root.Ratio != 0.05 {
+		t.Errorf("ratio should be clamped to 0.05, got %v", firstLayout(s).Root.Ratio)
 	}
 }
 
@@ -212,7 +231,7 @@ func TestValidateState_ResetMissingActiveID(t *testing.T) {
 	p := setStateFile(t)
 	os.MkdirAll(filepath.Dir(p), 0o755)
 	bad := DefaultData()
-	bad.Layout = LayoutState{
+	bad.Viewers[0].Layout = LayoutState{
 		Root: LayoutNodeState{
 			Kind: "split", ID: "S", Direction: "col", Ratio: 0.5,
 			A: &LayoutNodeState{Kind: "leaf", ID: "L1", Tabs: []TabState{}, ActiveIndex: -1},
@@ -224,8 +243,8 @@ func TestValidateState_ResetMissingActiveID(t *testing.T) {
 	os.WriteFile(p, data, 0o644)
 	s := Load()
 	// Falls back to first DFS leaf.
-	if s.Layout.ActiveID != "L1" {
-		t.Errorf("activeId should fall back to first leaf, got %q", s.Layout.ActiveID)
+	if firstLayout(s).ActiveID != "L1" {
+		t.Errorf("activeId should fall back to first leaf, got %q", firstLayout(s).ActiveID)
 	}
 }
 
@@ -233,7 +252,7 @@ func TestValidateState_DuplicateNodeIDs_FallsBack(t *testing.T) {
 	p := setStateFile(t)
 	os.MkdirAll(filepath.Dir(p), 0o755)
 	bad := DefaultData()
-	bad.Layout = LayoutState{
+	bad.Viewers[0].Layout = LayoutState{
 		Root: LayoutNodeState{
 			Kind: "split", ID: "X", Direction: "col", Ratio: 0.5,
 			A: &LayoutNodeState{Kind: "leaf", ID: "X", Tabs: []TabState{}, ActiveIndex: -1},
@@ -245,8 +264,8 @@ func TestValidateState_DuplicateNodeIDs_FallsBack(t *testing.T) {
 	os.WriteFile(p, data, 0o644)
 	s := Load()
 	// Duplicate IDs → fall back to default (single leaf root).
-	if s.Layout.Root.ID != "root-0" {
-		t.Errorf("expected fallback to default layout, got root id %q", s.Layout.Root.ID)
+	if firstLayout(s).Root.ID != "root-0" {
+		t.Errorf("expected fallback to default layout, got root id %q", firstLayout(s).Root.ID)
 	}
 }
 
@@ -254,15 +273,15 @@ func TestValidateState_InvalidKind_FallsBack(t *testing.T) {
 	p := setStateFile(t)
 	os.MkdirAll(filepath.Dir(p), 0o755)
 	bad := DefaultData()
-	bad.Layout = LayoutState{
+	bad.Viewers[0].Layout = LayoutState{
 		Root:     LayoutNodeState{Kind: "garbage", ID: "G"},
 		ActiveID: "G",
 	}
 	data, _ := json.Marshal(bad)
 	os.WriteFile(p, data, 0o644)
 	s := Load()
-	if s.Layout.Root.Kind != "leaf" || s.Layout.Root.ID != "root-0" {
-		t.Errorf("expected default fallback, got %+v", s.Layout.Root)
+	if firstLayout(s).Root.Kind != "leaf" || firstLayout(s).Root.ID != "root-0" {
+		t.Errorf("expected default fallback, got %+v", firstLayout(s).Root)
 	}
 }
 
@@ -289,8 +308,8 @@ func TestLoadState_V3FallsBackToDefault(t *testing.T) {
 	if s.TopTab != "list" {
 		t.Errorf("default TopTab = %q, want list", s.TopTab)
 	}
-	if s.Layout.Root.Kind != "leaf" {
-		t.Errorf("expected default leaf root, got kind %q", s.Layout.Root.Kind)
+	if firstLayout(s).Root.Kind != "leaf" {
+		t.Errorf("expected default leaf root, got kind %q", firstLayout(s).Root.Kind)
 	}
 }
 
@@ -304,8 +323,8 @@ func TestLoadState_V1FallsBackToDefault(t *testing.T) {
 	if s.Version != StateSchemaVersion {
 		t.Errorf("expected schema v%d, got %d", StateSchemaVersion, s.Version)
 	}
-	if s.Layout.Root.Kind != "leaf" {
-		t.Errorf("v1 fallback should produce default leaf root, got kind %q", s.Layout.Root.Kind)
+	if firstLayout(s).Root.Kind != "leaf" {
+		t.Errorf("v1 fallback should produce default leaf root, got kind %q", firstLayout(s).Root.Kind)
 	}
 }
 
@@ -332,8 +351,8 @@ func TestLoadState_V4FallsBackToDefault(t *testing.T) {
 	if s.Version != StateSchemaVersion {
 		t.Errorf("expected schema v%d, got %d", StateSchemaVersion, s.Version)
 	}
-	if s.Layout.Root.ID != defaultRootKey {
-		t.Errorf("expected default layout root id %q, got %q (v4 payload survived)", defaultRootKey, s.Layout.Root.ID)
+	if firstLayout(s).Root.ID != defaultRootKey {
+		t.Errorf("expected default layout root id %q, got %q (v4 payload survived)", defaultRootKey, firstLayout(s).Root.ID)
 	}
 	if s.TopTab != "list" {
 		t.Errorf("expected default TopTab \"list\", got %q (v4 payload survived)", s.TopTab)
@@ -346,19 +365,285 @@ func TestLoadState_V4FallsBackToDefault(t *testing.T) {
 	}
 }
 
-func TestDefaultData_V5Fields(t *testing.T) {
+// ---- v5 → v6 migration -----------------------------------------------------
+
+func TestLoadState_V5MigratesLosslessly(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	// v5 payload with non-default values across every field so a regression
+	// where any field gets dropped during migration is visible.
+	v5 := []byte(`{
+		"version": 5,
+		"window": {"width":1600,"height":900,"x":42,"y":42},
+		"layout": {
+			"root": {
+				"kind": "split", "id": "S1", "direction": "col", "ratio": 0.3,
+				"a": {"kind":"leaf","id":"L1","tabs":[{"path":"/a.jpg","zoom":1.5,"panX":10,"panY":20}],"activeIndex":0},
+				"b": {"kind":"leaf","id":"L2","tabs":[],"activeIndex":-1}
+			},
+			"activeId": "L1"
+		},
+		"topTab": "viewer",
+		"list": {"folderPath":"/img","filter":{"tags":["t1","t2"],"confidence":"high","query":"q"},"collapsedGroups":["g1"]}
+	}`)
+	if err := os.WriteFile(p, v5, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.Version != StateSchemaVersion {
+		t.Fatalf("Version: got %d, want %d", s.Version, StateSchemaVersion)
+	}
+	if len(s.Viewers) != 1 {
+		t.Fatalf("expected 1 viewer after v5 migration, got %d", len(s.Viewers))
+	}
+	v := s.Viewers[0]
+	if v.ID == "" {
+		t.Errorf("migrated viewer needs a non-empty id")
+	}
+	if v.Name != defaultViewerName {
+		t.Errorf("migrated viewer name: got %q, want %q", v.Name, defaultViewerName)
+	}
+	if v.Layout.Root.Kind != "split" || v.Layout.Root.ID != "S1" {
+		t.Errorf("layout root not preserved: %+v", v.Layout.Root)
+	}
+	if v.Layout.ActiveID != "L1" {
+		t.Errorf("layout activeId not preserved: %q", v.Layout.ActiveID)
+	}
+	if s.ActiveViewerID != v.ID {
+		t.Errorf("activeViewerID: got %q, want %q", s.ActiveViewerID, v.ID)
+	}
+	if s.Window.Width != 1600 {
+		t.Errorf("window not preserved: %+v", s.Window)
+	}
+	if s.TopTab != "viewer" {
+		t.Errorf("topTab not preserved: %q", s.TopTab)
+	}
+	if s.List.FolderPath != "/img" || len(s.List.Filter.Tags) != 2 {
+		t.Errorf("list not preserved: %+v", s.List)
+	}
+}
+
+func TestLoadState_V5InvalidLayoutFallsBack(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	// v5 with a structurally broken layout (split missing children).
+	v5 := []byte(`{
+		"version": 5,
+		"window": {"width":1024,"height":768,"x":-1,"y":-1},
+		"layout": {"root":{"kind":"split","id":"S","direction":"col","ratio":0.5},"activeId":"S"},
+		"topTab": "list",
+		"list": {"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}
+	}`)
+	if err := os.WriteFile(p, v5, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	// Default fallback: 1 viewer with the canonical empty leaf root.
+	if firstLayout(s).Root.ID != defaultRootKey {
+		t.Errorf("expected default fallback, got %+v", firstLayout(s).Root)
+	}
+}
+
+// ---- v6 -------------------------------------------------------------------
+
+func TestSaveLoadState_V6MultipleViewersRoundTrip(t *testing.T) {
+	setStateFile(t)
+	in := DefaultData()
+	in.Viewers = []ViewerState{
+		{
+			ID:     "v-a",
+			Name:   "ビューア 1",
+			Layout: LayoutState{Root: LayoutNodeState{Kind: "leaf", ID: "L-a", Tabs: []TabState{{Path: "/a.jpg", Zoom: 1, PanX: 0, PanY: 0}}, ActiveIndex: 0}, ActiveID: "L-a"},
+		},
+		{
+			ID:     "v-b",
+			Name:   "デザインレビュー",
+			Layout: LayoutState{Root: LayoutNodeState{Kind: "leaf", ID: "L-b", Tabs: []TabState{}, ActiveIndex: -1}, ActiveID: "L-b"},
+		},
+	}
+	in.ActiveViewerID = "v-b"
+	if err := Save(in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out := Load()
+	if len(out.Viewers) != 2 {
+		t.Fatalf("expected 2 viewers, got %d", len(out.Viewers))
+	}
+	if out.Viewers[0].ID != "v-a" || out.Viewers[1].ID != "v-b" {
+		t.Errorf("viewer order/IDs not preserved: %+v", out.Viewers)
+	}
+	if out.Viewers[1].Name != "デザインレビュー" {
+		t.Errorf("viewer name not preserved: %q", out.Viewers[1].Name)
+	}
+	if out.ActiveViewerID != "v-b" {
+		t.Errorf("activeViewerID: got %q, want v-b", out.ActiveViewerID)
+	}
+	if out.Viewers[0].Layout.Root.Tabs[0].Path != "/a.jpg" {
+		t.Errorf("viewer 0 tabs not preserved: %+v", out.Viewers[0].Layout.Root.Tabs)
+	}
+}
+
+func TestValidateState_V6EmptyViewersGetsDefault(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	// version=6, viewers explicitly empty.
+	payload := []byte(`{
+		"version": 6,
+		"window": {"width":1024,"height":768,"x":-1,"y":-1},
+		"viewers": [],
+		"activeViewerId": "",
+		"topTab": "list",
+		"list": {"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}
+	}`)
+	if err := os.WriteFile(p, payload, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if len(s.Viewers) != 1 {
+		t.Fatalf("expected 1 viewer after empty-array fallback, got %d", len(s.Viewers))
+	}
+	if s.ActiveViewerID != s.Viewers[0].ID {
+		t.Errorf("activeViewerID should fall back to viewers[0]")
+	}
+}
+
+func TestValidateState_V6ActiveViewerIDMismatch_FallsBackToFirst(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	payload := []byte(`{
+		"version": 6,
+		"window": {"width":1024,"height":768,"x":-1,"y":-1},
+		"viewers": [
+			{"id":"v-x","name":"X","layout":{"root":{"kind":"leaf","id":"L1","tabs":[],"activeIndex":-1},"activeId":"L1"}},
+			{"id":"v-y","name":"Y","layout":{"root":{"kind":"leaf","id":"L2","tabs":[],"activeIndex":-1},"activeId":"L2"}}
+		],
+		"activeViewerId": "missing",
+		"topTab": "viewer",
+		"list": {"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}
+	}`)
+	if err := os.WriteFile(p, payload, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.ActiveViewerID != "v-x" {
+		t.Errorf("expected activeViewerID to fall back to first (v-x), got %q", s.ActiveViewerID)
+	}
+}
+
+func TestValidateState_V6DuplicateViewerID_FallsBack(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	payload := []byte(`{
+		"version": 6,
+		"window": {"width":1024,"height":768,"x":-1,"y":-1},
+		"viewers": [
+			{"id":"dup","name":"A","layout":{"root":{"kind":"leaf","id":"L1","tabs":[],"activeIndex":-1},"activeId":"L1"}},
+			{"id":"dup","name":"B","layout":{"root":{"kind":"leaf","id":"L2","tabs":[],"activeIndex":-1},"activeId":"L2"}}
+		],
+		"activeViewerId": "dup",
+		"topTab": "list",
+		"list": {"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}
+	}`)
+	if err := os.WriteFile(p, payload, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	// Default fallback yields exactly 1 viewer with the canonical name.
+	if len(s.Viewers) != 1 || s.Viewers[0].Name != defaultViewerName {
+		t.Errorf("expected default fallback on duplicate viewer ID, got %+v", s.Viewers)
+	}
+}
+
+func TestValidateState_V6NameSanitization(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	// Long name (>32 runes), then empty/whitespace name, then control chars.
+	long := strings.Repeat("あ", 100) // 100 runes → must be truncated to 32
+	payload := []byte(`{
+		"version": 6,
+		"window": {"width":1024,"height":768,"x":-1,"y":-1},
+		"viewers": [
+			{"id":"v1","name":"` + long + `","layout":{"root":{"kind":"leaf","id":"L1","tabs":[],"activeIndex":-1},"activeId":"L1"}},
+			{"id":"v2","name":"   ","layout":{"root":{"kind":"leaf","id":"L2","tabs":[],"activeIndex":-1},"activeId":"L2"}},
+			{"id":"v3","name":"hi\nthere","layout":{"root":{"kind":"leaf","id":"L3","tabs":[],"activeIndex":-1},"activeId":"L3"}}
+		],
+		"activeViewerId": "v1",
+		"topTab": "list",
+		"list": {"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}
+	}`)
+	if err := os.WriteFile(p, payload, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if len(s.Viewers) != 3 {
+		t.Fatalf("expected 3 viewers, got %d", len(s.Viewers))
+	}
+	if cnt := utf8RuneCount(s.Viewers[0].Name); cnt != maxNameLen {
+		t.Errorf("v1 name should be truncated to %d runes, got %d (name=%q)", maxNameLen, cnt, s.Viewers[0].Name)
+	}
+	if s.Viewers[1].Name != "ビューア 2" {
+		t.Errorf("v2 whitespace-only name should fall back to 'ビューア 2', got %q", s.Viewers[1].Name)
+	}
+	if s.Viewers[2].Name != "hithere" {
+		t.Errorf("v3 control chars should be stripped, got %q", s.Viewers[2].Name)
+	}
+}
+
+func TestValidateState_V6TooManyViewers_Truncated(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	// 9 viewers — one over the limit.
+	var sb strings.Builder
+	sb.WriteString(`{"version":6,"window":{"width":1024,"height":768,"x":-1,"y":-1},"viewers":[`)
+	for i := range 9 {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		fmtID := func(i int) string { return string(rune('a' + i)) }
+		sb.WriteString(`{"id":"v-` + fmtID(i) + `","name":"V","layout":{"root":{"kind":"leaf","id":"L-` + fmtID(i) + `","tabs":[],"activeIndex":-1},"activeId":"L-` + fmtID(i) + `"}}`)
+	}
+	sb.WriteString(`],"activeViewerId":"v-a","topTab":"list","list":{"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}}`)
+	if err := os.WriteFile(p, []byte(sb.String()), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if len(s.Viewers) != maxViewers {
+		t.Errorf("expected %d viewers after truncation, got %d", maxViewers, len(s.Viewers))
+	}
+}
+
+// utf8RuneCount counts runes — broken out so the long-name assertion stays
+// readable. Avoids importing unicode/utf8 here just for one call.
+func utf8RuneCount(s string) int {
+	n := 0
+	for range s {
+		n++
+	}
+	return n
+}
+
+func TestDefaultData_V6Fields(t *testing.T) {
 	d := DefaultData()
-	if d.Version != 5 {
-		t.Errorf("Version = %d, want 5", d.Version)
+	if d.Version != StateSchemaVersion {
+		t.Errorf("Version = %d, want %d", d.Version, StateSchemaVersion)
 	}
 	if d.TopTab != "list" {
 		t.Errorf("TopTab = %q, want list", d.TopTab)
 	}
-	if d.Layout.Root.Kind != "leaf" {
-		t.Errorf("default root kind: got %q, want leaf", d.Layout.Root.Kind)
+	if len(d.Viewers) != 1 {
+		t.Fatalf("default viewers len = %d, want 1", len(d.Viewers))
 	}
-	if d.Layout.Root.ActiveIndex != -1 {
-		t.Errorf("empty leaf activeIndex must be -1, got %d", d.Layout.Root.ActiveIndex)
+	if d.Viewers[0].Name != defaultViewerName {
+		t.Errorf("default viewer name = %q, want %q", d.Viewers[0].Name, defaultViewerName)
+	}
+	if d.ActiveViewerID != d.Viewers[0].ID {
+		t.Errorf("ActiveViewerID mismatch: %q vs %q", d.ActiveViewerID, d.Viewers[0].ID)
+	}
+	if firstLayout(d).Root.Kind != "leaf" {
+		t.Errorf("default root kind: got %q, want leaf", firstLayout(d).Root.Kind)
+	}
+	if firstLayout(d).Root.ActiveIndex != -1 {
+		t.Errorf("empty leaf activeIndex must be -1, got %d", firstLayout(d).Root.ActiveIndex)
 	}
 	if d.List.Filter.Confidence != "all" {
 		t.Errorf("default Confidence = %q, want all", d.List.Filter.Confidence)
