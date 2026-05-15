@@ -134,6 +134,10 @@ html, body, #root {
   align-items: center;
   gap: 6px;
   padding: 0 10px 0 22px;
+  /* #51: 短い名前 ("1" など) でもタブ chrome が一覧タブ並みに見える幅を確保。
+     overflow-x: auto がコンテナ側にあるので、多タブ時もはみ出して横スクロール
+     になるだけで layout は壊れない。 */
+  min-width: 100px;
   max-width: 260px;
 }
 
@@ -171,6 +175,11 @@ html, body, #root {
   border-radius: 4px;
   padding: 0;
   flex-shrink: 0;
+  /* タブ右端に寄せる。短い名前で min-width 100px の余白がタブ右側に
+     生まれるケースでも × が常にタブ右端 (wrapper 右 padding 10px の内側)
+     に立つ。長い名前で内容がタブ幅を埋める場合は auto が 0 に潰れて
+     gap: 6px が下限として効く。 */
+  margin-left: auto;
   /* Hidden but keeps its 20px slot so the name doesn't slide on hover. */
   visibility: hidden;
 }
