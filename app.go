@@ -149,13 +149,24 @@ func (a *App) DeleteImage(folderPath, filename string) error {
 		return fmt.Errorf("delete: folderPath must be absolute: %q", cleanedFolder)
 	}
 	// Reject path traversal in `filename`. Sidecar entries use POSIX-relative
-	// names produced by classification.scanner, so a "../" would only show up
-	// if a tampered IPC request is sent. Refuse rather than computing a path
-	// that escapes folderPath.
-	if strings.Contains(cleanedName, "..") {
-		return fmt.Errorf("delete: filename must not contain '..': %q", cleanedName)
+	// names produced by classification.scanner, so any escape attempt
+	// (absolute path, leading "../") would only show up if a tampered IPC
+	// request is sent. We compute the join, then verify with filepath.Rel
+	// that the result still lives under cleanedFolder. A naive
+	// `strings.Contains(name, "..")` rejects innocent names like
+	// `v1..final.png` so we don't use that.
+	cleanedNameOS := filepath.FromSlash(cleanedName)
+	if filepath.IsAbs(cleanedNameOS) {
+		return fmt.Errorf("delete: filename must be relative: %q", cleanedName)
 	}
-	absPath := filepath.Join(cleanedFolder, filepath.FromSlash(cleanedName))
+	absPath := filepath.Join(cleanedFolder, cleanedNameOS)
+	rel, err := filepath.Rel(cleanedFolder, absPath)
+	if err != nil {
+		return fmt.Errorf("delete: filename resolves outside folder: %q (%w)", cleanedName, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("delete: filename must not escape folder: %q", cleanedName)
+	}
 	if err := imgfile.Trash(absPath); err != nil {
 		logging.Error("imgfile", "delete failed",
 			"folder", cleanedFolder, "filename", cleanedName, "err", err.Error())
