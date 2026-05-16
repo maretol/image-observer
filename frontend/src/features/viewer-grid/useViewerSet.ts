@@ -10,7 +10,7 @@
 //   - "moveTabToViewer" for the TabContextMenu cross-viewer move (§5.7).
 //
 // All state goes through one useState (the entire ViewerSet). Pure functions
-// live in viewers.ts and layout.ts; this file only does the React glue +
+// live in viewers.ts and layout/; this file only does the React glue +
 // pre-flight + toasts + logging.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
