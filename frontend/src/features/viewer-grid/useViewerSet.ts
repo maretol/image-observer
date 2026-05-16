@@ -421,18 +421,27 @@ export function useViewerSet(opts?: {
       let skipped = 0;
       logger.info("viewer", `${op} start`, { count: paths.length, ...extra });
       for (const path of paths) {
+        // Viewer-missing check goes BEFORE preflight: viewer existence does
+        // not depend on the previous iteration's apply() having committed,
+        // so there's no race to wait out. Bailing early matches the legacy
+        // ordering and avoids a misleading file-error toast on a path bound
+        // for a viewer that's already gone.
+        if (getLayout() === null) {
+          skipped += paths.length - (opened + skipped);
+          break;
+        }
         const ok = await preflight(path);
         if (!ok) {
           skipped++;
           continue;
         }
-        // Snapshot the layout AFTER the preflight await yields. The previous
-        // iteration's apply() schedules a setState that React commits during
-        // the yield (so `setRef.current` is up to date by the time we read
-        // it here). Reading before the await would see a count predating the
-        // last apply and let us run past MAX_PANELS while splitWithNewLeaf
-        // silently refuses each step — no toast, no aborted log, opened
-        // counted as if it had worked.
+        // Re-snapshot AFTER the preflight await. (a) The previous iteration's
+        // apply() schedules a setState that React commits during the yield,
+        // so reading countLeaves before the await would see a stale value
+        // and let us run past MAX_PANELS while splitWithNewLeaf silently
+        // refuses each step. (b) The target viewer could also have been
+        // closed during preflight; the second null check keeps accounting
+        // correct in that window.
         const l = getLayout();
         if (!l) {
           skipped += paths.length - (opened + skipped);
