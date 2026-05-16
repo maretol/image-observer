@@ -6,6 +6,10 @@ export function CreateEmptyClassification(arg1) {
   return window['go']['main']['App']['CreateEmptyClassification'](arg1);
 }
 
+export function DeleteImage(arg1, arg2) {
+  return window['go']['main']['App']['DeleteImage'](arg1, arg2);
+}
+
 export function GetImageInfo(arg1) {
   return window['go']['main']['App']['GetImageInfo'](arg1);
 }

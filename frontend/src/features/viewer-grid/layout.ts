@@ -593,6 +593,36 @@ export function closeTabInLeaf(
   return { root, activeId };
 }
 
+// closeTabsForPathInLayout removes every tab whose `path === absPath`
+// across all leaves. Used by the image-delete flow (#47) so that a freshly
+// deleted file does not leave dangling tabs that would error on next open.
+// Tabs are closed from highest tabIndex downward within each leaf so that
+// earlier indices in the same leaf stay valid mid-iteration; that order
+// also lets `closeTabInLeaf`'s "leaf became empty" collapse logic run
+// naturally once the last matching tab is removed.
+export function closeTabsForPathInLayout(
+  layout: Layout,
+  absPath: string,
+): Layout {
+  const matches: { leafId: string; tabIndex: number }[] = [];
+  for (const leaf of enumerateLeaves(layout.root)) {
+    leaf.tabs.forEach((t, i) => {
+      if (t.path === absPath) {
+        matches.push({ leafId: leaf.id, tabIndex: i });
+      }
+    });
+  }
+  if (matches.length === 0) return layout;
+  // Higher tabIndex first so removing one doesn't shift the next within the
+  // same leaf. Across leaves the order is irrelevant.
+  matches.sort((a, b) => b.tabIndex - a.tabIndex);
+  let next = layout;
+  for (const m of matches) {
+    next = closeTabInLeaf(next, m.leafId, m.tabIndex);
+  }
+  return next;
+}
+
 export function setActiveTabInLeaf(
   layout: Layout,
   leafId: string,

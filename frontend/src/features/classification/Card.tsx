@@ -25,6 +25,10 @@ export type CardProps = {
   onClickPreview: () => void;
   onToggleSelect: () => void;
   onExtendSelectionTo: () => void;
+  // Right-click anywhere on the card surface. The parent positions a
+  // single-item CardContextMenu at (clientX, clientY) and routes the
+  // menu's "削除" action through the classification hook (#47).
+  onRequestContextMenu: (clientX: number, clientY: number) => void;
 };
 
 export function Card({
@@ -38,6 +42,7 @@ export function Card({
   onClickPreview,
   onToggleSelect,
   onExtendSelectionTo,
+  onRequestContextMenu,
 }: CardProps) {
   const fullPath = `${folderPath}/${entry.filename}`;
   const { ref, url, state } = useGridThumbnail(fullPath);
@@ -57,7 +62,17 @@ export function Card({
   };
 
   return (
-    <div className={`cls-card ${selected ? "cls-card-selected" : ""}`}>
+    <div
+      className={`cls-card ${selected ? "cls-card-selected" : ""}`}
+      onContextMenu={(e) => {
+        // Suppress the webview's default menu and let the parent place a
+        // single-item ("削除") menu at the cursor. Captured at the .cls-card
+        // wrapper so right-click anywhere on the card surface — thumb,
+        // filename, badges — opens the menu (#47 §5.1).
+        e.preventDefault();
+        onRequestContextMenu(e.clientX, e.clientY);
+      }}
+    >
       <div
         ref={ref}
         className="cls-card-thumb"

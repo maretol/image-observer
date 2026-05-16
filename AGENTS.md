@@ -263,25 +263,35 @@ git grep -nE "(:hover|cursor: pointer)" frontend/src/App.css
 
 ## G. コミット運用
 
-### G-1. commit は Claude が実行しない — コマンドを提示してユーザに任せる
+### G-1. commit は Claude が実行できる (SSH 鍵署名)
 
-このリポジトリは **署名付き commit のみ取り込み可** に制限されている。
-GPG / SSH 署名鍵の passphrase は Claude Code に共有していないため、
-Claude が `git commit` を直接走らせると署名できずに失敗する (gpg-agent が
-non-interactive 環境で pinentry を起動できずタイムアウトする)。
+このリポジトリは **署名付き commit のみ取り込み可** に制限されているが、
+署名を SSH 鍵 + ssh-agent 構成に切り替えてあり、`git commit` 実行時に
+passphrase プロンプトは出ない (agent にキャッシュ済み)。Claude Code
+から `git commit` を **直接走らせて構わない**。
 
-そのため commit 段階に入ったら、Claude は実行を止めて以下を行う:
+通常運用:
+- `git commit -m "..."` / `git commit -m "$(cat <<'EOF' ... EOF)"` を
+  そのまま使える。
+- 大きい PR は論理単位ごとに複数 commit に分け、各 commit を Claude が
+  順番に作る。
+- commit メッセージ規約は CLAUDE.md / issue-triage コマンド側を参照
+  (`<type> (#<issue番号>): <短い要約>`)。
 
-1. コミットメッセージを起こす (HEREDOC で扱えるよう改行込みで提示)
-2. `git commit -m "$(cat <<'EOF' ... EOF)"` の形でコマンドをそのまま出す
-3. ユーザがローカルでそのコマンドを走らせて署名付き commit を作る
+過去事例 (履歴 / why の補助): 当初は GPG 署名で運用していたが、GPG 鍵の
+passphrase を Claude Code に共有していなかったため、`git commit` が
+pinentry タイムアウトで失敗していた (issue #30 PR)。SSH 署名 +
+ssh-agent への移行で解消。
 
-過去事例: issue #30 の PR で Claude が `git commit` を実行 → `gpg failed to
-sign the data` でタイムアウト失敗。`--no-gpg-sign` でバイパスする手は
-ルール上 NG (system prompt の "NEVER bypass signing unless explicitly asked")。
-
-`git add` / `git status` / `git diff` / `git push` / `gh pr create` 等は
-Claude が走らせて構わない。止まるのは **commit を作るコマンド** だけ。
+注意:
+- `--no-verify` / `--no-gpg-sign` / その他署名バイパス系のフラグを
+  使うのは **依然 NG** (system prompt の "NEVER bypass signing unless
+  explicitly asked")。SSH 署名が透過的に通る今、これらを付ける理由は
+  通常ない。pre-commit hook が失敗したら hook 側を直す。
+- amend で署名済み commit を改変する場合も同様。新しい commit を
+  作る方向で対処する (CLAUDE.md の `--amend` 回避と整合)。
+- `git push --force` / `git reset --hard` 等の destructive ops は
+  従来通りユーザー確認を取る (system prompt の reversibility ルール)。
 
 ---
 
@@ -383,7 +393,7 @@ Copilot は diff 中心に見るので「同じ問題が別ファイルにもあ
 - export 公開の追加 (B-1, B-2) → 参照型なら必ず clone
 - ドキュメント更新 (A-1, A-2) → 実体と突き合わせる
 - 実装 iterate / レビュー対応 (A-3) → 変更後に context.md / コメントが追従しているか再確認
-- commit 段階 (G-1) → コマンドを提示してユーザに任せる、Claude は実行しない
+- commit 段階 (G-1) → SSH 署名で Claude が直接 commit して構わない。署名バイパス (`--no-verify` / `--no-gpg-sign`) は依然禁止
 
 PR を作る直前には:
 

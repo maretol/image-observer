@@ -19,6 +19,9 @@ export type DirectoryGroupProps = {
   onClickPreview: (filename: string) => void;
   onToggleSelect: (filename: string) => void;
   onExtendSelectionTo: (filename: string) => void;
+  // Card right-click → ClassificationView positions CardContextMenu at
+  // (clientX, clientY) and routes the menu's "削除" action. (#47 §5.1)
+  onRequestCardContextMenu: (filename: string, x: number, y: number) => void;
 };
 
 export function DirectoryGroup({
@@ -35,6 +38,7 @@ export function DirectoryGroup({
   onClickPreview,
   onToggleSelect,
   onExtendSelectionTo,
+  onRequestCardContextMenu,
 }: DirectoryGroupProps) {
   const filteredCount = group.entries.length;
   return (
@@ -68,6 +72,9 @@ export function DirectoryGroup({
               onClickPreview={() => onClickPreview(entry.filename)}
               onToggleSelect={() => onToggleSelect(entry.filename)}
               onExtendSelectionTo={() => onExtendSelectionTo(entry.filename)}
+              onRequestContextMenu={(x, y) =>
+                onRequestCardContextMenu(entry.filename, x, y)
+              }
             />
           ))}
         </div>

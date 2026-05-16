@@ -471,6 +471,7 @@ function AppInner({ initialState }: AppInnerProps) {
             onOpenInViewer={onOpenInViewer}
             onOpenManyInTabs={onOpenManyInTabs}
             onOpenManyAsSplit={onOpenManyAsSplit}
+            onAfterDelete={viewer.closeTabsForPath}
           />
         ) : (
           <ViewerGrid
