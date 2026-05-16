@@ -254,9 +254,10 @@ export function ClassificationView({
 
   // Single-mode "選択モードに切り替え" — add the right-clicked card to the
   // selection set so the bulk-toolbar appears. We use toggleSelected (which
-  // adds when absent, removes when present) so calling it on an already-
-  // selected card from the single menu mode would no-op — but that path is
-  // unreachable by §11-D (single mode means the card is NOT in selection).
+  // adds when absent, removes when present). The "already-selected" branch
+  // would actually deselect the card, but spec §11-D guarantees the single
+  // menu is only shown when the card is NOT in selection, so that branch is
+  // unreachable from here.
   const onContextMenuEnterSelectionMode = useCallback(() => {
     if (!cardCtxMenu) return;
     const filename = cardCtxMenu.filename;

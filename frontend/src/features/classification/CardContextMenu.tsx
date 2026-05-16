@@ -7,9 +7,9 @@ import {
 } from "./cardContextMenuLogic";
 
 // Per-item / chrome heights used for the *initial* position seed. The actual
-// viewport-edge clamp re-runs in useLayoutEffect after first paint via
-// getBoundingClientRect(), so these only need to be "close enough" to avoid a
-// visible jump on first paint (mirrors TabContextMenu).
+// viewport-edge clamp re-runs in useLayoutEffect after DOM commit but before
+// paint via getBoundingClientRect(), so these only need to be "close enough"
+// to avoid a visible jump on first paint (mirrors TabContextMenu).
 const APPROX_MENU_WIDTH = 220;
 const CTX_ITEM_HEIGHT = 24;
 const CTX_DIVIDER_HEIGHT = 9;
