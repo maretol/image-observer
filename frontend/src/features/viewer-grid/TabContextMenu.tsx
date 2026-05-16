@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 type Viewer = { id: string; name: string };
 
@@ -19,16 +19,12 @@ type Props = {
   onMoveToViewer: (dstViewerId: string) => void;
 };
 
-// Approximate width used for screen-edge placement. We can't measure the menu
-// precisely before first paint, so this is a conservative seed wide enough to
-// cover the .ctx-item-viewer max-width (280px) + .ctx-item horizontal padding.
+// Approximate width / per-item heights used as the *initial* position seed.
+// The actual viewport-edge clamp runs in useLayoutEffect after first paint
+// using getBoundingClientRect(), so this seed only needs to be close enough
+// to avoid a visible jump — it doesn't have to perfectly match the rendered
+// size (which depends on browser default line-height / font metrics).
 const APPROX_MENU_WIDTH = 320;
-
-// Per-item / divider / chrome heights used to estimate the menu height from
-// the actual item count. Keeps the bottom-edge clamp accurate up to
-// MAX_VIEWERS=8 instead of falling back to a fixed seed that's too small at
-// the upper end. Values track .ctx-item / .ctx-divider / .tab-context-menu
-// rules in App.css (changes there should mirror here).
 const CTX_ITEM_HEIGHT = 24; // padding 5+5 + line-height ≈ 14
 const CTX_DIVIDER_HEIGHT = 9; // height 1 + margin 4+4
 const CTX_MENU_CHROME_HEIGHT = 14; // padding 6+6 + border 1+1
@@ -111,9 +107,12 @@ export function TabContextMenu({
     }
   };
 
-  // Estimate the menu height from the actual item count so the bottom-edge
-  // clamp stays accurate up to MAX_VIEWERS=8. 3 fixed items (閉じる / split×2),
-  // 1 divider always, + (1 divider + N viewer items) when other viewers exist.
+  // Initial position seed from a per-item-count estimate. 3 fixed items
+  // (閉じる / split×2), 1 divider always, + (1 divider + N viewer items) when
+  // other viewers exist. This is only the *seed* — useLayoutEffect below
+  // measures the actual rendered size and re-clamps before paint, so this
+  // estimate doesn't have to perfectly match the rendered size (which depends
+  // on browser default line-height / font metrics).
   const itemCount = 3 + otherViewers.length;
   const dividerCount = 1 + (hasMoveItems ? 1 : 0);
   const approxHeight =
@@ -121,11 +120,38 @@ export function TabContextMenu({
     itemCount * CTX_ITEM_HEIGHT +
     dividerCount * CTX_DIVIDER_HEIGHT;
 
-  // Position clamped within viewport. Math.max(0, ...) floors the result so
-  // a window narrower / shorter than the menu doesn't push it off-screen
-  // into negative coordinates.
-  const left = Math.max(0, Math.min(x, window.innerWidth - APPROX_MENU_WIDTH));
-  const top = Math.max(0, Math.min(y, window.innerHeight - approxHeight));
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number }>(() => ({
+    // Math.max(0, ...) floors the result so a window narrower / shorter than
+    // the menu doesn't push it off-screen into negative coordinates.
+    left: Math.max(0, Math.min(x, window.innerWidth - APPROX_MENU_WIDTH)),
+    top: Math.max(0, Math.min(y, window.innerHeight - approxHeight)),
+  }));
+
+  // After first DOM commit (before paint), measure the actual rendered size
+  // and re-clamp so OS / browser / font differences in line-height can't push
+  // the menu off-screen. Only adjust when the menu actually overflows —
+  // shrinking the gap to the cursor would be jarring.
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    let newLeft = pos.left;
+    let newTop = pos.top;
+    if (rect.right > window.innerWidth) {
+      newLeft = Math.max(0, window.innerWidth - rect.width);
+    }
+    if (rect.bottom > window.innerHeight) {
+      newTop = Math.max(0, window.innerHeight - rect.height);
+    }
+    if (newLeft !== pos.left || newTop !== pos.top) {
+      setPos({ left: newLeft, top: newTop });
+    }
+    // Mount-only: pos / x / y are captured by closure; re-clamping on a later
+    // setState would just no-op since the second render lands inside the
+    // viewport. Re-running this on every render would also flicker.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Build menuitems in a single flat array so itemsRef indices stay stable
   // regardless of how many other viewers exist. Order: 閉じる → split×2 →
@@ -142,8 +168,9 @@ export function TabContextMenu({
 
   return (
     <div
+      ref={rootRef}
       className="tab-context-menu-root"
-      style={{ position: "fixed", left, top, zIndex: 1000 }}
+      style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 1000 }}
     >
       <div
         className="tab-context-menu"
