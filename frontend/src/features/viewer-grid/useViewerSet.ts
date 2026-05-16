@@ -421,6 +421,18 @@ export function useViewerSet(opts?: {
       let skipped = 0;
       logger.info("viewer", `${op} start`, { count: paths.length, ...extra });
       for (const path of paths) {
+        const ok = await preflight(path);
+        if (!ok) {
+          skipped++;
+          continue;
+        }
+        // Snapshot the layout AFTER the preflight await yields. The previous
+        // iteration's apply() schedules a setState that React commits during
+        // the yield (so `setRef.current` is up to date by the time we read
+        // it here). Reading before the await would see a count predating the
+        // last apply and let us run past MAX_PANELS while splitWithNewLeaf
+        // silently refuses each step — no toast, no aborted log, opened
+        // counted as if it had worked.
         const l = getLayout();
         if (!l) {
           skipped += paths.length - (opened + skipped);
@@ -438,11 +450,6 @@ export function useViewerSet(opts?: {
           });
           skipped += remaining;
           break;
-        }
-        const ok = await preflight(path);
-        if (!ok) {
-          skipped++;
-          continue;
         }
         apply(path);
         opened++;
