@@ -11,7 +11,8 @@
 //
 // All state goes through one useState (the entire ViewerSet). Pure functions
 // live in viewers.ts and layout/; this file only does the React glue +
-// pre-flight + toasts + logging.
+// pre-flight + toasts + logging. Stateless helpers shared between the
+// callback families live in useViewerSet.helpers.ts.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GetImageInfo } from "../../../wailsjs/go/main/App";
@@ -33,13 +34,12 @@ import {
   setSplitRatio as setSplitRatioFn,
   splitFromContextMenu,
   splitTabIntoEdge,
-  splitWithNewLeaf,
   updateTabInLeaf,
   type Edge,
   type Layout,
   type SplitDirection,
 } from "./layout";
-import { newTab, type Tab } from "./useTabs";
+import { type Tab } from "./useTabs";
 import {
   activeViewer,
   addViewer,
@@ -52,9 +52,12 @@ import {
   sanitizeName,
   setActiveViewer,
   updateViewerLayout,
-  type Viewer,
   type ViewerSet,
 } from "./viewers";
+import {
+  leafTabsCount,
+  openPathAsSplitOrAppend,
+} from "./useViewerSet.helpers";
 
 export type ConfirmFn = (message: string) => Promise<boolean>;
 
@@ -115,63 +118,63 @@ export function useViewerSet(opts?: {
   // closeViewerCb assumes the caller already obtained user confirmation when
   // appropriate (per §5.4 the confirm dialog lives in App.tsx). It still
   // refuses to close the last viewer (no UI for that path either).
-  const closeViewerCb = useCallback(
-    (id: string) => {
+  const closeViewerCb = useCallback((id: string) => {
+    setSet((cur) => {
+      if (cur.viewers.length <= 1) {
+        logger.warn("viewer-set", "close refused", {
+          id,
+          reason: "last viewer",
+        });
+        return cur;
+      }
+      const target = cur.viewers.find((v) => v.id === id);
+      if (!target) return cur;
+      const tabCount = leafTabsCount(target);
+      const next = closeViewer(cur, id);
+      logger.info("viewer-set", "close", {
+        id,
+        hadTabs: tabCount > 0,
+        total: next.viewers.length,
+      });
+      return next;
+    });
+  }, []);
+
+  const renameViewerCb = useCallback(
+    (id: string, name: string) => {
+      // Distinguish the two reasons renameViewer can return the same set:
+      //   (a) sanitize → null (empty / whitespace-only) — a real rejection
+      //       that deserves a toast + warn log.
+      //   (b) sanitized name equals the existing name — silent no-op (the
+      //       user just blurred / Enter'd without changing anything).
+      // Pre-sanitizing here lets us branch cleanly; without it both paths
+      // collapsed onto the same `next === cur` check and fired a misleading
+      // "名前を空にできません" toast on every unchanged commit.
+      const sanitized = sanitizeName(name);
+      if (sanitized === null) {
+        toast("名前を空にできません", "warn");
+        logger.warn("viewer-set", "rename refused", {
+          id,
+          attempted: name,
+        });
+        return;
+      }
       setSet((cur) => {
-        if (cur.viewers.length <= 1) {
-          logger.warn("viewer-set", "close refused", {
-            id,
-            reason: "last viewer",
-          });
-          return cur;
-        }
         const target = cur.viewers.find((v) => v.id === id);
         if (!target) return cur;
-        const tabCount = leafTabsCount(target);
-        const next = closeViewer(cur, id);
-        logger.info("viewer-set", "close", {
+        if (target.name === sanitized) return cur; // (b) — silent no-op
+        const next = renameViewer(cur, id, sanitized);
+        if (next === cur) return cur; // defensive; sanitize already passed
+        logger.info("viewer-set", "rename", {
           id,
-          hadTabs: tabCount > 0,
-          total: next.viewers.length,
+          oldName: target.name,
+          newName: sanitized,
         });
         return next;
       });
     },
-    [],
+    [toast],
   );
-
-  const renameViewerCb = useCallback((id: string, name: string) => {
-    // Distinguish the two reasons renameViewer can return the same set:
-    //   (a) sanitize → null (empty / whitespace-only) — a real rejection
-    //       that deserves a toast + warn log.
-    //   (b) sanitized name equals the existing name — silent no-op (the
-    //       user just blurred / Enter'd without changing anything).
-    // Pre-sanitizing here lets us branch cleanly; without it both paths
-    // collapsed onto the same `next === cur` check and fired a misleading
-    // "名前を空にできません" toast on every unchanged commit.
-    const sanitized = sanitizeName(name);
-    if (sanitized === null) {
-      toast("名前を空にできません", "warn");
-      logger.warn("viewer-set", "rename refused", {
-        id,
-        attempted: name,
-      });
-      return;
-    }
-    setSet((cur) => {
-      const target = cur.viewers.find((v) => v.id === id);
-      if (!target) return cur;
-      if (target.name === sanitized) return cur; // (b) — silent no-op
-      const next = renameViewer(cur, id, sanitized);
-      if (next === cur) return cur; // defensive; sanitize already passed
-      logger.info("viewer-set", "rename", {
-        id,
-        oldName: target.name,
-        newName: sanitized,
-      });
-      return next;
-    });
-  }, [toast]);
 
   const setActiveViewerCb = useCallback((id: string) => {
     setSet((cur) => {
@@ -186,22 +189,19 @@ export function useViewerSet(opts?: {
     });
   }, []);
 
-  // ─── helpers: apply a Layout transform to the active viewer ────────
+  // ─── helpers: apply a Layout transform to one viewer ───────────────
 
   // applyToActive runs `fn(activeViewerLayout)` and writes back. Used for the
   // single-viewer mutations that don't need cross-viewer state (the bulk of
   // the Phase 5 layout operations).
-  const applyToActive = useCallback(
-    (fn: (layout: Layout) => Layout) => {
-      setSet((cur) => {
-        const av = activeViewer(cur);
-        const nextLayout = fn(av.layout);
-        if (nextLayout === av.layout) return cur;
-        return updateViewerLayout(cur, av.id, nextLayout);
-      });
-    },
-    [],
-  );
+  const applyToActive = useCallback((fn: (layout: Layout) => Layout) => {
+    setSet((cur) => {
+      const av = activeViewer(cur);
+      const nextLayout = fn(av.layout);
+      if (nextLayout === av.layout) return cur;
+      return updateViewerLayout(cur, av.id, nextLayout);
+    });
+  }, []);
 
   // applyToViewer is the same but for an arbitrary viewer ID — used by the
   // bulk-actions "open in viewer X" path.
@@ -216,6 +216,22 @@ export function useViewerSet(opts?: {
       });
     },
     [],
+  );
+
+  // enforcePanelLimit short-circuits a panel-creating op when the active /
+  // target layout already has MAX_PANELS leaves. Surfaces the same
+  // toast+warn pair the inline call sites used to duplicate.
+  const enforcePanelLimit = useCallback(
+    (layout: Layout, attempt: string): boolean => {
+      if (countLeaves(layout.root) < MAX_PANELS) return true;
+      toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
+      logger.warn("dnd", "panel limit reached", {
+        panels: MAX_PANELS,
+        attempt,
+      });
+      return false;
+    },
+    [toast],
   );
 
   // ─── panel-level mutations (active viewer) ─────────────────────────
@@ -249,12 +265,7 @@ export function useViewerSet(opts?: {
   );
 
   const moveTab = useCallback(
-    (
-      srcLeafId: string,
-      srcIdx: number,
-      dstLeafId: string,
-      dstIdx?: number,
-    ) => {
+    (srcLeafId: string, srcIdx: number, dstLeafId: string, dstIdx?: number) => {
       applyToActive((l) =>
         moveTabIntoLeaf(l, srcLeafId, srcIdx, dstLeafId, dstIdx),
       );
@@ -282,21 +293,8 @@ export function useViewerSet(opts?: {
       let ok = false;
       setSet((cur) => {
         const av = activeViewer(cur);
-        if (countLeaves(av.layout.root) >= MAX_PANELS) {
-          toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
-          logger.warn("dnd", "panel limit reached", {
-            panels: MAX_PANELS,
-            attempt: "split",
-          });
-          return cur;
-        }
-        const r = splitTabIntoEdge(
-          av.layout,
-          srcLeafId,
-          srcIdx,
-          dstLeafId,
-          edge,
-        );
+        if (!enforcePanelLimit(av.layout, "split")) return cur;
+        const r = splitTabIntoEdge(av.layout, srcLeafId, srcIdx, dstLeafId, edge);
         ok = r.ok;
         if (!r.ok) {
           logger.warn("dnd", "split refused", {
@@ -310,7 +308,7 @@ export function useViewerSet(opts?: {
       });
       return ok;
     },
-    [toast],
+    [enforcePanelLimit],
   );
 
   const splitFromContext = useCallback(
@@ -318,14 +316,7 @@ export function useViewerSet(opts?: {
       let ok = false;
       setSet((cur) => {
         const av = activeViewer(cur);
-        if (countLeaves(av.layout.root) >= MAX_PANELS) {
-          toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
-          logger.warn("dnd", "panel limit reached", {
-            panels: MAX_PANELS,
-            attempt: "context-menu",
-          });
-          return cur;
-        }
+        if (!enforcePanelLimit(av.layout, "context-menu")) return cur;
         const r = splitFromContextMenu(av.layout, leafId, tabIdx, direction);
         ok = r.ok;
         if (!r.ok) {
@@ -339,7 +330,7 @@ export function useViewerSet(opts?: {
       });
       return ok;
     },
-    [toast],
+    [enforcePanelLimit],
   );
 
   const setSplitRatioCb = useCallback(
@@ -383,6 +374,101 @@ export function useViewerSet(opts?: {
     [toast],
   );
 
+  // ─── bulk-apply helpers ────────────────────────────────────────────
+
+  // applyManyWithPreflight runs preflight + apply for each path. Tallies
+  // opened / skipped and emits matching `${op} start` / `${op} done` lines on
+  // the "viewer" log channel. Extra fields (e.g. viewerId) are merged into
+  // each log line — useful for the in-viewer variants.
+  const applyManyWithPreflight = useCallback(
+    async (
+      paths: string[],
+      apply: (path: string) => void,
+      op: string,
+      extra: Record<string, unknown> = {},
+    ): Promise<{ opened: number; skipped: number }> => {
+      let opened = 0;
+      let skipped = 0;
+      logger.info("viewer", `${op} start`, { count: paths.length, ...extra });
+      for (const path of paths) {
+        const ok = await preflight(path);
+        if (!ok) {
+          skipped++;
+          continue;
+        }
+        apply(path);
+        opened++;
+      }
+      logger.info("viewer", `${op} done`, { opened, skipped, ...extra });
+      return { opened, skipped };
+    },
+    [preflight],
+  );
+
+  // applyManyWithLimit is applyManyWithPreflight + a per-iteration panel-
+  // count snapshot (read via getLayout). Used by the "open as split" bulk
+  // flows where each step adds a panel. getLayout may return null to abort
+  // silently (= target viewer disappeared mid-loop, no toast).
+  const applyManyWithLimit = useCallback(
+    async (
+      paths: string[],
+      getLayout: () => Layout | null,
+      apply: (path: string) => void,
+      op: string,
+      extra: Record<string, unknown> = {},
+    ): Promise<{ opened: number; skipped: number }> => {
+      let opened = 0;
+      let skipped = 0;
+      logger.info("viewer", `${op} start`, { count: paths.length, ...extra });
+      for (const path of paths) {
+        // Viewer-missing check goes BEFORE preflight: viewer existence does
+        // not depend on the previous iteration's apply() having committed,
+        // so there's no race to wait out. Bailing early matches the legacy
+        // ordering and avoids a misleading file-error toast on a path bound
+        // for a viewer that's already gone.
+        if (getLayout() === null) {
+          skipped += paths.length - (opened + skipped);
+          break;
+        }
+        const ok = await preflight(path);
+        if (!ok) {
+          skipped++;
+          continue;
+        }
+        // Re-snapshot AFTER the preflight await. (a) The previous iteration's
+        // apply() schedules a setState that React commits during the yield,
+        // so reading countLeaves before the await would see a stale value
+        // and let us run past MAX_PANELS while splitWithNewLeaf silently
+        // refuses each step. (b) The target viewer could also have been
+        // closed during preflight; the second null check keeps accounting
+        // correct in that window.
+        const l = getLayout();
+        if (!l) {
+          skipped += paths.length - (opened + skipped);
+          break;
+        }
+        if (countLeaves(l.root) >= MAX_PANELS) {
+          toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
+          const remaining = paths.length - (opened + skipped);
+          logger.warn("viewer", `${op} aborted`, {
+            opened,
+            skippedSoFar: skipped,
+            remaining,
+            reason: "panel limit",
+            ...extra,
+          });
+          skipped += remaining;
+          break;
+        }
+        apply(path);
+        opened++;
+      }
+      logger.info("viewer", `${op} done`, { opened, skipped, ...extra });
+      return { opened, skipped };
+    },
+    [preflight, toast],
+  );
+
   // ─── open paths (active viewer) ────────────────────────────────────
 
   const openInActive = useCallback(
@@ -404,63 +490,24 @@ export function useViewerSet(opts?: {
   );
 
   const openManyInActive = useCallback(
-    async (paths: string[]): Promise<{ opened: number; skipped: number }> => {
-      let opened = 0;
-      let skipped = 0;
-      logger.info("viewer", "open-many-in-tabs start", { count: paths.length });
-      for (const path of paths) {
-        const ok = await preflight(path);
-        if (!ok) {
-          skipped++;
-          continue;
-        }
-        applyToActive((l) => appendOrFocusInActive(l, path));
-        opened++;
-      }
-      logger.info("viewer", "open-many-in-tabs done", { opened, skipped });
-      return { opened, skipped };
-    },
-    [applyToActive, preflight],
+    (paths: string[]) =>
+      applyManyWithPreflight(
+        paths,
+        (path) => applyToActive((l) => appendOrFocusInActive(l, path)),
+        "open-many-in-tabs",
+      ),
+    [applyManyWithPreflight, applyToActive],
   );
 
   const openManyAsSplit = useCallback(
-    async (paths: string[]): Promise<{ opened: number; skipped: number }> => {
-      let opened = 0;
-      let skipped = 0;
-      logger.info("viewer", "open-many-split start", { count: paths.length });
-      for (const path of paths) {
-        const av = activeViewer(setRef.current);
-        if (countLeaves(av.layout.root) >= MAX_PANELS) {
-          toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
-          const remaining = paths.length - (opened + skipped);
-          logger.warn("viewer", "open-many-split aborted", {
-            opened,
-            skippedSoFar: skipped,
-            remaining,
-            reason: "panel limit",
-          });
-          skipped += remaining;
-          break;
-        }
-        const ok = await preflight(path);
-        if (!ok) {
-          skipped++;
-          continue;
-        }
-        applyToActive((l) => {
-          const leaf = findLeaf(l.root, l.activeId);
-          if (leaf && leaf.tabs.length === 0) {
-            return appendOrFocusInActive(l, path);
-          }
-          const r = splitWithNewLeaf(l, l.activeId, "right", newTab(path));
-          return r.ok ? r.layout : l;
-        });
-        opened++;
-      }
-      logger.info("viewer", "open-many-split done", { opened, skipped });
-      return { opened, skipped };
-    },
-    [applyToActive, preflight, toast],
+    (paths: string[]) =>
+      applyManyWithLimit(
+        paths,
+        () => activeViewer(setRef.current).layout,
+        (path) => applyToActive((l) => openPathAsSplitOrAppend(l, path)),
+        "open-many-split",
+      ),
+    [applyManyWithLimit, applyToActive],
   );
 
   // ─── open paths (specific viewer, used by SampleModal + bulk) ─────
@@ -489,88 +536,29 @@ export function useViewerSet(opts?: {
   );
 
   const openManyInViewer = useCallback(
-    async (
-      viewerId: string,
-      paths: string[],
-    ): Promise<{ opened: number; skipped: number }> => {
-      let opened = 0;
-      let skipped = 0;
-      logger.info("viewer", "open-many-in-tabs(viewer) start", {
-        viewerId,
-        count: paths.length,
-      });
-      for (const path of paths) {
-        const ok = await preflight(path);
-        if (!ok) {
-          skipped++;
-          continue;
-        }
-        setSet((cur) => openPathInViewer(cur, viewerId, path));
-        opened++;
-      }
-      logger.info("viewer", "open-many-in-tabs(viewer) done", {
-        viewerId,
-        opened,
-        skipped,
-      });
-      return { opened, skipped };
-    },
-    [preflight],
+    (viewerId: string, paths: string[]) =>
+      applyManyWithPreflight(
+        paths,
+        (path) => setSet((cur) => openPathInViewer(cur, viewerId, path)),
+        "open-many-in-tabs(viewer)",
+        { viewerId },
+      ),
+    [applyManyWithPreflight],
   );
 
   const openManyAsSplitInViewer = useCallback(
-    async (
-      viewerId: string,
-      paths: string[],
-    ): Promise<{ opened: number; skipped: number }> => {
-      let opened = 0;
-      let skipped = 0;
-      logger.info("viewer", "open-many-split(viewer) start", {
-        viewerId,
-        count: paths.length,
-      });
-      for (const path of paths) {
-        const v = setRef.current.viewers.find((vv) => vv.id === viewerId);
-        if (!v) {
-          skipped += paths.length - (opened + skipped);
-          break;
-        }
-        if (countLeaves(v.layout.root) >= MAX_PANELS) {
-          toast(`パネル数の上限 (${MAX_PANELS}) に達しました`, "warn");
-          const remaining = paths.length - (opened + skipped);
-          logger.warn("viewer", "open-many-split(viewer) aborted", {
-            viewerId,
-            opened,
-            skippedSoFar: skipped,
-            remaining,
-            reason: "panel limit",
-          });
-          skipped += remaining;
-          break;
-        }
-        const ok = await preflight(path);
-        if (!ok) {
-          skipped++;
-          continue;
-        }
-        applyToViewer(viewerId, (l) => {
-          const leaf = findLeaf(l.root, l.activeId);
-          if (leaf && leaf.tabs.length === 0) {
-            return appendOrFocusInActive(l, path);
-          }
-          const r = splitWithNewLeaf(l, l.activeId, "right", newTab(path));
-          return r.ok ? r.layout : l;
-        });
-        opened++;
-      }
-      logger.info("viewer", "open-many-split(viewer) done", {
-        viewerId,
-        opened,
-        skipped,
-      });
-      return { opened, skipped };
-    },
-    [applyToViewer, preflight, toast],
+    (viewerId: string, paths: string[]) =>
+      applyManyWithLimit(
+        paths,
+        () =>
+          setRef.current.viewers.find((vv) => vv.id === viewerId)?.layout ??
+          null,
+        (path) =>
+          applyToViewer(viewerId, (l) => openPathAsSplitOrAppend(l, path)),
+        "open-many-split(viewer)",
+        { viewerId },
+      ),
+    [applyManyWithLimit, applyToViewer],
   );
 
   // ─── delete-driven tab cleanup (#47) ───────────────────────────────
@@ -693,20 +681,4 @@ export function useViewerSet(opts?: {
       moveTabToViewer,
     ],
   );
-}
-
-// leafTabsCount sums the tab count across all leaves in a viewer's layout.
-// Used only for the close-viewer log line ("did the user lose data?").
-function leafTabsCount(v: Viewer): number {
-  let n = 0;
-  walk(v.layout.root);
-  return n;
-  function walk(node: Layout["root"]) {
-    if (node.kind === "leaf") {
-      n += node.tabs.length;
-      return;
-    }
-    walk(node.a);
-    walk(node.b);
-  }
 }
