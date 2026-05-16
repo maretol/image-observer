@@ -3,7 +3,7 @@ import {
   SPLIT_OPEN_LIMIT,
   canBulkSplitOpen,
   computeCardContextMenuMode,
-} from "./cardContextMenu";
+} from "./cardContextMenuLogic";
 
 describe("computeCardContextMenuMode", () => {
   it("returns single when selection is empty", () => {

@@ -21,7 +21,7 @@ import { TagChips } from "./TagChips";
 import {
   SPLIT_OPEN_LIMIT,
   computeCardContextMenuMode,
-} from "./cardContextMenu";
+} from "./cardContextMenuLogic";
 import { tagSummary } from "./filters";
 import { groupByDirectory, groupKeyOf } from "./groups";
 import type { UseClassificationReturn } from "./useClassification";

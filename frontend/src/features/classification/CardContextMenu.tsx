@@ -4,7 +4,7 @@ import {
   type CardContextMenuMode,
   SPLIT_OPEN_LIMIT,
   canBulkSplitOpen,
-} from "./cardContextMenu";
+} from "./cardContextMenuLogic";
 
 // Per-item / chrome heights used for the *initial* position seed. The actual
 // viewport-edge clamp re-runs in useLayoutEffect after first paint via
