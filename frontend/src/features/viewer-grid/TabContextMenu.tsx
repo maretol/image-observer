@@ -8,7 +8,7 @@ type Props = {
   x: number;
   y: number;
   // Multi-viewer (#11). Every viewer except the current one is rendered as a
-  // top-level "ビューア「N」へ移動" menuitem (#57 — flattened from the previous
+  // top-level "{name} へ移動" menuitem (#57 — flattened from the previous
   // submenu). With only 1 viewer the entries (and the preceding divider) are
   // suppressed.
   viewers: Viewer[];
@@ -19,11 +19,19 @@ type Props = {
   onMoveToViewer: (dstViewerId: string) => void;
 };
 
-// Approximate width / height used for screen-edge placement. We can't measure
-// the menu precisely before first paint, so the initial style needs a
-// reasonable seed to avoid flashing off-screen.
-const APPROX_MENU_WIDTH = 240;
-const APPROX_MENU_HEIGHT = 200;
+// Approximate width used for screen-edge placement. We can't measure the menu
+// precisely before first paint, so this is a conservative seed wide enough to
+// cover the .ctx-item-viewer max-width (280px) + .ctx-item horizontal padding.
+const APPROX_MENU_WIDTH = 320;
+
+// Per-item / divider / chrome heights used to estimate the menu height from
+// the actual item count. Keeps the bottom-edge clamp accurate up to
+// MAX_VIEWERS=8 instead of falling back to a fixed seed that's too small at
+// the upper end. Values track .ctx-item / .ctx-divider / .tab-context-menu
+// rules in App.css (changes there should mirror here).
+const CTX_ITEM_HEIGHT = 24; // padding 5+5 + line-height ≈ 14
+const CTX_DIVIDER_HEIGHT = 9; // height 1 + margin 4+4
+const CTX_MENU_CHROME_HEIGHT = 14; // padding 6+6 + border 1+1
 
 export function TabContextMenu({
   x,
@@ -103,16 +111,31 @@ export function TabContextMenu({
     }
   };
 
+  // Estimate the menu height from the actual item count so the bottom-edge
+  // clamp stays accurate up to MAX_VIEWERS=8. 3 fixed items (閉じる / split×2),
+  // 1 divider always, + (1 divider + N viewer items) when other viewers exist.
+  const itemCount = 3 + otherViewers.length;
+  const dividerCount = 1 + (hasMoveItems ? 1 : 0);
+  const approxHeight =
+    CTX_MENU_CHROME_HEIGHT +
+    itemCount * CTX_ITEM_HEIGHT +
+    dividerCount * CTX_DIVIDER_HEIGHT;
+
   // Position clamped within viewport. Math.max(0, ...) floors the result so
   // a window narrower / shorter than the menu doesn't push it off-screen
   // into negative coordinates.
   const left = Math.max(0, Math.min(x, window.innerWidth - APPROX_MENU_WIDTH));
-  const top = Math.max(0, Math.min(y, window.innerHeight - APPROX_MENU_HEIGHT));
+  const top = Math.max(0, Math.min(y, window.innerHeight - approxHeight));
 
   // Build menuitems in a single flat array so itemsRef indices stay stable
   // regardless of how many other viewers exist. Order: 閉じる → split×2 →
-  // (divider) → viewer×N.
+  // (divider) → viewer×N. Each index is captured in render (not inside the
+  // ref callback) so itemsRef positions don't drift if React re-invokes the
+  // ref callback during StrictMode double-invoke / unmount-null cleanup.
   let refIdx = 0;
+  const closeIdx = refIdx++;
+  const splitColIdx = refIdx++;
+  const splitRowIdx = refIdx++;
   const assignRef = (el: HTMLButtonElement | null, i: number) => {
     itemsRef.current[i] = el;
   };
@@ -131,7 +154,7 @@ export function TabContextMenu({
         onKeyDown={onMenuKeyDown}
       >
         <button
-          ref={(el) => assignRef(el, refIdx++)}
+          ref={(el) => assignRef(el, closeIdx)}
           type="button"
           role="menuitem"
           className="ctx-item"
@@ -141,7 +164,7 @@ export function TabContextMenu({
         </button>
         <div className="ctx-divider" role="separator" />
         <button
-          ref={(el) => assignRef(el, refIdx++)}
+          ref={(el) => assignRef(el, splitColIdx)}
           type="button"
           role="menuitem"
           className="ctx-item"
@@ -150,7 +173,7 @@ export function TabContextMenu({
           右に分割
         </button>
         <button
-          ref={(el) => assignRef(el, refIdx++)}
+          ref={(el) => assignRef(el, splitRowIdx)}
           type="button"
           role="menuitem"
           className="ctx-item"
