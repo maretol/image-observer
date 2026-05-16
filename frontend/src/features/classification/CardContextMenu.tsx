@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
 // Approximate width/height used for screen-edge placement. We don't measure
 // the menu post-render (only one item, so the seed values are accurate) —
@@ -66,7 +67,14 @@ export function CardContextMenu({
     Math.min(y, window.innerHeight - APPROX_MENU_HEIGHT),
   );
 
-  return (
+  // Render into <body> via Portal so the menu sits outside the .cls-view
+  // subtree. .cls-view has `zoom: var(--ui-scale)` applied (App.css §UI
+  // scale), and a `position: fixed` descendant of a zoomed ancestor is
+  // scaled by the same factor on Chromium/WebView2 — `left/top` set from
+  // raw clientX/Y would then land at zoom×coords instead of the cursor (#72).
+  // The viewer-side TabContextMenu does not need this because .panel-tree
+  // is intentionally kept out of the zoomed chrome (App.css §UI scale).
+  return createPortal(
     <div
       className="cls-card-context-menu-root"
       style={{ position: "fixed", left, top, zIndex: 1000 }}
@@ -91,6 +99,7 @@ export function CardContextMenu({
           削除
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
