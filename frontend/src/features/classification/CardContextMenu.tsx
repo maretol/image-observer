@@ -317,6 +317,14 @@ function buildBulkEntries(
   // would receive the action (= 複数ビューア時)。1 個しかないなら表記不要。
   const intoSuffix = dst && viewers.length > 1 ? ` → ${dst.name}` : "";
   const splitDisabled = !canBulkSplitOpen(selectedCount);
+  // Disabled <button>s can't receive focus, so a `title` / `aria-label` would
+  // be unreachable for keyboard / screen-reader users (Copilot review #58
+  // thread #2). Embed the limit reason directly into the visible label so the
+  // disabled state explains itself. `title` is kept as supplementary text for
+  // pointer users with extended hover.
+  const splitLabel = splitDisabled
+    ? `${selectedCount} 件をパネル分割で開く (上限 ${SPLIT_OPEN_LIMIT} 枚)${intoSuffix}`
+    : `${selectedCount} 件をパネル分割で開く${intoSuffix}`;
   const splitTitle = splitDisabled
     ? `パネル分割で開けるのは ${SPLIT_OPEN_LIMIT} 枚までです (タブで開いてください)`
     : "選択した画像をそれぞれ別パネルに開く";
@@ -331,7 +339,7 @@ function buildBulkEntries(
     {
       kind: "item",
       key: "bulk-open-split",
-      label: `${selectedCount} 件をパネル分割で開く${intoSuffix}`,
+      label: splitLabel,
       onClick: onOpenManyAsSplit,
       disabled: splitDisabled,
       title: splitTitle,

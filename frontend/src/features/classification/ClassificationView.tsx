@@ -214,7 +214,8 @@ export function ClassificationView({
   // the currently picked viewer was closed. Declared *before* the
   // context-menu callbacks because their dep arrays read this value (and
   // dep arrays are evaluated at useCallback() call time — so a later const
-  // declaration would be in the temporal dead zone, AGENTS.md A-x style).
+  // declaration would be in the temporal dead zone; same pattern as #27's
+  // selectAnchorRef relocation, per AGENTS.md A-3).
   const [bulkDstViewerId, setBulkDstViewerId] = useState(activeViewerId);
   useEffect(() => {
     setBulkDstViewerId(activeViewerId);
@@ -489,6 +490,11 @@ export function ClassificationView({
       />
       {cardCtxMenu ? (
         <CardContextMenu
+          // Re-mount on filename / x / y change so the menu's useState
+          // position seed is re-evaluated (Copilot review #58 thread #1).
+          // Without a fresh mount the menu would keep its first cursor
+          // position even if the parent opens it again at new coords.
+          key={`${cardCtxMenu.filename}|${cardCtxMenu.x},${cardCtxMenu.y}`}
           x={cardCtxMenu.x}
           y={cardCtxMenu.y}
           mode={computeCardContextMenuMode(
