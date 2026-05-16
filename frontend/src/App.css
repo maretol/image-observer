@@ -684,8 +684,14 @@ html, body, #root {
   pointer-events: auto;
 }
 
-.cls-card-context-item-danger:hover,
-.cls-card-context-item-danger:focus-visible {
+/* Specificity note (#58 review round 3): both `.ctx-item:hover:not(:disabled)`
+   and `.cls-card-context-item-danger:hover` match the 削除 button (which has
+   both classes). The :not() pseudo on the ctx-item rule pushes its specificity
+   to (0,3,0), out-ranking the bare (0,2,0) danger rule and silently reverting
+   the red tint. Compound the selector with `.ctx-item` and the same `:not()`
+   to bring danger up to (0,4,0) so it wins regardless of source order. */
+.ctx-item.cls-card-context-item-danger:hover:not(:disabled),
+.ctx-item.cls-card-context-item-danger:focus-visible:not(:disabled) {
   background: #6b1f1f;
   color: #fff;
   outline: none;

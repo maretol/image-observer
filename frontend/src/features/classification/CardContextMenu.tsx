@@ -325,24 +325,33 @@ function buildBulkEntries(
   const splitLabel = splitDisabled
     ? `${selectedCount} 件をパネル分割で開く (上限 ${SPLIT_OPEN_LIMIT} 枚)${intoSuffix}`
     : `${selectedCount} 件をパネル分割で開く${intoSuffix}`;
+  const tabsLabel = `${selectedCount} 件をタブで開く${intoSuffix}`;
+  // For disabled split, keep the limit hint (already in the label too) so the
+  // tooltip explains *why* it's disabled. Otherwise fall back to the full
+  // label so the truncated viewer-name suffix is reachable on hover (#58
+  // review round 3 — viewer names can be up to 32 runes, the ellipsis from
+  // ctx-item-viewer hides the tail).
   const splitTitle = splitDisabled
     ? `パネル分割で開けるのは ${SPLIT_OPEN_LIMIT} 枚までです (タブで開いてください)`
-    : "選択した画像をそれぞれ別パネルに開く";
+    : splitLabel;
 
   return [
     {
       kind: "item",
       key: "bulk-open-tabs",
-      label: `${selectedCount} 件をタブで開く${intoSuffix}`,
+      label: tabsLabel,
+      title: tabsLabel,
+      className: "ctx-item-viewer",
       onClick: onOpenManyInTabs,
     },
     {
       kind: "item",
       key: "bulk-open-split",
       label: splitLabel,
+      title: splitTitle,
+      className: "ctx-item-viewer",
       onClick: onOpenManyAsSplit,
       disabled: splitDisabled,
-      title: splitTitle,
     },
     { kind: "divider", key: "div-before-clear" },
     {

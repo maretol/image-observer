@@ -266,9 +266,10 @@ export function ClassificationView({
   }, [cardCtxMenu, toggleSelected]);
 
   // Bulk-mode actions — close menu first, then dispatch. Match the bulk-
-  // toolbar buttons (clearSelected on completion of "open many" is a deliberate
-  // UX choice the toolbar already makes — once the user has fired the action
-  // they typically want a clean slate).
+  // toolbar buttons: we call clearSelected synchronously right after firing
+  // onOpenMany* (not "on completion" — the open IPC runs out-of-band). The
+  // toolbar makes the same deliberate UX choice: once the user has invoked
+  // the action they typically want a clean slate.
   const onContextMenuOpenManyInTabs = useCallback(() => {
     if (!cardCtxMenu) return;
     setCardCtxMenu(null);

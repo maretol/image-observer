@@ -22,6 +22,13 @@
 - 2026-05-16 Copilot 2nd round 対応: 冒頭ステータスを「Phase 1 実装完了」に更新 /
   §5.3 末尾の「viewers.length === 1 のときは divider なし」を実装 (常に divider あり) に
   合わせて修正。
+- 2026-05-16 Copilot 3rd round 対応: §11-G の outside-click wrapper 記述を「Tab 側
+  `.tab-context-menu-root` / Card 側 `.cls-card-context-menu-root` で class 名は別、
+  パターンのみ共通」に書き分け / §13 App.css の変更内容を実体 (`.ctx-item:hover` /
+  `:focus-visible` を `:not(:disabled)` で絞る + `.ctx-item:disabled` 追加 + danger 詳細度
+  引上げ) に揃える。実装側では `.ctx-item.cls-card-context-item-danger:hover:not(:disabled)`
+  の form に書き直して詳細度を (0,4,0) まで引き上げ、bulk-mode のラベル (intoSuffix 含む)
+  に `ctx-item-viewer` クラスと `title` を付けて長いビューア名でも overflow しない形に。
 
 ---
 
@@ -295,8 +302,10 @@ Phase 2 で別 issue 化して検討。spec 案ベースの先取り設計:
 
 ### G. メニュー UI の共通化スコープ — chrome class のみ (§5.7)
 
-`.tab-context-menu` chrome class と `tab-context-menu-root` の outside-click パターンは
-共有するが、コンポーネントは **`CardContextMenu` と `TabContextMenu` で別実装**。
+`.tab-context-menu` chrome class を共有し、outside-click のスコープ wrapper (Tab 側
+`.tab-context-menu-root` / Card 側 `.cls-card-context-menu-root` — class 名は別だが
+`.closest(<wrapper>)` の判定パターンは共通) を踏襲するが、コンポーネントは
+**`CardContextMenu` と `TabContextMenu` で別実装**。
 共通基底コンポーネント化は v1 では行わない。
 理由: 操作セットが異なる (Card は単一/バルク 2 モード、Tab は移動 / 分割)。早すぎる抽象化は
 将来の Phase 2 拡張 (フォルダ移動 / 設定 UI) を縛る。chrome の見た目さえ揃っていれば UI
@@ -326,7 +335,7 @@ TabContextMenu と同等の実装を追加する。
 |---------|---------|
 | `frontend/src/features/classification/CardContextMenu.tsx` | mode prop + 各モードの項目組み立て + キーボードナビ + viewport clamp 再計算 |
 | `frontend/src/features/classification/ClassificationView.tsx` | mode 判定 + CardContextMenu への prop 注入 + bulkDstViewerId 共有 |
-| `frontend/src/App.css` | バルクメニュー用 modifier class (必要に応じ追加) / 「選択モードに切り替え」項目のスタイル |
+| `frontend/src/App.css` | `.ctx-item:hover` / `:focus-visible` を `:not(:disabled)` で絞り (disabled item の hover/focus を抑制)、`.ctx-item:disabled` (opacity 0.45 / cursor not-allowed) を追加。`:not()` で詳細度が上がる影響で `.cls-card-context-item-danger:hover` が退行するため、danger 側を `.ctx-item.cls-card-context-item-danger:hover:not(:disabled)` に書き直して詳細度を引き上げ。新規 modifier class や「選択モードに切り替え」専用スタイルは追加しない。 |
 | `frontend/src/features/classification/cardContextMenuLogic.ts` (新規) | `computeCardContextMenuMode` / `canBulkSplitOpen` / `SPLIT_OPEN_LIMIT` の純関数モジュール (CardContextMenu.tsx と大文字小文字違いのファイル名衝突を避けるため `Logic` suffix を採用、レビュー #58 thread #8) |
 | `frontend/src/features/classification/cardContextMenuLogic.test.ts` (新規) | 純関数の vitest (mode 4 ケース + canBulkSplitOpen 4 ケース) |
 
