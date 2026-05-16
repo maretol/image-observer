@@ -18,6 +18,10 @@ import { EditPopover } from "./EditPopover";
 import { SampleModal } from "./SampleModal";
 import { SearchBox } from "./SearchBox";
 import { TagChips } from "./TagChips";
+import {
+  SPLIT_OPEN_LIMIT,
+  computeCardContextMenuMode,
+} from "./cardContextMenuLogic";
 import { tagSummary } from "./filters";
 import { groupByDirectory, groupKeyOf } from "./groups";
 import type { UseClassificationReturn } from "./useClassification";
@@ -43,10 +47,6 @@ export type ClassificationViewProps = {
   // so the parent can close any viewer tabs still referencing it (#47).
   onAfterDelete: (absPath: string) => void;
 };
-
-// Visual sanity ceiling for the "split-open" path. 8 panels in a row already
-// gets cramped on a 1080p display; beyond that we suggest "tabs" instead.
-const SPLIT_OPEN_LIMIT = 8;
 
 export function ClassificationView({
   state,
@@ -206,6 +206,26 @@ export function ClassificationView({
     [],
   );
 
+  // Bulk-actions destination viewer (#11). Per spec §5.6.2 the default is
+  // always "the most recently active viewer" — so we always sync to
+  // activeViewerId whenever the parent reports a change, overriding any
+  // explicit user pick. This keeps "open" intuitive after the user switches
+  // viewers in the viewer tab and returns. Defensive: fall back to active if
+  // the currently picked viewer was closed. Declared *before* the
+  // context-menu callbacks because their dep arrays read this value (and
+  // dep arrays are evaluated at useCallback() call time — so a later const
+  // declaration would be in the temporal dead zone; same pattern as #27's
+  // selectAnchorRef relocation, per AGENTS.md A-3).
+  const [bulkDstViewerId, setBulkDstViewerId] = useState(activeViewerId);
+  useEffect(() => {
+    setBulkDstViewerId(activeViewerId);
+  }, [activeViewerId]);
+  useEffect(() => {
+    if (!viewers.some((v) => v.id === bulkDstViewerId)) {
+      setBulkDstViewerId(activeViewerId);
+    }
+  }, [viewers, activeViewerId, bulkDstViewerId]);
+
   const onContextMenuDelete = useCallback(() => {
     if (!cardCtxMenu) return;
     const filename = cardCtxMenu.filename;
@@ -219,21 +239,67 @@ export function ClassificationView({
     })();
   }, [cardCtxMenu, deleteOne, folderPath, onAfterDelete]);
 
-  // Bulk-actions destination viewer (#11). Per spec §5.6.2 the default is
-  // always "the most recently active viewer" — so we always sync to
-  // activeViewerId whenever the parent reports a change, overriding any
-  // explicit user pick. This keeps "open" intuitive after the user switches
-  // viewers in the viewer tab and returns. Defensive: fall back to active if
-  // the currently picked viewer was closed.
-  const [bulkDstViewerId, setBulkDstViewerId] = useState(activeViewerId);
-  useEffect(() => {
-    setBulkDstViewerId(activeViewerId);
-  }, [activeViewerId]);
-  useEffect(() => {
-    if (!viewers.some((v) => v.id === bulkDstViewerId)) {
-      setBulkDstViewerId(activeViewerId);
-    }
-  }, [viewers, activeViewerId, bulkDstViewerId]);
+  // Single-mode "ビューア「{name}」で開く" — close menu first, then open.
+  // Closing before the async open avoids a stale menu sitting on top of the
+  // viewer tab after the top tab switches.
+  const onContextMenuOpenInViewer = useCallback(
+    (viewerId: string) => {
+      if (!cardCtxMenu) return;
+      const filename = cardCtxMenu.filename;
+      setCardCtxMenu(null);
+      onOpenInViewer(viewerId, filename);
+    },
+    [cardCtxMenu, onOpenInViewer],
+  );
+
+  // Single-mode "選択モードに切り替え" — add the right-clicked card to the
+  // selection set so the bulk-toolbar appears. We use toggleSelected (which
+  // adds when absent, removes when present). The "already-selected" branch
+  // would actually deselect the card, but spec §11-D guarantees the single
+  // menu is only shown when the card is NOT in selection, so that branch is
+  // unreachable from here.
+  const onContextMenuEnterSelectionMode = useCallback(() => {
+    if (!cardCtxMenu) return;
+    const filename = cardCtxMenu.filename;
+    setCardCtxMenu(null);
+    toggleSelected(filename);
+  }, [cardCtxMenu, toggleSelected]);
+
+  // Bulk-mode actions — close menu first, then dispatch. Match the bulk-
+  // toolbar buttons: we call clearSelected synchronously right after firing
+  // onOpenMany* (not "on completion" — the open IPC runs out-of-band). The
+  // toolbar makes the same deliberate UX choice: once the user has invoked
+  // the action they typically want a clean slate.
+  const onContextMenuOpenManyInTabs = useCallback(() => {
+    if (!cardCtxMenu) return;
+    setCardCtxMenu(null);
+    onOpenManyInTabs(bulkDstViewerId, selectedFilenames);
+    clearSelected();
+  }, [
+    cardCtxMenu,
+    onOpenManyInTabs,
+    bulkDstViewerId,
+    selectedFilenames,
+    clearSelected,
+  ]);
+
+  const onContextMenuOpenManyAsSplit = useCallback(() => {
+    if (!cardCtxMenu) return;
+    setCardCtxMenu(null);
+    onOpenManyAsSplit(bulkDstViewerId, selectedFilenames);
+    clearSelected();
+  }, [
+    cardCtxMenu,
+    onOpenManyAsSplit,
+    bulkDstViewerId,
+    selectedFilenames,
+    clearSelected,
+  ]);
+
+  const onContextMenuClearSelection = useCallback(() => {
+    setCardCtxMenu(null);
+    clearSelected();
+  }, [clearSelected]);
 
   if (!folderPath) {
     return (
@@ -426,9 +492,27 @@ export function ClassificationView({
       />
       {cardCtxMenu ? (
         <CardContextMenu
+          // Re-mount on filename / x / y change so the menu's useState
+          // position seed is re-evaluated (Copilot review #58 thread #1).
+          // Without a fresh mount the menu would keep its first cursor
+          // position even if the parent opens it again at new coords.
+          key={`${cardCtxMenu.filename}|${cardCtxMenu.x},${cardCtxMenu.y}`}
           x={cardCtxMenu.x}
           y={cardCtxMenu.y}
+          mode={computeCardContextMenuMode(
+            selectedFilenames,
+            cardCtxMenu.filename,
+          )}
+          viewers={viewers}
+          activeViewerId={activeViewerId}
+          selectedCount={selectedFilenames.length}
+          bulkDstViewerId={bulkDstViewerId}
+          onOpenInViewer={onContextMenuOpenInViewer}
+          onEnterSelectionMode={onContextMenuEnterSelectionMode}
           onDelete={onContextMenuDelete}
+          onOpenManyInTabs={onContextMenuOpenManyInTabs}
+          onOpenManyAsSplit={onContextMenuOpenManyAsSplit}
+          onClearSelection={onContextMenuClearSelection}
           onClose={() => setCardCtxMenu(null)}
         />
       ) : null}
