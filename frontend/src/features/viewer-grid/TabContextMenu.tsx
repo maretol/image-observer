@@ -54,10 +54,15 @@ export function TabContextMenu({
   useEffect(() => {
     // Defer registration so we don't catch the same click that opened the menu.
     const t = window.setTimeout(() => {
-      const onDocMouseDown = (e: MouseEvent) => {
+      const onDocPointerDown = (e: PointerEvent) => {
         // Submenu lives inside our DOM tree (rendered as a sibling within
-        // tab-context-menu wrapper), so a mousedown anywhere outside that
+        // tab-context-menu wrapper), so a pointerdown anywhere outside that
         // wrapper closes the entire menu.
+        //
+        // We listen on pointerdown rather than mousedown because ImageView's
+        // pan-drag handler calls preventDefault() on pointerdown, which
+        // suppresses the synthesized mousedown — clicking the image area
+        // would otherwise leave this menu open (#56).
         const target = e.target as Element | null;
         if (target && target.closest(".tab-context-menu-root")) return;
         onClose();
@@ -65,12 +70,12 @@ export function TabContextMenu({
       const onKey = (e: KeyboardEvent) => {
         if (e.key === "Escape") onClose();
       };
-      document.addEventListener("mousedown", onDocMouseDown);
+      document.addEventListener("pointerdown", onDocPointerDown);
       document.addEventListener("keydown", onKey);
       // Move focus into the menu so keyboard users land on the first item.
       itemsRef.current[0]?.focus();
       cleanup = () => {
-        document.removeEventListener("mousedown", onDocMouseDown);
+        document.removeEventListener("pointerdown", onDocPointerDown);
         document.removeEventListener("keydown", onKey);
       };
     }, 0);
