@@ -624,11 +624,20 @@ html, body, #root {
   font-size: 12px;
 }
 
-.ctx-item:hover,
-.ctx-item:focus-visible {
+.ctx-item:hover:not(:disabled),
+.ctx-item:focus-visible:not(:disabled) {
   background: #4a2a16;
   color: #fff;
   outline: none;
+}
+
+/* Disabled state — used by Card context menu's "N 件をパネル分割で開く"
+   when the selection exceeds SPLIT_OPEN_LIMIT (#58). Mirrors .cls-bulk-btn
+   disabled styling so the menu item reads as "non-actionable" without
+   needing its own modifier class. */
+.ctx-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .ctx-item-move {
