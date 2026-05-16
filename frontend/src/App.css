@@ -657,8 +657,8 @@ html, body, #root {
   pointer-events: auto;
 }
 
-/* Flattened "ビューア「N」へ移動" entries (#57). Names can be up to 32
-   runes; clip with ellipsis so a long name doesn't blow the menu width. */
+/* Flattened "{name} へ移動" entries (#57). Names can be up to 32 runes;
+   clip with ellipsis so a long name doesn't blow the menu width. */
 .ctx-item-viewer {
   white-space: nowrap;
   overflow: hidden;

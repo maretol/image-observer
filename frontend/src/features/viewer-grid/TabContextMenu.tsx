@@ -20,10 +20,11 @@ type Props = {
 };
 
 // Approximate width / per-item heights used as the *initial* position seed.
-// The actual viewport-edge clamp runs in useLayoutEffect after first paint
-// using getBoundingClientRect(), so this seed only needs to be close enough
-// to avoid a visible jump — it doesn't have to perfectly match the rendered
-// size (which depends on browser default line-height / font metrics).
+// The actual viewport-edge clamp runs in useLayoutEffect after DOM commit but
+// before paint using getBoundingClientRect(), so this seed only needs to be
+// close enough to avoid a visible jump — it doesn't have to perfectly match
+// the rendered size (which depends on browser default line-height / font
+// metrics).
 const APPROX_MENU_WIDTH = 320;
 const CTX_ITEM_HEIGHT = 24; // padding 5+5 + line-height ≈ 14
 const CTX_DIVIDER_HEIGHT = 9; // height 1 + margin 4+4
