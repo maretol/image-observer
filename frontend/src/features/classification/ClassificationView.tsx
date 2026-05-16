@@ -10,6 +10,7 @@ import {
 } from "react";
 import { ConflictDialog } from "../../shared/components/ConflictDialog";
 import { MergePromptDialog } from "../../shared/components/MergePromptDialog";
+import { CardContextMenu } from "./CardContextMenu";
 import { ClassificationHeader } from "./ClassificationHeader";
 import { ConfidenceSegment } from "./ConfidenceSegment";
 import { DirectoryGroup } from "./DirectoryGroup";
@@ -38,6 +39,9 @@ export type ClassificationViewProps = {
   onOpenInViewer: (viewerId: string, filename: string) => void;
   onOpenManyInTabs: (viewerId: string, filenames: string[]) => void;
   onOpenManyAsSplit: (viewerId: string, filenames: string[]) => void;
+  // Called with the deleted file's absolute path after deleteOne() succeeds
+  // so the parent can close any viewer tabs still referencing it (#47).
+  onAfterDelete: (absPath: string) => void;
 };
 
 // Visual sanity ceiling for the "split-open" path. 8 panels in a row already
@@ -53,6 +57,7 @@ export function ClassificationView({
   onOpenInViewer,
   onOpenManyInTabs,
   onOpenManyAsSplit,
+  onAfterDelete,
 }: ClassificationViewProps) {
   const {
     folderPath,
@@ -87,6 +92,7 @@ export function ClassificationView({
     resolveMergeMerge,
     resolveMergeSkip,
     resolveMergeCancel,
+    deleteOne,
   } = state;
 
   const allEntries = loadResult?.entries ?? [];
@@ -178,6 +184,40 @@ export function ClassificationView({
   useLayoutEffect(() => {
     setPreviewFilename(null);
   }, [folderPath]);
+
+  // Right-click context menu state (#47). One menu instance at a time. The
+  // Card emits position via onRequestContextMenu; CardContextMenu owns its
+  // outside-click / Esc lifecycle and calls onClose to clear this state.
+  // Folder change dismisses an open menu because the captured filename no
+  // longer belongs to the current view.
+  const [cardCtxMenu, setCardCtxMenu] = useState<{
+    filename: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    setCardCtxMenu(null);
+  }, [folderPath]);
+
+  const onRequestCardContextMenu = useCallback(
+    (filename: string, x: number, y: number) => {
+      setCardCtxMenu({ filename, x, y });
+    },
+    [],
+  );
+
+  const onContextMenuDelete = useCallback(() => {
+    if (!cardCtxMenu) return;
+    const filename = cardCtxMenu.filename;
+    // Close the menu BEFORE awaiting confirm so the ConfirmDialog modal isn't
+    // visually behind the menu, and so a stray outside-click closing the menu
+    // mid-confirm can't race with the delete flow.
+    setCardCtxMenu(null);
+    void (async () => {
+      const ok = await deleteOne(filename);
+      if (ok) onAfterDelete(`${folderPath}/${filename}`);
+    })();
+  }, [cardCtxMenu, deleteOne, folderPath, onAfterDelete]);
 
   // Bulk-actions destination viewer (#11). Per spec §5.6.2 the default is
   // always "the most recently active viewer" — so we always sync to
@@ -345,6 +385,7 @@ export function ClassificationView({
               onExtendSelectionTo={(filename) =>
                 extendSelectionTo(filename, displayedOrder)
               }
+              onRequestCardContextMenu={onRequestCardContextMenu}
             />
           ))}
         </div>
@@ -383,6 +424,14 @@ export function ClassificationView({
           closePreview();
         }}
       />
+      {cardCtxMenu ? (
+        <CardContextMenu
+          x={cardCtxMenu.x}
+          y={cardCtxMenu.y}
+          onDelete={onContextMenuDelete}
+          onClose={() => setCardCtxMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -8,6 +8,8 @@ import {thumb} from '../models';
 
 export function CreateEmptyClassification(arg1:string):Promise<classification.SaveOutput>;
 
+export function DeleteImage(arg1:string,arg2:string):Promise<void>;
+
 export function GetImageInfo(arg1:string):Promise<imgread.Info>;
 
 export function GetLogPath():Promise<string>;

@@ -4,6 +4,7 @@ import {
   appendOrFocusInActive,
   clampRatio,
   closeTabInLeaf,
+  closeTabsForPathInLayout,
   collapseEmptyLeaf,
   countLeaves,
   deserializeLayout,
@@ -33,6 +34,7 @@ import {
   updateSplit,
   updateTabInLeaf,
   validateLayout,
+  type Layout,
   type LayoutNode,
   type LeafNode,
   type SplitNode,
@@ -673,6 +675,71 @@ describe("pickNewActiveId", () => {
 });
 
 // ─── helpers ────────────────────────────────────────────────────────
+
+// ─── closeTabsForPathInLayout (#47 image delete) ───────────────────
+
+describe("closeTabsForPathInLayout", () => {
+  function build(tabs: Tab[][], activeLeafIdx = 0): Layout {
+    // Build a flat chain of leaves split right-to-left so the BSP tree has
+    // realistic shape. For tabs.length <= 1 we return a single leaf.
+    if (tabs.length === 1) {
+      const leaf = leafOf(`L0`, tabs[0]);
+      return { root: leaf, activeId: leaf.id };
+    }
+    const leaves: LeafNode[] = tabs.map((ts, i) => leafOf(`L${i}`, ts));
+    let acc: LayoutNode = leaves[leaves.length - 1];
+    for (let i = leaves.length - 2; i >= 0; i--) {
+      acc = splitOf(`S${i}`, "col", leaves[i], acc);
+    }
+    return { root: acc, activeId: leaves[activeLeafIdx].id };
+  }
+
+  it("returns the same layout when no tab matches", () => {
+    const layout = build([[t("/a"), t("/b")]]);
+    const next = closeTabsForPathInLayout(layout, "/never-opened");
+    expect(next).toBe(layout);
+  });
+
+  it("removes a matching tab in a single leaf", () => {
+    const layout = build([[t("/a"), t("/victim"), t("/c")]]);
+    const next = closeTabsForPathInLayout(layout, "/victim");
+    const leaf = next.root as LeafNode;
+    expect(leaf.tabs.map((tab) => tab.path)).toEqual(["/a", "/c"]);
+  });
+
+  it("removes the same path from multiple leaves", () => {
+    const layout = build([
+      [t("/a"), t("/victim")],
+      [t("/victim"), t("/d")],
+    ]);
+    const next = closeTabsForPathInLayout(layout, "/victim");
+    const leaves = enumerateLeaves(next.root);
+    expect(leaves.flatMap((l) => l.tabs.map((tab) => tab.path))).toEqual([
+      "/a",
+      "/d",
+    ]);
+  });
+
+  it("removes duplicates within one leaf (highest tabIndex first)", () => {
+    // Two tabs in the same leaf both point at /dup. Naively iterating from
+    // low → high index would shift the second match. The implementation
+    // sorts high → low so both are dropped intact.
+    const layout = build([[t("/dup"), t("/a"), t("/dup"), t("/b")]]);
+    const next = closeTabsForPathInLayout(layout, "/dup");
+    const leaf = next.root as LeafNode;
+    expect(leaf.tabs.map((tab) => tab.path)).toEqual(["/a", "/b"]);
+  });
+
+  it("collapses the parent split if a leaf becomes empty", () => {
+    const layout = build([[t("/a")], [t("/victim")]]);
+    expect(layout.root.kind).toBe("split");
+    const next = closeTabsForPathInLayout(layout, "/victim");
+    // Single survivor → root should now be the surviving leaf, not a split.
+    expect(next.root.kind).toBe("leaf");
+    const leaf = next.root as LeafNode;
+    expect(leaf.tabs.map((tab) => tab.path)).toEqual(["/a"]);
+  });
+});
 
 describe("emptyLeaf / leafWithTab / initialLayout", () => {
   it("emptyLeaf has -1 activeIndex", () => {

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CreateEmptyClassification,
+  DeleteImage,
   LoadClassification,
   MergeChildSidecars,
   OpenFolderDialog,
   PreviewChildSidecars,
+  SaveClassification,
   UpdateClassificationEntry,
 } from "../../../wailsjs/go/main/App";
 import { classification } from "../../../wailsjs/go/models";
@@ -79,6 +81,12 @@ export type UseClassificationReturn = {
   resolveMergeMerge: () => Promise<void>;
   resolveMergeSkip: () => Promise<void>;
   resolveMergeCancel: () => void;
+  // deleteOne sends one image to the OS recycle bin (Windows; os.Remove in
+  // dev builds — see internal/imgfile.Trash) and mirrors the removal into
+  // the sidecar. Returns true iff the file is no longer on disk so the
+  // caller can also close any viewer tabs still pointing at it. False on
+  // user cancel or pre-sidecar failure (file untouched).
+  deleteOne: (filename: string) => Promise<boolean>;
   persistableState: {
     folderPath: string;
     filter: { tags: string[]; confidence: string; query: string };
@@ -439,6 +447,100 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     // Folder selection persists; the user can hit "再読み込み" or pick again.
   }, []);
 
+  // deleteOne: confirm → Trash → mirror into sidecar → patch in-memory entries.
+  // Returns true iff the file was removed from disk (the caller, App.tsx,
+  // uses this signal to also close any matching viewer tabs). False when
+  // the user cancels confirm or the Trash IPC fails before any disk change.
+  //
+  // Sidecar save uses the standard mtime-conflict path: on CONFLICT we
+  // reload the JSON (picking up any external edits to other entries) and
+  // retry the delete once. If the retry also fails the file stays gone on
+  // disk and a warn toast is surfaced — the user's intent (remove this
+  // file) has been honored even if the sidecar bookkeeping drifted.
+  const deleteOne = useCallback(
+    async (filename: string): Promise<boolean> => {
+      const cur = folderRef.current;
+      if (!cur || !loadResult) return false;
+
+      const proceed = await confirm(
+        `${filename} をゴミ箱に送りますか?`,
+      );
+      if (!proceed) return false;
+
+      try {
+        await DeleteImage(cur, filename);
+      } catch (e) {
+        const msg = errorMessage(e);
+        toast("削除に失敗しました (詳細はログ)", "error");
+        logger.error("classification", "delete failed", { filename, err: msg });
+        return false;
+      }
+
+      // File is gone on disk. From here we are best-effort on the sidecar.
+      const removeFiltered = (entries: classification.Entry[]) =>
+        entries.filter((e) => e.filename !== filename);
+
+      let entriesAfter = removeFiltered(loadResult.entries);
+      let nextMtime = loadResult.mtime;
+      let sidecarErr: string | null = null;
+
+      try {
+        const out = await SaveClassification(cur, entriesAfter, loadResult.mtime);
+        nextMtime = out.mtime;
+      } catch (e) {
+        const msg = errorMessage(e);
+        if (msg.startsWith(CONFLICT_PREFIX)) {
+          // Pick up external edits then re-apply the delete with the fresh mtime.
+          const fresh = await loadInternal(cur);
+          if (fresh) {
+            entriesAfter = removeFiltered(fresh.entries);
+            try {
+              const out = await SaveClassification(cur, entriesAfter, fresh.mtime);
+              nextMtime = out.mtime;
+            } catch (e2) {
+              sidecarErr = errorMessage(e2);
+            }
+          } else {
+            sidecarErr = "reload failed";
+          }
+        } else {
+          sidecarErr = msg;
+        }
+      }
+
+      setLoadResult((prev) => {
+        if (!prev) return prev;
+        return classification.LoadResult.createFrom({
+          ...prev,
+          entries: entriesAfter,
+          mtime: nextMtime,
+        });
+      });
+      setSelected((curSel) => {
+        if (!curSel.has(filename)) return curSel;
+        const next = new Set(curSel);
+        next.delete(filename);
+        return next;
+      });
+
+      if (sidecarErr) {
+        toast(
+          `${filename} を削除しましたが、サイドカー更新に失敗しました (詳細はログ)`,
+          "warn",
+        );
+        logger.warn("classification", "delete sidecar save failed", {
+          filename,
+          err: sidecarErr,
+        });
+      } else {
+        toast(`${filename} をゴミ箱に送りました`, "info");
+        logger.info("classification", "deleted", { filename });
+      }
+      return true;
+    },
+    [confirm, loadInternal, loadResult, toast],
+  );
+
   const persistableState = useMemo(
     () => ({
       folderPath,
@@ -489,6 +591,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       resolveMergeMerge,
       resolveMergeSkip,
       resolveMergeCancel,
+      deleteOne,
       persistableState,
     }),
     [
@@ -525,6 +628,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       resolveMergeMerge,
       resolveMergeSkip,
       resolveMergeCancel,
+      deleteOne,
       persistableState,
     ],
   );

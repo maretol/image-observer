@@ -687,6 +687,22 @@ html, body, #root {
   text-overflow: ellipsis;
 }
 
+/* Card right-click menu (#47). Reuses .tab-context-menu for chrome; this
+   wrapper exists so the outside-click handler can scope its target check
+   via .closest(".cls-card-context-menu-root"). The danger modifier on the
+   "削除" item swaps the hover/focus tint from the neutral terracotta to a
+   red so the destructive action reads distinctly even with one menuitem. */
+.cls-card-context-menu-root {
+  pointer-events: auto;
+}
+
+.cls-card-context-item-danger:hover,
+.cls-card-context-item-danger:focus-visible {
+  background: #6b1f1f;
+  color: #fff;
+  outline: none;
+}
+
 /* Confirm Dialog */
 
 .confirm-dialog-overlay {

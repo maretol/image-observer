@@ -22,6 +22,7 @@ import { basename } from "../../shared/utils/path";
 import {
   appendOrFocusInActive,
   closeTabInLeaf,
+  closeTabsForPathInLayout,
   countLeaves,
   findLeaf,
   MAX_PANELS,
@@ -572,6 +573,28 @@ export function useViewerSet(opts?: {
     [applyToViewer, preflight, toast],
   );
 
+  // ─── delete-driven tab cleanup (#47) ───────────────────────────────
+
+  // closeTabsForPath walks every viewer's layout and closes every tab whose
+  // `path === absPath`. Used after a successful image deletion so the now-
+  // missing file does not stay open as a ghost tab. No-op when nothing
+  // matched; that lets the caller invoke it unconditionally after delete
+  // without first probing whether any viewer had the file open.
+  const closeTabsForPath = useCallback((absPath: string) => {
+    setSet((cur) => {
+      let changed = false;
+      const nextViewers = cur.viewers.map((v) => {
+        const nextLayout = closeTabsForPathInLayout(v.layout, absPath);
+        if (nextLayout === v.layout) return v;
+        changed = true;
+        return { ...v, layout: nextLayout };
+      });
+      if (!changed) return cur;
+      logger.info("viewer-set", "closeTabsForPath", { path: absPath });
+      return { ...cur, viewers: nextViewers };
+    });
+  }, []);
+
   // ─── cross-viewer tab move ─────────────────────────────────────────
 
   // moveTabToViewer: the user right-clicks a tab in the active viewer's
@@ -639,6 +662,8 @@ export function useViewerSet(opts?: {
       openInViewer,
       openManyInViewer,
       openManyAsSplitInViewer,
+      // delete-driven cleanup
+      closeTabsForPath,
       // cross-viewer
       moveTabToViewer,
     }),
@@ -664,6 +689,7 @@ export function useViewerSet(opts?: {
       openInViewer,
       openManyInViewer,
       openManyAsSplitInViewer,
+      closeTabsForPath,
       moveTabToViewer,
     ],
   );

@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"image-observer/internal/classification"
+	"image-observer/internal/imgfile"
 	"image-observer/internal/imgread"
 	"image-observer/internal/logging"
 	"image-observer/internal/settings"
@@ -124,6 +127,43 @@ func (a *App) MergeChildSidecars(folderPath string) (classification.SaveOutput, 
 		return classification.SaveOutput{}, classificationError(err)
 	}
 	return classification.SaveOutput{Mtime: mtime}, nil
+}
+
+// DeleteImage sends a single image file to the OS recycle bin (Windows) or
+// removes it outright (non-windows dev builds — see internal/imgfile.Trash).
+// `folderPath` is the absolute folder currently open in the list tab and
+// `filename` is the POSIX-relative path (may include subdirectories, e.g.
+// "child1/foo.png") so it matches the entry shape stored in the sidecar.
+//
+// Sidecar JSON updates are intentionally NOT done here: the frontend calls
+// SaveClassification separately so the existing mtime-conflict resolution
+// (see classification.SaveJSON / ErrConflict) keeps working without
+// duplication. See docs/spec-image-delete.md §6.2.
+func (a *App) DeleteImage(folderPath, filename string) error {
+	cleanedFolder := strings.TrimSpace(folderPath)
+	cleanedName := strings.TrimSpace(filename)
+	if cleanedFolder == "" || cleanedName == "" {
+		return fmt.Errorf("delete: folderPath and filename must not be empty")
+	}
+	if !filepath.IsAbs(cleanedFolder) {
+		return fmt.Errorf("delete: folderPath must be absolute: %q", cleanedFolder)
+	}
+	// Reject path traversal in `filename`. Sidecar entries use POSIX-relative
+	// names produced by classification.scanner, so a "../" would only show up
+	// if a tampered IPC request is sent. Refuse rather than computing a path
+	// that escapes folderPath.
+	if strings.Contains(cleanedName, "..") {
+		return fmt.Errorf("delete: filename must not contain '..': %q", cleanedName)
+	}
+	absPath := filepath.Join(cleanedFolder, filepath.FromSlash(cleanedName))
+	if err := imgfile.Trash(absPath); err != nil {
+		logging.Error("imgfile", "delete failed",
+			"folder", cleanedFolder, "filename", cleanedName, "err", err.Error())
+		return err
+	}
+	logging.Info("imgfile", "deleted",
+		"folder", cleanedFolder, "filename", cleanedName, "mode", "trash")
+	return nil
 }
 
 // classificationError tags conflict errors with a "CONFLICT:" prefix so the
