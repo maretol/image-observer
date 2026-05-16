@@ -540,6 +540,10 @@ function ViewerTab({
   onClose,
 }: ViewerTabProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  // #53: wrapper の padding 領域クリックでも focus を一覧タブ (タブ全体が
+  // <button>) と同じく「選択中のタブにフォーカスが乗る」状態に揃えるため、
+  // wrapper onClick から内側 name button を focus する用の ref。
+  const nameButtonRef = useRef<HTMLButtonElement>(null);
   // Esc cancellation suppresses the blur-commit that would otherwise fire
   // when isEditing flips false → the input unmounts while focused → React
   // dispatches blur synchronously on the unmounting node, calling
@@ -595,8 +599,11 @@ function ViewerTab({
   // wrapper の padding (上下 4px / 左 22px / 右 10px) や close ボタン非表示時の
   // 右側スペースをクリックしても無反応だった。wrapper 側で click / dblclick を
   // 受け、close ボタン由来のイベントだけ除外することで一覧タブと当たり判定を揃える。
+  // close 内の CloseIcon は SVG 要素なので e.target は HTMLElement ではなく
+  // SVGElement になり得る。closest() は Element の API なので instanceof Element
+  // でガードしてから呼ぶ。
   const isFromClose = (e: React.MouseEvent) =>
-    (e.target as HTMLElement | null)?.closest(".top-tab-viewer-close") != null;
+    e.target instanceof Element && e.target.closest(".top-tab-viewer-close") != null;
 
   return (
     <span
@@ -604,6 +611,12 @@ function ViewerTab({
       onClick={(e) => {
         if (isFromClose(e)) return;
         onActivate();
+        // 一覧タブはタブ全体が <button> なので click で自動的にフォーカスが
+        // 乗るが、ビューアタブの wrapper は <span> でフォーカス不可。padding
+        // 領域クリック時に focus-visible リング含めて一覧タブと挙動を揃える
+        // ため、内側 name button へ明示的に focus を寄せる。name button 上の
+        // 直接クリックなら既に focus されているので呼んでも no-op。
+        nameButtonRef.current?.focus();
       }}
       onDoubleClick={(e) => {
         if (isFromClose(e)) return;
@@ -612,6 +625,7 @@ function ViewerTab({
       }}
     >
       <button
+        ref={nameButtonRef}
         type="button"
         role="tab"
         aria-selected={isActive}
