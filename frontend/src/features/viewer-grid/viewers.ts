@@ -2,7 +2,7 @@
 // with its own BSP `Layout` (spec-viewer-flexlayout.md). All mutations here
 // are pure: take a ViewerSet, return a new one. The React glue lives in
 // useViewerSet.ts, which applies the layout-level pure functions from
-// layout.ts to the active viewer's `Layout` and exposes both viewer-level
+// layout/ to the active viewer's `Layout` and exposes both viewer-level
 // (add/close/rename) and panel-level (open/split/move/...) operations.
 
 import {
@@ -172,7 +172,7 @@ export function setActiveViewer(set: ViewerSet, id: string): ViewerSet {
 }
 
 // updateViewerLayout swaps in a new Layout for a single viewer. This is the
-// generic bridge used by useViewerSet to apply existing `layout.ts` mutations
+// generic bridge used by useViewerSet to apply existing `layout/` mutations
 // (split/move/reorder/etc.) to one viewer at a time.
 export function updateViewerLayout(
   set: ViewerSet,
@@ -278,7 +278,7 @@ export function moveTabAcrossViewers(
 }
 
 // pickFirstLeafId — local helper for activeId fallback after a collapse.
-// Avoids importing enumerateLeaves from layout.ts (which would allocate
+// Avoids importing enumerateLeaves from layout/ (which would allocate
 // the full leaf list when we only need the first one).
 function pickFirstLeafId(node: LayoutNode): string | null {
   if (node.kind === "leaf") return node.id;

@@ -182,7 +182,7 @@ const (
 既存の `useViewerGrid` が抱えていた layout mutation 群 (open / close / split / move / reorder / setActivePanel / setActiveTab / updateTabState / setSplitRatio / openManyInActive / openManyAsSplit / preflight) は **`useViewerSet` に移管** される。
 
 - 各 mutation は内部で `set.viewers[active].layout` に対して既存 `layout.ts` の純関数を適用し、active viewer のみを置換した新 `viewers` 配列を返す。
-- 純関数 ([layout.ts](../frontend/src/features/viewer-grid/layout.ts)) 自体は変更不要 (既に Layout 単体を入出力する設計)。
+- 純関数 ([layout/](../frontend/src/features/viewer-grid/layout/) — Phase 5 当時は `layout.ts` 単一ファイル、#68 で機能別モジュールに分割) 自体は変更不要 (既に Layout 単体を入出力する設計)。
 - `MAX_PANELS = 16` の上限は **ビューア当たり** で適用 (現状の挙動と一致)。
 
 ### 4.6 ビューア間タブ移動 `moveTabAcrossViewers(set, srcViewerId, srcLeafId, srcIdx, dstViewerId) → ViewerSet`
