@@ -291,8 +291,9 @@ image-observer/
         │   │   ├── useDnD.ts           # pointer events 自前 + elementFromPoint で hit test (Phase 5)
         │   │   ├── useTabs.ts          # Tab 型と newTab ファクトリのみ
         │   │   ├── viewers.ts         # ViewerSet 純関数 (#11): add/close/rename/setActive/suggestViewerName/moveTabAcrossViewers
-        │   │   ├── viewers.test.ts    # vitest: 39 ケース
-        │   │   └── useViewerSet.ts    # ViewerSet 全体管理 + active viewer の panel-level mutation を delegate (旧 useViewerGrid を置換)
+        │   │   ├── viewers.test.ts    # vitest (#11)
+        │   │   ├── useViewerSet.ts    # ViewerSet 全体管理 + active viewer の panel-level mutation を delegate (旧 useViewerGrid を置換)
+        │   │   └── useViewerSet.helpers.ts # ステートレス補助関数 (#65): leafTabsCount / openPathAsSplitOrAppend
         │   └── session/            # ↔ internal/state (永続化グルー)
         │       ├── useSessionLoad.ts   # 起動時 GetState (2 段階 mount)
         │       └── useSessionSave.ts   # 500ms debounce で SaveState (v4 schema: layout + topTab + list)
