@@ -85,6 +85,18 @@ func writeImage(t *testing.T, path string) {
 	}
 }
 
+// newClassifyTestState builds a minimal *watchState wrapping the provided
+// fsnotify watcher so unit tests for classifyAndAccumulate can call it
+// without spinning up a full Manager. PR #75 14th: signature change from
+// (*fsnotify.Watcher) to (*watchState) so the Remove branch can consult
+// watchedDirs reliably.
+func newClassifyTestState(w *fsnotify.Watcher) *watchState {
+	return &watchState{
+		watcher:     w,
+		watchedDirs: make(map[string]struct{}),
+	}
+}
+
 func TestStart_NewImage_Emits(t *testing.T) {
 	dir := t.TempDir()
 	cap := newCaptured()
@@ -636,7 +648,7 @@ func TestClassify_DirCreateThenSamePathImageCreate_NoDoubleCount(t *testing.T) {
 	// dedup we'd hit addedFiles=2; with dedup we stay at 1 and consume the
 	// parked entry.
 	ev := fsnotify.Event{Name: "/staged/photo.png", Op: fsnotify.Create}
-	if !classifyAndAccumulate(acc, ev, w) {
+	if !classifyAndAccumulate(acc, ev, newClassifyTestState(w)) {
 		t.Errorf("Create should still trigger debounce reset even when deduped")
 	}
 	if acc.addedFiles != 1 {
@@ -648,12 +660,48 @@ func TestClassify_DirCreateThenSamePathImageCreate_NoDoubleCount(t *testing.T) {
 
 	// A second Create for the same path *now* (post-consume) counts as a
 	// genuine new addition.
-	if !classifyAndAccumulate(acc, ev, w) {
+	if !classifyAndAccumulate(acc, ev, newClassifyTestState(w)) {
 		t.Errorf("second Create should trigger")
 	}
 	if acc.addedFiles != 2 {
 		t.Errorf("post-consume re-Create: addedFiles got %d, want 2", acc.addedFiles)
 	}
+}
+
+// TestStart_ImageExtensionDirRemovedAsAnyChange verifies that removing a
+// directory whose name happens to carry an image extension (e.g.
+// `photos.jpg/`) does NOT bump removedFiles. PR #75 14th, thread D: the
+// classification scanner ignores directories entirely, so reporting "image
+// removed" for a removed dir over-counts. We detect the dir-vs-file
+// distinction via w.Remove's return value (non-nil = path wasn't a
+// watched dir) and surface dir removal as a generic anyChange.
+func TestStart_ImageExtensionDirRemovedAsAnyChange(t *testing.T) {
+	root := t.TempDir()
+	dirPath := filepath.Join(root, "looks-like-image.png")
+	if err := os.Mkdir(dirPath, 0o755); err != nil {
+		t.Fatalf("mkdir image-named dir: %v", err)
+	}
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(root); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	if err := os.Remove(dirPath); err != nil {
+		t.Fatalf("rmdir: %v", err)
+	}
+	got := cap.waitForPayload(t, 1, time.Second)
+	if got[0].RemovedFiles != 0 {
+		t.Errorf("image-extension dir removal should not bump removedFiles, got %+v", got[0])
+	}
+	if got[0].RenamedFiles != 0 {
+		t.Errorf("image-extension dir removal should not bump renamedFiles, got %+v", got[0])
+	}
+	// anyChange (= the payload was emitted at all) is enough for the
+	// frontend to re-Load; the inverse "would payload have been emitted
+	// without anyChange?" is asserted by waitForPayload succeeding.
 }
 
 // TestClassify_DirCreateSharesDiscoveredDedup verifies that two dir-Create
@@ -682,8 +730,9 @@ func TestClassify_DirCreateSharesDiscoveredDedup(t *testing.T) {
 	// whole tree under parent, finds child/photo.png, returns it.
 	// addedFiles bumps to 1 and parks the path.
 	acc := &changedAccumulator{}
+	st := newClassifyTestState(w)
 	parentEv := fsnotify.Event{Name: parent, Op: fsnotify.Create}
-	if !classifyAndAccumulate(acc, parentEv, w) {
+	if !classifyAndAccumulate(acc, parentEv, st) {
 		t.Fatalf("parent Create should trigger")
 	}
 	if acc.addedFiles != 1 {
@@ -695,7 +744,7 @@ func TestClassify_DirCreateSharesDiscoveredDedup(t *testing.T) {
 	// child, finds the same photo.png. Without dedup we'd bump
 	// addedFiles to 2; with the new shared dedup it stays at 1.
 	childEv := fsnotify.Event{Name: child, Op: fsnotify.Create}
-	if !classifyAndAccumulate(acc, childEv, w) {
+	if !classifyAndAccumulate(acc, childEv, st) {
 		t.Fatalf("child Create should still trigger debounce reset")
 	}
 	if acc.addedFiles != 1 {
@@ -722,7 +771,7 @@ func TestClassify_WriteOnImageTriggersTimerWithoutBumpingCounters(t *testing.T) 
 
 	acc := &changedAccumulator{}
 	ev := fsnotify.Event{Name: "/anywhere/photo.png", Op: fsnotify.Write}
-	if !classifyAndAccumulate(acc, ev, w) {
+	if !classifyAndAccumulate(acc, ev, newClassifyTestState(w)) {
 		t.Errorf("Write on an image should return true to extend debounce")
 	}
 	if acc.addedFiles != 0 || acc.removedFiles != 0 ||

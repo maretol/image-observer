@@ -84,6 +84,17 @@ type watchState struct {
 	stop    chan struct{}
 	done    chan struct{}
 
+	// watchedDirs tracks every directory we've successfully Add'd to the
+	// fsnotify Watcher. Used to detect "this Remove/Rename event is for a
+	// path we know was a directory" reliably, instead of relying on
+	// w.Remove's return value (which is timing-dependent — Linux inotify
+	// processes IN_IGNORED asynchronously, so by the time we hand-call
+	// w.Remove on the IN_DELETE, the watch may already be gone internally
+	// and we'd get a misleading "not in watch list" error). PR #75 14th,
+	// thread D. Only written by the loop goroutine (Create branch) and
+	// by Start (before the loop starts); no concurrent access.
+	watchedDirs map[string]struct{}
+
 	// stopRequested is set true by stopLocked *before* closing the watcher.
 	// The loop checks it on the Events-channel-closed path to decide
 	// whether to flush pending events (explicit Stop = discard / treat
@@ -133,6 +144,12 @@ func (m *Manager) Start(root string) error {
 		return fmt.Errorf("watcher: NewWatcher: %w", err)
 	}
 
+	// watchedDirs is populated by addSubtree during the initial walk and
+	// extended by the loop's Create branch. It lets classifyAndAccumulate
+	// detect "this Remove was for a watched directory" reliably without
+	// relying on w.Remove's timing-dependent return value (PR #75 14th).
+	watchedDirs := make(map[string]struct{})
+
 	// Root must succeed: without it we can't see top-level changes (image
 	// add/remove directly in `root`). Descendants are best-effort. The
 	// initial walk doesn't need the discovered-image dedup set (that's
@@ -141,16 +158,17 @@ func (m *Manager) Start(root string) error {
 	// walk), so we use the collect-free overload to avoid allocating
 	// thousands of POSIX path strings just to discard them when scanning
 	// a large image folder (PR #75 8th, thread C).
-	if !addSubtree(w, root) {
+	if !addSubtree(w, root, watchedDirs) {
 		_ = w.Close()
 		return fmt.Errorf("watcher: cannot watch root %q", root)
 	}
 
 	st := &watchState{
-		watcher: w,
-		root:    root,
-		stop:    make(chan struct{}),
-		done:    make(chan struct{}),
+		watcher:     w,
+		root:        root,
+		stop:        make(chan struct{}),
+		done:        make(chan struct{}),
+		watchedDirs: watchedDirs,
 	}
 	m.state = st
 	go m.loop(st)
@@ -294,7 +312,7 @@ func (m *Manager) loop(st *watchState) {
 			}
 			logging.Debug("watcher", "event",
 				"op", ev.Op.String(), "path", ev.Name)
-			if classifyAndAccumulate(&pending, ev, st.watcher) {
+			if classifyAndAccumulate(&pending, ev, st) {
 				resetTimer()
 			}
 			// Root vanished: a Remove / Rename on the watched root itself
@@ -375,6 +393,14 @@ func (m *Manager) loop(st *watchState) {
 // against a concurrent writer dropping files into the just-created dir),
 // the image-Create branch consumes the entry instead of double-counting.
 // The map is wiped by reset() at the end of each flush.
+//
+// removedPaths is a per-window dedup set for Remove / Rename events on the
+// same path. Inotify fires multiple events for a removed/renamed entry
+// (parent's IN_DELETE plus the path's own IN_DELETE_SELF / IN_IGNORED),
+// and without dedup the second event would over-count — the first call's
+// w.Remove succeeds (was watched) and gets classified as a dir, while
+// subsequent calls return "not in watch list" and fall through to the
+// image-file branch counting +1 removedFiles. The map is wiped by reset().
 type changedAccumulator struct {
 	addedFiles           int
 	removedFiles         int
@@ -382,6 +408,7 @@ type changedAccumulator struct {
 	sidecarChanged       bool
 	anyChange            bool
 	discoveredImagePaths map[string]struct{}
+	removedPaths         map[string]struct{}
 }
 
 func (c *changedAccumulator) empty() bool {
@@ -408,9 +435,11 @@ func (c *changedAccumulator) snapshot(folder string) ChangedPayload {
 // Returns true iff the event should reset the debounce timer (i.e. it
 // contributes something the frontend cares about).
 //
-// w is passed in so the function can incrementally Add new subdirectories
-// for monitoring without round-tripping back through the loop.
-func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnotify.Watcher) bool {
+// st is passed in so the function can incrementally Add new subdirectories
+// for monitoring (via st.watcher) and consult / update st.watchedDirs to
+// distinguish dir-vs-file Remove events reliably (PR #75 14th, thread D).
+func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, st *watchState) bool {
+	w := st.watcher
 	base := filepath.Base(ev.Name)
 	if isHiddenName(base) {
 		return false
@@ -475,7 +504,7 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnoti
 				// Create event, so we already have some visibility — we
 				// just lose the new subdir's nested activity). anyChange
 				// stays true so the frontend re-Loads.
-				_, discovered := addSubtreeCollect(w, ev.Name)
+				_, discovered := addSubtreeCollect(w, ev.Name, st.watchedDirs)
 				if len(discovered) > 0 {
 					if acc.discoveredImagePaths == nil {
 						acc.discoveredImagePaths = make(map[string]struct{}, len(discovered))
@@ -518,12 +547,23 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnoti
 	// Chmod-only on non-image paths stays ignored.
 	if !imgfile.IsImage(base) {
 		if ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename) {
-			// Drop the watch on the vanished path best-effort. On Linux
-			// inotify a Rename of a watched subdirectory tracks the inode
-			// (not the path), so without an explicit Remove the moved-out
-			// subtree's later events would keep flowing into THIS root's
+			// Dedup against acc.removedPaths so the IN_IGNORED / IN_DELETE_SELF
+			// follow-ups don't re-trigger this branch's anyChange flush
+			// (functionally OK but wasteful). Drop from st.watchedDirs and
+			// w.Remove the vanished path best-effort — on Linux inotify a
+			// Rename of a watched subdirectory tracks the inode (not the
+			// path), so without an explicit Remove the moved-out subtree's
+			// later events would keep flowing into THIS root's
 			// classification:changed stream — breaking the "current folder
 			// only" contract (PR #75 review).
+			if acc.removedPaths == nil {
+				acc.removedPaths = make(map[string]struct{})
+			}
+			if _, dup := acc.removedPaths[ev.Name]; dup {
+				return true
+			}
+			acc.removedPaths[ev.Name] = struct{}{}
+			delete(st.watchedDirs, ev.Name)
 			_ = w.Remove(ev.Name)
 			acc.anyChange = true
 			return true
@@ -545,26 +585,38 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnoti
 		}
 		triggered = true
 	}
-	if ev.Op.Has(fsnotify.Remove) {
-		acc.removedFiles++
-		// Best-effort drop of any inotify watch on this path. Image files
-		// don't normally get watched (we only Add directories), but a
-		// directory whose name happens to carry an image extension (e.g.
-		// `photos.jpg/`) would land in this image branch — without an
-		// explicit Remove, Linux inotify could keep the inode-tracked
-		// watch alive and leak events from the moved-out subtree into
-		// this root (PR #75 review). Idempotent for the common file case.
-		_ = w.Remove(ev.Name)
-		triggered = true
-	}
-	if ev.Op.Has(fsnotify.Rename) {
-		// Rename at the source path is observationally a Remove. The
-		// destination, if inside a watched dir on the same fs, surfaces as
-		// a separate Create event. We count the Rename as a Remove for
-		// entries math, plus a renamedFiles tick for informational purposes.
-		acc.removedFiles++
-		acc.renamedFiles++
-		_ = w.Remove(ev.Name) // same defensive cleanup as Remove above
+	if ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename) {
+		// Inotify fires multiple events for a removed/renamed path: the
+		// parent's IN_DELETE / IN_MOVED_FROM, plus the path's own
+		// IN_DELETE_SELF / IN_MOVE_SELF + IN_IGNORED. Without dedup the
+		// second event would over-count. Track per-window seen paths.
+		if acc.removedPaths == nil {
+			acc.removedPaths = make(map[string]struct{})
+		}
+		if _, dup := acc.removedPaths[ev.Name]; dup {
+			return true
+		}
+		acc.removedPaths[ev.Name] = struct{}{}
+		// Detect dir-vs-file via st.watchedDirs (NOT w.Remove's return
+		// value — that's timing-dependent because Linux inotify processes
+		// IN_IGNORED asynchronously and may have internally evicted the
+		// watch by the time we hand-call w.Remove on the IN_DELETE).
+		// If the path is in watchedDirs, it was a directory we'd added
+		// (e.g. an `photos.jpg/` image-extension dir). The classification
+		// scanner ignores directories (`d.IsDir() → return nil`), so
+		// reporting removedFiles++ here would over-report. Treat as
+		// anyChange instead. For real image files we never Add'd, the
+		// path isn't in watchedDirs → bump normally (PR #75 14th, thread D).
+		if _, wasDir := st.watchedDirs[ev.Name]; wasDir {
+			delete(st.watchedDirs, ev.Name)
+			_ = w.Remove(ev.Name) // best-effort cleanup; may already be auto-evicted
+			acc.anyChange = true
+		} else {
+			acc.removedFiles++
+			if ev.Op.Has(fsnotify.Rename) {
+				acc.renamedFiles++
+			}
+		}
 		triggered = true
 	}
 	// fsnotify.Write on an existing image leaves the entries set unchanged
@@ -601,10 +653,14 @@ func isHiddenName(name string) bool {
 // allocating thousands of POSIX path strings just to discard them would
 // spike memory on a large image folder (PR #75 8th, thread C).
 //
+// watchedDirs (if non-nil) is populated with every directory path
+// successfully Add'd so the Remove/Rename handler can detect dir-vs-file
+// reliably (PR #75 14th, thread D).
+//
 // Failures on descendant Add calls are logged and skipped rather than
 // aborting the walk — partial coverage beats none.
-func addSubtree(w *fsnotify.Watcher, root string) bool {
-	rootAdded, _ := addSubtreeImpl(w, root, false)
+func addSubtree(w *fsnotify.Watcher, root string, watchedDirs map[string]struct{}) bool {
+	rootAdded, _ := addSubtreeImpl(w, root, false, watchedDirs)
 	return rootAdded
 }
 
@@ -618,17 +674,20 @@ func addSubtree(w *fsnotify.Watcher, root string) bool {
 // the call site: the parent dir's watch is what gave us the Create event,
 // so we already have some visibility and only lose the new subdir's nested
 // activity.
-func addSubtreeCollect(w *fsnotify.Watcher, root string) (rootAdded bool, discovered []string) {
-	return addSubtreeImpl(w, root, true)
+func addSubtreeCollect(w *fsnotify.Watcher, root string, watchedDirs map[string]struct{}) (rootAdded bool, discovered []string) {
+	return addSubtreeImpl(w, root, true, watchedDirs)
 }
 
-func addSubtreeImpl(w *fsnotify.Watcher, root string, collect bool) (rootAdded bool, discovered []string) {
+func addSubtreeImpl(w *fsnotify.Watcher, root string, collect bool, watchedDirs map[string]struct{}) (rootAdded bool, discovered []string) {
 	// Add root explicitly first so callers can distinguish "root failed"
 	// from "some descendant failed".
 	if err := w.Add(root, fsnotify.All); err != nil {
 		logging.Warn("watcher", "add root failed",
 			"dir", root, "err", err.Error())
 		return false, nil
+	}
+	if watchedDirs != nil {
+		watchedDirs[root] = struct{}{}
 	}
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil {
@@ -651,6 +710,8 @@ func addSubtreeImpl(w *fsnotify.Watcher, root string, collect bool) (rootAdded b
 			if err := w.Add(p, fsnotify.All); err != nil {
 				logging.Warn("watcher", "add dir failed",
 					"dir", p, "err", err.Error())
+			} else if watchedDirs != nil {
+				watchedDirs[p] = struct{}{}
 			}
 			return nil
 		}

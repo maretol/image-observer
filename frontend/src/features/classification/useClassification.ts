@@ -364,9 +364,12 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         }
         return;
       }
-      // loadInternal is gen-aware: if the user switched folders, the
-      // new openFolder's loadInternal already bumped the gen and our
-      // result will be discarded via the stale-null return.
+      // Folder check before the trailing reload: even though loadInternal
+      // is gen-aware and would mark itself stale via the new openFolder's
+      // bump, we still issued an IPC for the OLD folder. Skipping it when
+      // state has moved on saves a wasted Load and prevents any race with
+      // the gen-bump timing (PR #75 14th, thread C).
+      if (folderRef.current !== path) return;
       await loadInternal(path);
     },
     [confirm, loadInternal, toast],
@@ -415,9 +418,13 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     // next render (PR #75 review).
     folderRef.current = picked;
     setFolderPath(picked);
-    // Folder change invalidates filename-keyed selection (and its anchor).
-    setSelected(new Set());
-    setSelectAnchor(null);
+    // Folder change invalidates ALL entries-dependent state, not just
+    // selection — editing pointing at an OLD-folder file would re-surface
+    // its popover if the NEW folder happens to contain a same-named file,
+    // conflict / mergePrompt / pendingResultRef likewise carry stale
+    // folder pointers (PR #75 14th, thread A). resetEntriesDependentState
+    // covers selection + anchor + all of the above in one call.
+    resetEntriesDependentState();
     const res = await loadInternal(picked);
     // loadInternal returns null on stale (a newer Load superseded us) as
     // well as on error. In both cases the postLoadFlow's merge / create-
@@ -425,7 +432,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     // (PR #75 review thread #1).
     if (!res) return;
     await postLoadFlow(picked, res);
-  }, [loadInternal, postLoadFlow, toast]);
+  }, [loadInternal, postLoadFlow, toast, resetEntriesDependentState]);
 
   const reload = useCallback(async () => {
     const cur = folderRef.current;
@@ -535,11 +542,16 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // loadResultRef mirrors loadResult so the handler can compare the incoming
   // re-Load to what we already display without depending on loadResult
   // directly (which would force a new handleWatcherPayload identity each
-  // render and grow the dep churn).
+  // render and grow the dep churn). Synced render-time (not via useEffect)
+  // because the handler reads it in its self-echo check — if a watcher
+  // event lands between `setLoadResult(patch)` and the post-render effect,
+  // the handler would compare against the PRE-patch entries and falsely
+  // classify the watcher echo of our just-completed save as an external
+  // change, surfacing "外部変更" toasts / unnecessary commits for normal
+  // saves (PR #75 14th, thread B). Same reasoning as folderRef /
+  // watchModeRef / editingRef / conflictRef / mergePromptOpenRef above.
   const loadResultRef = useRef<classification.LoadResult | null>(loadResult);
-  useEffect(() => {
-    loadResultRef.current = loadResult;
-  }, [loadResult]);
+  loadResultRef.current = loadResult;
 
   // inFlightDeletesRef tracks filenames whose Delete IPC has fired but whose
   // sidecar save / local state patch hasn't completed yet. The watcher fires
@@ -1151,6 +1163,14 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           entry,
           loadResult.mtime,
         );
+        // Folder check before any state commit — the UpdateEntry disk
+        // write itself is fine to complete against `cur`, but patching
+        // the NEW folder's loadResult with OLD folder's mtime / entry
+        // would corrupt it. If the user switched folders mid-await we
+        // skip the local commit entirely; the OLD folder's save did
+        // succeed on disk, and any next openFolder of it will Load the
+        // updated entry via the normal path (PR #75 14th, thread C).
+        if (folderRef.current !== cur) return;
         // Bump the shared generation BEFORE patching local state so any
         // watcher / replay / silent-recheck / manual reload whose
         // LoadClassification started before our save returned is now
@@ -1180,6 +1200,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         });
         setEditing({ open: false, filename: null });
       } catch (e) {
+        // Same folder check as the success path — surfacing a conflict
+        // dialog or error toast for the OLD folder while the user is
+        // on a NEW folder is confusing UX (PR #75 14th, thread C).
+        if (folderRef.current !== cur) return;
         const msg = errorMessage(e);
         if (msg.startsWith(CONFLICT_PREFIX)) {
           setConflict({ filename: entry.filename, draft: entry });
@@ -1210,6 +1234,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     if (!cur) return;
     try {
       const out = await UpdateClassificationEntry(cur, conflict.draft, 0);
+      // Folder check before any state commit — patching the NEW folder's
+      // state with OLD folder's mutation result is the same UX bug as
+      // saveEdit (PR #75 14th, thread C).
+      if (folderRef.current !== cur) return;
       // Bump gen immediately after the disk write so any in-flight
       // watcher / replay / silent recheck Load whose LoadClassification
       // started before our forced overwrite is now stale — without this
@@ -1226,6 +1254,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       // out.mtime is captured by reload, so we don't need to do anything else here.
       void out;
     } catch (e) {
+      if (folderRef.current !== cur) return;
       toast(`強制上書きに失敗しました: ${errorMessage(e)}`, "error");
     }
   }, [conflict, reload, toast]);
@@ -1243,11 +1272,17 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       await MergeChildSidecars(target);
       logger.info("classification", "merged child sidecars", { folder: target });
     } catch (e) {
+      if (folderRef.current !== target) return;
       const msg = errorMessage(e);
       toast(`マージに失敗しました: ${msg}`, "error");
       logger.error("classification", "merge failed", { folder: target, err: msg });
       return;
     }
+    // Folder check before bumping gen + dispatching the reload — without
+    // this the OLD folder's reload would bump generation (stale-ifying
+    // the NEW folder's in-flight Load) and then commit OLD folder data
+    // to NEW folder state (PR #75 14th, thread C).
+    if (folderRef.current !== target) return;
     // Bump gen after the merge write so an in-flight watcher / silent
     // recheck Load that started before the merge is stale-discarded —
     // same flicker-prevention rule as saveEdit / deleteOne (PR #75 10th
@@ -1263,9 +1298,11 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     try {
       await CreateEmptyClassification(target);
     } catch (e) {
+      if (folderRef.current !== target) return;
       toast(`サイドカー作成に失敗しました: ${errorMessage(e)}`, "error");
       return;
     }
+    if (folderRef.current !== target) return;
     // Same gen-bump rule as resolveMergeMerge above.
     ++requestGenRef.current;
     await loadInternal(target);
@@ -1309,11 +1346,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           await DeleteImage(cur, filename);
         } catch (e) {
           const msg = errorMessage(e);
-          toast("削除に失敗しました (詳細はログ)", "error");
           logger.error("classification", "delete failed", {
             filename,
             err: msg,
           });
+          // Surface the failure toast only if the user is still looking
+          // at this folder (PR #75 14th, thread C).
+          if (folderRef.current === cur) {
+            toast("削除に失敗しました (詳細はログ)", "error");
+          }
           return false;
         }
 
@@ -1369,6 +1410,14 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           }
         }
 
+        // Folder check before any state commit — patching NEW folder's
+        // loadResult with OLD folder's entriesAfter (which is missing the
+        // deleted filename for the OLD folder) would erroneously remove a
+        // same-named entry from the NEW folder's list (PR #75 14th,
+        // thread C). File is already off disk for OLD folder; the user
+        // sees no visible state change, which is correct for NEW folder
+        // context.
+        if (folderRef.current !== cur) return true;
         // Bump generation before patching local state so any in-flight
         // LoadClassification (watcher / replay / silent recheck / manual
         // reload) that started before our delete + sidecar save returned
