@@ -509,6 +509,11 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         // wipe a successfully-displayed newer result (PR #75 review).
         if (myGen !== requestGenRef.current) return;
         if (folderRef.current !== payload.folder) return;
+        // Also re-check watchMode: the entry-gate above ran before the
+        // await; if the user flipped to off while we were awaiting,
+        // surfacing the failure (with toast / setError) would be acting
+        // on monitoring the user opted out of (PR #75 8th, thread A).
+        if (watchModeRef.current === WATCH_MODE_OFF) return;
         // Mirror the manual-reload error path so a deleted / unreadable
         // folder surfaces to the user instead of silently leaving a stale
         // grid. Also drop the on-screen result — leaving it in place
@@ -524,6 +529,11 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       // Discard the success result for the same reasons.
       if (myGen !== requestGenRef.current) return;
       if (folderRef.current !== payload.folder) return;
+      // Same off-during-await guard as the catch above — the entry-gate
+      // ran before LoadClassification. If watchMode flipped to off while
+      // awaiting, committing the result would auto-merge after the user
+      // opted out (PR #75 8th, thread A).
+      if (watchModeRef.current === WATCH_MODE_OFF) return;
       // Successful Load (including silent self-echo paths) is a
       // confirmation that the folder is readable; clear any leftover
       // error from a previous failed reload so the UI doesn't keep
@@ -760,6 +770,11 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         // handler's success path will commit instead).
         if (myGen !== requestGenRef.current) return;
         if (folderRef.current !== pending.folder) return;
+        // Also re-check watchMode: the entry-gate above ran before the
+        // reload await. If the user flipped to off while awaiting,
+        // surfacing the failure would act on monitoring the user opted
+        // out of (PR #75 8th, thread B).
+        if (watchModeRef.current === WATCH_MODE_OFF) return;
         // Otherwise surface to the user — the suppressed comment in the
         // 4th-round review pointed out that log-only made auto-merge
         // failures invisible. Mirror the manual-reload error path.
@@ -775,6 +790,23 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       // back (PR #75 review).
       if (myGen !== requestGenRef.current) return;
       if (folderRef.current !== pending.folder) return;
+      // Same off-during-await guard — committing the freshly-reloaded
+      // result after the user disabled monitoring would surprise them
+      // (PR #75 8th, thread B).
+      if (watchModeRef.current === WATCH_MODE_OFF) return;
+    }
+    // Even when we didn't reload (mtime matched, fresh = pending.fresh),
+    // re-check watchMode here so the deferred commit doesn't slip through
+    // after the user disabled monitoring between defer-park and replay
+    // trigger. The entry-gate above already handles the case where
+    // performReplay starts with watchMode = off, but watchMode could
+    // also flip during the reload await covered above (handled there).
+    // This final guard catches the "no reload, fresh was parked while
+    // watchMode was auto, then user toggled off, then defer closed"
+    // sequence (PR #75 8th, thread B).
+    if (watchModeRef.current === WATCH_MODE_OFF) {
+      pendingResultRef.current = null;
+      return;
     }
     if (reloadedFresh) {
       // Clear any leftover error from a previous failed reload — the
