@@ -561,7 +561,14 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // the file while our local loadResult still has it. Without filtering,
   // the entriesEquivalent self-echo check would miss this case and toast
   // "外部で更新されました" for the user's own delete (PR #75 9th, thread J).
-  const inFlightDeletesRef = useRef<Set<string>>(new Set());
+  //
+  // Scoped per folder (Map<folder, Set<filename>>) so an in-flight delete on
+  // folder A doesn't suppress a same-named-file diff in folder B if the user
+  // switches folders before the delete IPC settles. Without folder scoping,
+  // stripInFlight would drop the same-named entry from the new folder's
+  // fresh entries and entriesEquivalent would falsely report "no change",
+  // leaving the listing stale until the next event (PR #75 21st, thread A).
+  const inFlightDeletesRef = useRef<Map<string, Set<string>>>(new Map());
 
   // commitFreshResult swaps loadResult to the watcher-supplied snapshot AND
   // drops any selected filenames that no longer exist on disk. The bulk
@@ -660,11 +667,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       // the only difference is one of those in-flight deletes, treat as
       // self-echo and skip the toast (PR #75 9th, thread J).
       const cur = loadResultRef.current;
-      const inFlightDeletes = inFlightDeletesRef.current;
+      // Scope in-flight delete filenames to payload.folder so a stale
+      // delete pending on a different folder can't suppress this folder's
+      // diff (PR #75 21st, thread A).
+      const inFlightDeletes =
+        inFlightDeletesRef.current.get(payload.folder) ?? null;
       const stripInFlight = (
         entries: classification.Entry[],
       ): classification.Entry[] =>
-        inFlightDeletes.size === 0
+        !inFlightDeletes || inFlightDeletes.size === 0
           ? entries
           : entries.filter((e) => !inFlightDeletes.has(e.filename));
       const entriesUnchanged =
@@ -764,11 +775,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           if (folderRef.current !== folder) return;
           if (watchModeRef.current !== WATCH_MODE_AUTO) return;
           const cur = loadResultRef.current;
-          const inFlightDeletes = inFlightDeletesRef.current;
+          // See handleWatcherPayload: per-folder set, so a delete still in
+          // flight on a different folder can't suppress this one's diff
+          // (PR #75 21st, thread A).
+          const inFlightDeletes =
+            inFlightDeletesRef.current.get(folder) ?? null;
           const stripInFlight = (
             entries: classification.Entry[],
           ): classification.Entry[] =>
-            inFlightDeletes.size === 0
+            !inFlightDeletes || inFlightDeletes.size === 0
               ? entries
               : entries.filter((e) => !inFlightDeletes.has(e.filename));
           const entriesUnchanged =
@@ -1345,8 +1360,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       // setLoadResult patch lands) is recognised as a self-echo rather
       // than as an unexplained external removal that triggers a toast +
       // possible commit. Cleared in the finally below regardless of the
-      // sidecar outcome (PR #75 9th, thread J).
-      inFlightDeletesRef.current.add(filename);
+      // sidecar outcome (PR #75 9th, thread J). Keyed by the folder we
+      // captured at entry (`cur`) so the cleanup deletes from the same
+      // bucket even if folderRef has changed by then (PR #75 21st, thread A).
+      let folderDeletes = inFlightDeletesRef.current.get(cur);
+      if (!folderDeletes) {
+        folderDeletes = new Set();
+        inFlightDeletesRef.current.set(cur, folderDeletes);
+      }
+      folderDeletes.add(filename);
       try {
         try {
           await DeleteImage(cur, filename);
@@ -1460,7 +1482,11 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         }
         return true;
       } finally {
-        inFlightDeletesRef.current.delete(filename);
+        const set = inFlightDeletesRef.current.get(cur);
+        if (set) {
+          set.delete(filename);
+          if (set.size === 0) inFlightDeletesRef.current.delete(cur);
+        }
       }
     },
     [confirm, loadInternal, loadResult, toast],

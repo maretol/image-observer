@@ -134,13 +134,24 @@ func (m *Manager) Start(root string) error {
 	// "image added in folder" events — appearing healthy but doing nothing.
 	// Start's documented contract is "recursive directory watch", so the
 	// caller is owed an explicit error instead of silent degradation.
-	// Follow the root symlink deliberately (Stat, not Lstat) — a symlink
-	// pointing to a real directory is a legitimate root; only the *interior*
-	// walk refuses to follow symlinks to avoid expanding the watch tree.
-	// PR #75 review 20th.
-	if info, err := os.Stat(root); err != nil {
-		return fmt.Errorf("watcher: stat root %q: %w", root, err)
-	} else if !info.IsDir() {
+	// Lstat (not Stat) so a symlink-to-dir root is rejected too: the
+	// subsequent filepath.WalkDir(root, ...) lstats the root itself and
+	// would see a symlink (not a dir), skipping descent and leaving
+	// nested subdirectory watches unset. We could resolve via
+	// filepath.EvalSymlinks here, but the classification scanner
+	// (internal/classification/scanner.go) has the same Lstat-at-root
+	// constraint, so admitting symlink roots in the watcher without
+	// aligning the scanner would emit events for nested changes the
+	// scanner can never surface. Reject up front; callers can pass the
+	// real path instead. PR #75 review 20th / 21st.
+	info, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("watcher: lstat root %q: %w", root, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("watcher: root must not be a symlink, got %q", root)
+	}
+	if !info.IsDir() {
 		return fmt.Errorf("watcher: root must be a directory, got %q (mode %s)",
 			root, info.Mode().Type())
 	}
@@ -475,15 +486,37 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, st *watch
 		return false
 	}
 
-	// Sidecar JSON: any non-chmod event flips the flag.
+	// Sidecar JSON: any non-chmod event flips the flag — UNLESS the path
+	// is actually a *directory* named `_classification.json`. The
+	// classification scanner ignores directories, so treating a same-named
+	// dir as a sidecar would (a) skip addSubtree on Create (descendants
+	// never get watched) and (b) skip removeSubtreeFromWatch on Remove
+	// (inode-tracked watches leak). For Remove/Rename we consult
+	// st.watchedDirs (path is already gone, so Lstat would fail); for
+	// Create we Lstat (and explicitly ignore symlinks, mirroring the
+	// dir-Create branch below). Fall through to the regular dir branches
+	// when the path is a dir. PR #75 review 21st.
 	if base == classification.SidecarJSON {
-		if ev.Op.Has(fsnotify.Create) || ev.Op.Has(fsnotify.Write) ||
-			ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename) {
-			acc.sidecarChanged = true
-			acc.anyChange = true
-			return true
+		pathIsDir := false
+		if ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename) {
+			_, pathIsDir = st.watchedDirs[ev.Name]
+		} else if ev.Op.Has(fsnotify.Create) {
+			if info, err := os.Lstat(ev.Name); err == nil &&
+				info.Mode()&os.ModeSymlink == 0 && info.IsDir() {
+				pathIsDir = true
+			}
 		}
-		return false
+		if !pathIsDir {
+			if ev.Op.Has(fsnotify.Create) || ev.Op.Has(fsnotify.Write) ||
+				ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename) {
+				acc.sidecarChanged = true
+				acc.anyChange = true
+				return true
+			}
+			return false
+		}
+		// Falls through to the dir-Create branch (line ~507) and the
+		// non-image Remove/Rename branch (line ~578) below.
 	}
 
 	// Chmod-only carries no information for entries display.

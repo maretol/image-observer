@@ -527,7 +527,7 @@ supersede しない」セマンティクス (= 自分の commit が他経路の 
 | replay reload 失敗 | bump | ✓ | ✓ | ✓ | – | – | – | – |
 | replay (no-reload 経路) | – | ✓ | ✓ | – | – | – | – | ✓ |
 | auto-load on mount (loadInternal) | bump | ✓ | – | – | ✓ | ✓ | – | – |
-| silent recheck after Start | **snapshot** | ✓ | ✓ | – | – | – | – | – |
+| silent recheck after Start | **snapshot** | ✓ | – | ✓ | ✓ | – | – | – |
 | Start IPC success | – | ✓ | ✓ | – | – | – | ✓ | – |
 | Start IPC fail | – | ✓ | ✓ | – | – | – | ✓ | – |
 | Stop IPC success | – | – | – | – | – | – | ✓ | – |

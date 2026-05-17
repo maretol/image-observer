@@ -335,6 +335,72 @@ func TestStart_FailsOnFileRoot(t *testing.T) {
 	}
 }
 
+// TestStart_SidecarNamedDirectoryHandledAsDir guards Thread G of PR #75 21st:
+// a directory whose basename is exactly `_classification.json` must NOT be
+// treated as a sidecar file. Without dir-detection in the sidecar branch the
+// Create would early-return after flipping SidecarChanged, skipping
+// addSubtree → nested image files would never produce events. We assert that
+// (a) the dir itself doesn't flip SidecarChanged and (b) an image dropped
+// inside it does surface as addedFiles>0 after a follow-up flush.
+func TestStart_SidecarNamedDirectoryHandledAsDir(t *testing.T) {
+	root := t.TempDir()
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(root); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	misnamed := filepath.Join(root, "_classification.json")
+	if err := os.Mkdir(misnamed, 0o755); err != nil {
+		t.Fatalf("mkdir misnamed: %v", err)
+	}
+	got := cap.waitForPayload(t, 1, time.Second)
+	if got[0].SidecarChanged {
+		t.Errorf("dir Create on _classification.json must NOT flip SidecarChanged, got %+v", got[0])
+	}
+	cap.reset()
+
+	// Drop an image inside the misnamed dir. If the dir was correctly
+	// addSubtree'd, fsnotify watches it and this Create produces a payload
+	// with addedFiles=1.
+	inner := filepath.Join(misnamed, "inside.png")
+	writeImage(t, inner)
+	got = cap.waitForPayload(t, 1, time.Second)
+	if got[0].AddedFiles != 1 {
+		t.Errorf("image inside _classification.json/ should bump AddedFiles, got %+v", got[0])
+	}
+}
+
+// TestStart_FailsOnSymlinkRoot pins the explicit rejection of symlink roots.
+// fsnotify.Watcher.Add follows the symlink (events would come back labelled
+// with the link path), but filepath.WalkDir Lstats the root, sees a symlink
+// (not a dir), and refuses to descend — leaving nested subdirectory watches
+// unset. internal/classification/scanner.go has the same constraint, so
+// rather than supporting symlink roots in only one of the two and emitting
+// events the scanner can never surface, Start rejects them up front.
+// PR #75 review 21st, thread F.
+func TestStart_FailsOnSymlinkRoot(t *testing.T) {
+	parent := t.TempDir()
+	target := filepath.Join(parent, "real")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatalf("setup mkdir: %v", err)
+	}
+	link := filepath.Join(parent, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable in this environment: %v", err)
+	}
+	m := NewManagerWithDebounce(func(ChangedPayload) {}, shortDebounce)
+	err := m.Start(link)
+	if err == nil {
+		_ = m.Stop()
+		t.Fatal("Start on a symlink root should fail")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("error message should mention 'symlink', got: %v", err)
+	}
+}
+
 func TestStart_ImageRemoveBumpsRemovedFiles(t *testing.T) {
 	// PR #75 review: image Remove / Rename were the headline Phase 1
 	// behaviors but had no integration coverage.

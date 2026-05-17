@@ -448,9 +448,14 @@ Go 側 no-op、Stop は idempotent なので二重 IPC は副作用なし。
 
 ### 6.2 EventsEmit
 
-`runtime.EventsEmit(a.ctx, "classification:changed", ChangedPayload{...})`
+`runtime.EventsEmit(a.ctx, watcher.ClassificationChangedEvent, ChangedPayload{...})`
 を呼ぶのは **`app.go` だけ** (`NewApp` で `watcher.NewManager` に渡す `EmitFunc`
-コールバック内で結線)。`internal/watcher` 自身は `wails/v2/pkg/runtime` を
+コールバック内で結線)。**event 名はリテラル `"classification:changed"` ではなく
+`watcher.ClassificationChangedEvent` 定数経由で参照する** — `internal/watcher`
+側と `useClassification.ts` 側が同値テスト (`TestClassificationChangedEventName`
++ `watcherPolicy.test.ts` の `expect(CLASSIFICATION_CHANGED_EVENT).toBe(...)`)
+で D-1 ドリフト検知しており、ここでリテラルを混ぜると将来 app.go 側にも
+直書きを戻す誤解を招く。`internal/watcher` 自身は `wails/v2/pkg/runtime` を
 import しない設計で、`Manager.emit(payload)` (DI で受け取った関数) を呼ぶだけ。
 こうすることでテストは `EmitFunc` を直接差し替えてキャプチャでき (§11)、
 将来 IPC 機構が変わっても影響範囲を app.go に閉じ込められる (§7.3 / §12)。
@@ -462,13 +467,27 @@ Wails の `generate module` は **EventsEmit の payload 型を TS namespace 化
 
 ### 6.3 ライフサイクル責務
 
-- フォルダを開く / 切り替える ← フロント `useClassification.openFolder` が
-  `StartFolderWatch` を呼ぶ
-- アプリ起動時に session 復元で folder が読まれた ← `useClassification` の
-  auto-load effect が同様に `StartFolderWatch` を呼ぶ
-- WatchMode が `"off"` ← フロント側で `StartFolderWatch` を呼ばない (Go 側は
-  「呼ばれたら起動する」スタンスで設定値は知らない)
-- WatchMode を `"auto"` ↔ `"off"` で切替 ← フロントが `Stop` / `Start` を相応に呼ぶ
+`useClassification` 内の **`StartFolderWatch` / `StopFolderWatch` 呼び出しは
+すべて単一の `dispatchWatchIntentRef` 経由**で行う (= folder-watch effect が
+`folderPath` / `watchMode` の変化を見て dispatch する単一導管)。`openFolder` /
+auto-load effect / 設定 UI から直接 Start / Stop を呼ぶ経路は意図的に持たない —
+JS から並列で Start("A") → Start("B") を発行すると Wails の per-call goroutine
+dispatch によって Go 側 `m.mu` 取得順が逆転し得るため、最後の IPC が "勝者" に
+なる race を避ける目的 (`postLoadFlow` の race と並んで PR #75 7th / 10th の
+主要設計点)。各経路の責務:
+
+- フォルダを開く / 切り替える ← `openFolder` は **folderPath / folderRef を
+  更新するのみ**。`useEffect([folderPath, watchMode])` が `dispatchWatchIntentRef`
+  を経由して Start / Stop を発行する
+- アプリ起動時に session 復元で folder が読まれた ← auto-load effect も同様、
+  folderPath を反映するだけで Start / Stop は folder-watch effect が処理
+- WatchMode が `"off"` ← `dispatchWatchIntentRef` が `StopFolderWatch` を呼ぶ
+  (Go 側は「呼ばれたら起動する」スタンスで設定値は知らない)
+- WatchMode を `"auto"` ↔ `"off"` で切替 ← 同じ effect が依存変更で再 fire し、
+  intent に応じて Start / Stop を発行
+- Start / Stop IPC の完了 (success / error) ← `dispatchWatchIntentRef` の
+  then / catch 内で現 intent を再評価し、ズレていれば再 dispatch する
+  fixed-point reconcile (Start same-root = no-op / Stop = idempotent を前提)
 - アプリ終了 ← `main.go` の `OnShutdown` で `internal/watcher` 側に Stop を委譲
   (フロント経由ではなく直接)
 
@@ -490,6 +509,23 @@ Wails の `generate module` は **EventsEmit の payload 型を TS namespace 化
 ```go
 // internal/watcher/manager.go (擬似コード)
 func (m *Manager) Start(root string) error {
+    // Root が「実在するディレクトリ」であることを Lstat で確認する。
+    // fsnotify.Watcher.Add は通常ファイルも成功し得るため、ここで弾かないと
+    // Start が success を返した後、画像追加 / 削除 event が一切流れない
+    // (= 健康に見えて沈黙する) 状態になる。symlink-to-dir も拒否する —
+    // 後続の filepath.WalkDir(root, ...) は内部で root を Lstat するので
+    // symlink を辿らず子孫の Add が走らない (classification.scanner も
+    // 同じ Lstat-at-root 制約なので一貫させる)。詳細は §5.1 / PR #75
+    // review 20th / 21st。
+    info, err := os.Lstat(root)
+    if err != nil { return fmt.Errorf("watcher: lstat root: %w", err) }
+    if info.Mode()&os.ModeSymlink != 0 {
+        return fmt.Errorf("watcher: root must not be a symlink: %q", root)
+    }
+    if !info.IsDir() {
+        return fmt.Errorf("watcher: root must be a directory: %q", root)
+    }
+
     w, err := fsnotify.NewWatcher()
     if err != nil { return err }
     // Root は明示的に最初に Add し、失敗したら Start 全体を fail させる
