@@ -250,7 +250,12 @@ func (m *Manager) loop(st *watchState) {
 			if timer != nil {
 				timer.Stop()
 			}
-			flush()
+			// Explicit Stop discards pending events instead of flushing
+			// them: when the user switches off the watcher (or closes the
+			// app), in-flight bursts inside the 200ms window are the very
+			// thing they wanted to suppress. A trailing flush would emit
+			// "classification:changed" *after* StopFolderWatch returned and
+			// the frontend would still auto-merge (PR #75 review thread).
 			return
 		}
 	}
@@ -317,24 +322,36 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnoti
 	}
 
 	// New directory: Stat to confirm (Create on a regular file lands here too).
-	// On a confirmed dir we add a watch incrementally so files dropped inside
-	// later still register. We do NOT pre-walk the new dir's contents — any
-	// files dropped between Create and Add will be picked up by the
-	// frontend's re-Load (which uses classification.scanner / WalkDir).
+	// On a confirmed dir we walk it recursively so:
+	//   1) every nested subdirectory gets its own watch (Linux inotify has no
+	//      native recursive mode — without this, a `mv` of an existing tree
+	//      into the watched root would silently miss arbitrary descendants),
+	//   2) image files already present (e.g. from a `mv` / `cp -r`) are
+	//      counted as added so the debounced payload accurately summarizes
+	//      the change.
 	if ev.Op.Has(fsnotify.Create) {
 		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-			if addErr := w.Add(ev.Name, fsnotify.All); addErr != nil {
-				logging.Warn("watcher", "add dir failed (incremental)",
-					"dir", ev.Name, "err", addErr.Error())
-			}
+			added := addSubtreeRecursively(w, ev.Name)
+			acc.addedFiles += added
 			acc.anyChange = true
 			return true
 		}
 	}
 
-	// Below here we only care about image files. Non-image files (e.g.
-	// `.txt`, `_classification.csv`, `.bak`) generate no UI-visible change.
+	// Below here we only care about image files for the count. Non-image
+	// files (e.g. `.txt`, `_classification.csv`, `.bak`) carry no entry
+	// information — BUT a Remove or Rename on a non-image, non-sidecar path
+	// is almost always either a directory disappearing (Linux's IN_IGNORED
+	// fires on the dir's own path with no extension) or a file the user is
+	// reorganising. Either way the on-disk set changed enough to warrant a
+	// re-Load, so we flag anyChange without bumping addedFiles / removedFiles
+	// (we can't tell whether the path was an image-bearing subtree). Write /
+	// Chmod-only on non-image paths stays ignored.
 	if !imgfile.IsImage(base) {
+		if ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename) {
+			acc.anyChange = true
+			return true
+		}
 		return false
 	}
 
@@ -366,4 +383,41 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnoti
 // hidden attribute is not consulted (deliberate v1 limit).
 func isHiddenName(name string) bool {
 	return strings.HasPrefix(name, ".")
+}
+
+// addSubtreeRecursively walks `root` (which must itself already exist and be
+// a directory), Adds every non-hidden subdirectory to w, and returns the
+// count of image files encountered along the way. Used by both the initial
+// Start enumeration and the per-event handler for `mv`-in / `cp -r`-style
+// directory drops where Linux inotify only signals the top-level Create.
+// Failures on individual Add calls are logged and skipped rather than
+// aborting the walk — partial coverage beats none.
+func addSubtreeRecursively(w *fsnotify.Watcher, root string) int {
+	imageCount := 0
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if isHiddenName(d.Name()) && p != root {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			if err := w.Add(p, fsnotify.All); err != nil {
+				logging.Warn("watcher", "add dir failed (incremental)",
+					"dir", p, "err", err.Error())
+			}
+			return nil
+		}
+		if imgfile.IsImage(d.Name()) {
+			imageCount++
+		}
+		return nil
+	})
+	return imageCount
 }

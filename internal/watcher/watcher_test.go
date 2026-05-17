@@ -277,6 +277,109 @@ func TestStart_FailsOnMissingRoot(t *testing.T) {
 	}
 }
 
+func TestStop_DiscardsPendingBurst(t *testing.T) {
+	// PR #75 review: an explicit Stop in the middle of a debounce window
+	// must NOT flush. Otherwise switching watchMode = "off" or closing the
+	// app surfaces a stale "classification:changed" the user just opted
+	// out of.
+	dir := t.TempDir()
+	cap := newCaptured()
+	// Use a long debounce so we can Stop while the timer is still pending.
+	m := NewManagerWithDebounce(cap.emit, 1*time.Second)
+	if err := m.Start(dir); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	writeImage(t, filepath.Join(dir, "in-flight.png"))
+	// Give inotify a beat to deliver the Create + classifyAndAccumulate to
+	// land it in `pending` (but well within the 1s debounce).
+	time.Sleep(80 * time.Millisecond)
+
+	if err := m.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// If Stop flushed, a payload would already be queued (no further wait
+	// needed); confirm it stayed silent.
+	cap.expectNoPayload(t, 200*time.Millisecond)
+}
+
+func TestStart_MoveInExistingTreePicksUpNested(t *testing.T) {
+	// PR #75 review: Linux inotify only signals the top-level Create when an
+	// existing subtree is moved into the watched root. We need to walk and
+	// Add nested subdirs on the spot — and count pre-existing image files —
+	// or activity inside them later goes unobserved.
+	root := t.TempDir()
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(root); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// Build the source tree outside the watched root, then atomically rename
+	// into the root to simulate a `mv existing-dir watched/`.
+	staging := t.TempDir()
+	srcTop := filepath.Join(staging, "moved")
+	srcNested := filepath.Join(srcTop, "nested")
+	if err := os.MkdirAll(srcNested, 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	writeImage(t, filepath.Join(srcTop, "top.png"))
+	writeImage(t, filepath.Join(srcNested, "deep.png"))
+
+	dst := filepath.Join(root, "moved")
+	if err := os.Rename(srcTop, dst); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	got := cap.waitForPayload(t, 1, time.Second)
+	if got[0].AddedFiles != 2 {
+		t.Errorf("AddedFiles for mv-in tree: got %d, want 2 (payloads=%+v)",
+			got[0].AddedFiles, got)
+	}
+
+	// Now confirm the nested watch was actually registered: drop a file
+	// into the nested subdir and we should see it.
+	writeImage(t, filepath.Join(dst, "nested", "after-move.png"))
+	got = cap.waitForPayload(t, 2, time.Second)
+	if got[1].AddedFiles != 1 {
+		t.Errorf("AddedFiles for post-move nested write: got %d, want 1 (all=%+v)",
+			got[1].AddedFiles, got)
+	}
+}
+
+func TestStart_RemovedSubdirFlagsAnyChange(t *testing.T) {
+	// PR #75 review: removing a non-image, non-sidecar path (typically a
+	// subdirectory) must still trigger a flush so the frontend re-Loads. The
+	// previous classifier dropped it on the `!imgfile.IsImage(base)` floor
+	// and the UI was left showing stale entries.
+	root := t.TempDir()
+	sub := filepath.Join(root, "doomed")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(root); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// Remove the empty subdir; we should still get at least one payload
+	// even though no image / sidecar event was involved.
+	if err := os.Remove(sub); err != nil {
+		t.Fatalf("rmdir: %v", err)
+	}
+	got := cap.waitForPayload(t, 1, time.Second)
+	// addedFiles / removedFiles stay 0 — we only flag anyChange because we
+	// can't tell from the event alone whether the path was image-bearing.
+	if got[0].AddedFiles != 0 || got[0].RemovedFiles != 0 {
+		t.Errorf("dir-only remove should not bump counters, got %+v", got[0])
+	}
+}
+
 func TestStart_ChmodOnly_NotEmitted(t *testing.T) {
 	dir := t.TempDir()
 	img := filepath.Join(dir, "x.png")
