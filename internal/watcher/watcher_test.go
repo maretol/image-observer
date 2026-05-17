@@ -971,8 +971,12 @@ func TestClassify_SubtreeRemoveTombstonesDescendants(t *testing.T) {
 	// for the wasDir check (Remove path is already gone, so Lstat would
 	// fail and the dir branch deliberately avoids it — see comment at
 	// line ~674).
-	parent := "/root/parent"
-	imageDir := "/root/parent/photos.jpg"
+	// Use filepath.Join so the descendant tombstone match (which is built
+	// from removeSubtreeFromWatch's `prefix + filepath.Separator`) works
+	// on Windows too — POSIX-style "/" hardcoded paths would not match a
+	// "\\"-suffixed prefix there (PR #75 25th, thread A).
+	parent := filepath.Join(string(filepath.Separator), "root", "parent")
+	imageDir := filepath.Join(parent, "photos.jpg")
 	st := newClassifyTestState(w)
 	st.watchedDirs[parent] = struct{}{}
 	st.watchedDirs[imageDir] = struct{}{}

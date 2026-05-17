@@ -412,6 +412,15 @@ func (m *Manager) loop(st *watchState) {
 			resetTimer()
 		case <-timerCh:
 			timerCh = nil
+			// Stop and the debounce timer can both become ready in the same
+			// select tick. Go picks a ready case at random, so even after
+			// stopLocked has set stopRequested + closed st.stop, this branch
+			// can still win and flush pending events — violating the
+			// "explicit Stop discards pending" contract enforced by the
+			// Events !ok and st.stop branches above (PR #75 25th, thread C).
+			if st.stopRequested.Load() {
+				return
+			}
 			flush()
 		case <-st.stop:
 			if timer != nil {
