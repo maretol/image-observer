@@ -3,6 +3,7 @@ package watcher
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -307,6 +308,30 @@ func TestStart_FailsOnMissingRoot(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "definitely-missing")
 	if err := m.Start(missing); err == nil {
 		t.Errorf("Start on missing root should fail")
+	}
+}
+
+// TestStart_FailsOnFileRoot guards the directory-root precondition.
+// fsnotify.Watcher.Add accepts plain files on inotify, so without an
+// explicit IsDir() check Start would happily watch a single file and
+// then deliver no "image added in folder" events — looking healthy but
+// silently broken. Start's contract is "recursive directory watch", so
+// the caller is owed an explicit error.
+// PR #75 review 20th, thread F.
+func TestStart_FailsOnFileRoot(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "not-a-dir.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatalf("setup write: %v", err)
+	}
+	m := NewManagerWithDebounce(func(ChangedPayload) {}, shortDebounce)
+	err := m.Start(file)
+	if err == nil {
+		_ = m.Stop()
+		t.Fatal("Start on a file path should fail")
+	}
+	if !strings.Contains(err.Error(), "directory") {
+		t.Errorf("error message should mention 'directory', got: %v", err)
 	}
 }
 

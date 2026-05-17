@@ -128,6 +128,23 @@ func (m *Manager) Start(root string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Reject non-directory roots up front. inotify (and therefore
+	// fsnotify.Watcher.Add) happily watches single files, so without this
+	// check Start would succeed on a file path and then never deliver any
+	// "image added in folder" events — appearing healthy but doing nothing.
+	// Start's documented contract is "recursive directory watch", so the
+	// caller is owed an explicit error instead of silent degradation.
+	// Follow the root symlink deliberately (Stat, not Lstat) — a symlink
+	// pointing to a real directory is a legitimate root; only the *interior*
+	// walk refuses to follow symlinks to avoid expanding the watch tree.
+	// PR #75 review 20th.
+	if info, err := os.Stat(root); err != nil {
+		return fmt.Errorf("watcher: stat root %q: %w", root, err)
+	} else if !info.IsDir() {
+		return fmt.Errorf("watcher: root must be a directory, got %q (mode %s)",
+			root, info.Mode().Type())
+	}
+
 	if m.state != nil {
 		// No-op only when the live goroutine is still running; otherwise
 		// the state is a zombie (loop exited via watcher.Errors / Events
