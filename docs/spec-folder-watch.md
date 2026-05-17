@@ -206,6 +206,24 @@
   `TestStart_FailedNewRootStopsExisting` で「Start(a) success → Start(file)
   失敗 → `Current()==''`」を pin (thread H)。本 spec の変更は説明追加のみ、
   挙動側は §10 の degraded mode 遷移と整合している。
+- 2026-05-17 PR #75 24th レビュー対応: (1) **実装側**: `removeSubtreeFromWatch`
+  に `tombstone map[string]struct{}` 引数を追加し、unwatch した descendant
+  path をその場で `acc.removedPaths` に登録するように変更。subtree Remove
+  の直後に descendant 単独の `IN_DELETE_SELF` が同 debounce window 内に届いた
+  とき、`watchedDirs` から既に消えた image-extension dir (`photos.jpg/`) が
+  image branch に fall-through して `removedFiles++` に誤計上される race を
+  `acc.removedPaths` の per-window dedup で吸収する。`TestClassify_SubtreeRemoveTombstonesDescendants`
+  で classify-level に pin (thread A)。§7.1 の `removeSubtreeFromWatch`
+  説明にも tombstone の役割を追記。(2) `docs/todo.md` J-2 のローカル件数
+  参照コマンドに「CI と同じく `mkdir -p frontend/dist && touch frontend/dist/.ci-placeholder`
+  を先に実行」前提を追記 (`//go:embed all:frontend/dist` を満たすため、
+  thread B)。(3) `AGENTS.md` H-8 race マトリクスを実装と揃える: Start IPC
+  success/fail の `mode (post-await)` を `✓` に修正 (現行
+  `dispatchWatchIntentRef` は `.then` / `.catch` の両方で `watchModeRef.current`
+  を再確認している、thread C)。ローカル mutation success 2 行 (`saveEdit /
+  deleteOne` と `resolveConflictForce / resolveMergeMerge / resolveMergeSkip`)
+  の `folder check` を `✓` に修正 (全経路で disk IPC 後の state commit / reload
+  前に `folderRef.current === cur/target` を check している、thread D)。
 
 ---
 
@@ -616,12 +634,17 @@ walk + 各サブフォルダを `w.Add`** する。これにより:
 - 同じ walk で発見した既存画像ファイルは `addedFiles` に集計 (バルク mv の
   サマリを payload に正しく反映するため)
 
-Remove / Rename では **`removeSubtreeFromWatch(st, ev.Name)` で `ev.Name` および
-配下の watch path を一括解除** する (#75 15th)。単一の `w.Remove` だけでは
-descendant の inode-tracked watch が残り、rename out で moved 先 subtree の
-変更が現 root の event として流れ続けて「現在フォルダのみ監視」前提を破る。
-Linux inotify は dir 削除時に `IN_IGNORED` で watch を自動解除するが、明示
-`w.Remove` は冪等性確保用 (エラーは黙殺、auto-evict 済みも許容)。
+Remove / Rename では **`removeSubtreeFromWatch(st, ev.Name, acc.removedPaths)`
+で `ev.Name` および配下の watch path を一括解除** する (#75 15th)。単一の
+`w.Remove` だけでは descendant の inode-tracked watch が残り、rename out で
+moved 先 subtree の変更が現 root の event として流れ続けて「現在フォルダのみ
+監視」前提を破る。Linux inotify は dir 削除時に `IN_IGNORED` で watch を自動
+解除するが、明示 `w.Remove` は冪等性確保用 (エラーは黙殺、auto-evict 済みも
+許容)。解除した descendant path は同時に `acc.removedPaths` にも登録 (tombstone)
+し、subtree Remove の直後に descendant 単独の `IN_DELETE_SELF` が同 debounce
+window 内に届いたとき、`watchedDirs` から既に消えた image-extension dir
+(`photos.jpg/`) が image branch に fall-through して `removedFiles++` に誤計上
+される race を予防する (#75 23rd, thread A)。
 
 ### 7.2 イベント分類
 

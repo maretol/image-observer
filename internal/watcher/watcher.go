@@ -638,7 +638,11 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, st *watch
 			// path, violating "current folder only" (PR #75 15th,
 			// thread B). removeSubtreeFromWatch is a no-op if ev.Name
 			// wasn't a watched dir (common case for regular files).
-			removeSubtreeFromWatch(st, ev.Name)
+			// Tombstone every descendant we unwatch into acc.removedPaths
+			// so the IN_DELETE_SELF follow-ups for them are absorbed by
+			// the dedup above and never reach the image-file branch
+			// (PR #75 23rd, thread A).
+			removeSubtreeFromWatch(st, ev.Name, acc.removedPaths)
 			acc.anyChange = true
 			return true
 		}
@@ -686,8 +690,12 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, st *watch
 			// removeSubtreeFromWatch comment / PR #75 15th, thread C.
 			// Image-extension dirs (`photos.jpg/`) can have arbitrary
 			// nested watched dirs, and a rename moves all of their
-			// inode-tracked watches out of the tree.
-			removeSubtreeFromWatch(st, ev.Name)
+			// inode-tracked watches out of the tree. Tombstone the
+			// unwatched descendants into acc.removedPaths so their
+			// own IN_DELETE_SELF events are absorbed by the dedup
+			// above and don't fall through to the image branch with
+			// wasDir=false (PR #75 23rd, thread A).
+			removeSubtreeFromWatch(st, ev.Name, acc.removedPaths)
 			acc.anyChange = true
 		} else {
 			acc.removedFiles++
@@ -731,13 +739,24 @@ func isHiddenName(name string) bool {
 // path), violating the "current folder only" invariant (PR #75 15th,
 // threads B/C). w.Remove errors are ignored: a watch may already have
 // been auto-evicted via IN_IGNORED.
-func removeSubtreeFromWatch(st *watchState, prefix string) {
+//
+// `tombstone` (if non-nil) receives every path that was unwatched. The
+// caller passes acc.removedPaths so any follow-up Remove / Rename event
+// for a descendant arriving within the same debounce window hits the
+// existing dedup guard instead of being misclassified — descendants like
+// `photos.jpg/` (a directory with an image extension) would otherwise
+// fall through to the image-file branch and over-count removedFiles once
+// they've already been deleted from watchedDirs (PR #75 23rd, thread A).
+func removeSubtreeFromWatch(st *watchState, prefix string, tombstone map[string]struct{}) {
 	sep := string(filepath.Separator)
 	prefixWithSep := prefix + sep
 	for d := range st.watchedDirs {
 		if d == prefix || strings.HasPrefix(d, prefixWithSep) {
 			delete(st.watchedDirs, d)
 			_ = st.watcher.Remove(d)
+			if tombstone != nil {
+				tombstone[d] = struct{}{}
+			}
 		}
 	}
 }

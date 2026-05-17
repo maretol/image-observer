@@ -528,12 +528,12 @@ supersede しない」セマンティクス (= 自分の commit が他経路の 
 | replay (no-reload 経路) | – | ✓ | ✓ | – | – | – | – | ✓ |
 | auto-load on mount (loadInternal) | bump | ✓ | – | – | ✓ | ✓ | – | – |
 | silent recheck after Start | **snapshot** | ✓ | – | ✓ | ✓ | – | – | – |
-| Start IPC success | – | ✓ | ✓ | – | – | – | ✓ | – |
-| Start IPC fail | – | ✓ | ✓ | – | – | – | ✓ | – |
+| Start IPC success | – | ✓ | ✓ | ✓ | – | – | ✓ | – |
+| Start IPC fail | – | ✓ | ✓ | ✓ | – | – | ✓ | – |
 | Stop IPC success | – | – | – | – | – | – | ✓ | – |
 | Stop IPC fail | – | – | – | – | – | – | ✓ | – |
-| ローカル mutation success (saveEdit / deleteOne) | bump | – | – | – | – | – | – | – |
-| ローカル mutation success (resolveConflictForce / resolveMergeMerge / resolveMergeSkip) | bump | – | – | – | – | – | – | – |
+| ローカル mutation success (saveEdit / deleteOne) | bump | ✓ | – | – | – | – | – | – |
+| ローカル mutation success (resolveConflictForce / resolveMergeMerge / resolveMergeSkip) | bump | ✓ | – | – | – | – | – | – |
 | ローカル mutation コンフリクトリトライ (loadInternal null) | – (早期 return) | – | – | – | – | – | – | – |
 | postLoadFlow (await を跨ぐ side-effect 経路) | – | ✓ (各 await 後) | – | – | – | – | – | – |
 

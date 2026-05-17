@@ -948,6 +948,71 @@ func TestClassify_WriteOnImageTriggersTimerWithoutBumpingCounters(t *testing.T) 
 	}
 }
 
+// TestClassify_SubtreeRemoveTombstonesDescendants verifies that a Remove
+// event on a watched ancestor directory tombstones every descendant path
+// into acc.removedPaths, so a follow-up Remove arriving for one of those
+// descendants in the same debounce window is absorbed by the dedup guard
+// instead of falling through to the image-file branch. PR #75 23rd,
+// thread A: descendants like `photos.jpg/` (a directory whose name carries
+// an image extension) are particularly vulnerable — once their entry in
+// st.watchedDirs has been cleaned by removeSubtreeFromWatch, the wasDir
+// check fails and imgfile.IsImage(base) classifies them as an image file
+// removal, inflating removedFiles.
+func TestClassify_SubtreeRemoveTombstonesDescendants(t *testing.T) {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	defer w.Close()
+
+	// Simulate the state right after Start: parent + an image-extension
+	// descendant dir are both in watchedDirs. No actual on-disk tree
+	// is needed because classifyAndAccumulate only consults st.watchedDirs
+	// for the wasDir check (Remove path is already gone, so Lstat would
+	// fail and the dir branch deliberately avoids it — see comment at
+	// line ~674).
+	parent := "/root/parent"
+	imageDir := "/root/parent/photos.jpg"
+	st := newClassifyTestState(w)
+	st.watchedDirs[parent] = struct{}{}
+	st.watchedDirs[imageDir] = struct{}{}
+
+	acc := &changedAccumulator{}
+
+	// 1st event: Remove on parent. wasDir=true → anyChange path, and the
+	// new tombstone code seeds acc.removedPaths with every descendant.
+	parentEv := fsnotify.Event{Name: parent, Op: fsnotify.Remove}
+	if !classifyAndAccumulate(acc, parentEv, st) {
+		t.Fatalf("parent Remove should trigger")
+	}
+	if acc.removedFiles != 0 {
+		t.Errorf("parent Remove (dir): removedFiles got %d, want 0", acc.removedFiles)
+	}
+	if !acc.anyChange {
+		t.Errorf("parent Remove (dir): anyChange should be set")
+	}
+	if _, ok := acc.removedPaths[imageDir]; !ok {
+		t.Errorf("descendant %q not tombstoned in removedPaths after subtree unwatch", imageDir)
+	}
+
+	// 2nd event: descendant's own IN_DELETE_SELF arrives. watchedDirs no
+	// longer contains imageDir (removeSubtreeFromWatch cleaned it), AND
+	// imgfile.IsImage("photos.jpg") returns true — without the tombstone
+	// this would fall through to the image-file branch and bump
+	// removedFiles. With the tombstone seeded above, the dedup at the top
+	// of the Remove branch returns true and no counter moves.
+	descEv := fsnotify.Event{Name: imageDir, Op: fsnotify.Remove}
+	if !classifyAndAccumulate(acc, descEv, st) {
+		t.Fatalf("descendant Remove should still trigger debounce reset")
+	}
+	if acc.removedFiles != 0 {
+		t.Errorf("descendant image-ext dir Remove leaked into image branch: removedFiles got %d, want 0", acc.removedFiles)
+	}
+	if acc.renamedFiles != 0 {
+		t.Errorf("descendant image-ext dir Remove leaked into image branch: renamedFiles got %d, want 0", acc.renamedFiles)
+	}
+}
+
 func sprintN(i int) string {
 	const digits = "0123456789"
 	if i < 10 {
