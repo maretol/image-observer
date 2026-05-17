@@ -25,6 +25,7 @@ import {
   formatChangeSummary,
   type ChangedPayload,
 } from "./watcherPolicy";
+import { WATCH_MODE_AUTO, WATCH_MODE_OFF } from "../settings/watchMode";
 
 // CLASSIFICATION_CHANGED_EVENT mirrors the Go-side
 // `watcher.ClassificationChangedEvent`. There is no auto-generated TS
@@ -115,11 +116,17 @@ export type UseClassificationReturn = {
 type Opts = {
   initialList?: wstate.ListTabState | null;
   confirm: ConfirmFn;
-  // settings.watchMode: "auto" | "off". Undefined while settings are still
-  // loading; the watch effect intentionally waits in that state — Start
-  // would briefly run a watcher for users who have persisted watchMode =
-  // "off", and Stop would race with a settings-load that immediately wants
-  // a Start. The effect kicks in once settings hydrate.
+  // settings.watchMode: the WATCH_MODE_AUTO / WATCH_MODE_OFF literals
+  // (frontend/src/features/settings/watchMode.ts, pinned to the Go-side
+  // `internal/settings.WatchMode*` values via AGENTS.md D-1 drift tests).
+  // Typed as `string` because the Wails-generated `SettingsData.watchMode`
+  // is `string`; Go-side Validate guarantees one of the two literals at
+  // load time, so direct equality with the constants is safe.
+  //
+  // Undefined while settings are still loading; the watch effect intentionally
+  // waits in that state — Start would briefly run a watcher for users who
+  // have persisted watchMode = "off", and Stop would race with a settings-load
+  // that immediately wants a Start. The effect kicks in once settings hydrate.
   watchMode?: string;
 };
 
@@ -158,17 +165,26 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   const toast = useToastFn();
   const { confirm, watchMode } = opts;
 
-  // Avoid stale closures in async ops by mirroring folderPath.
-  const folderRef = useRef(folderPath);
-  useEffect(() => {
-    folderRef.current = folderPath;
-  }, [folderPath]);
-
   // Refs that the watcher event handler reads. Mirrored from state so the
   // single EventsOn callback (registered once for the hook's lifetime — see
   // the empty-deps subscription effect below) always sees the latest
   // decision-relevant values without needing a fresh closure on every state
   // change.
+  //
+  // folderRef and watchModeRef are synced during render (not in a useEffect)
+  // so that watcher events arriving between a state / prop change and the
+  // post-render effect can't slip through with a stale value. A typical
+  // failure mode: user picks folder B, setFolderPath(B) is called, but
+  // folderRef.current is still A until the post-commit effect runs. An
+  // in-flight event for folder A would then pass the "payload.folder ===
+  // folderRef.current" check and get auto-merged into the wrong list
+  // (PR #75 review). React's render phase is allowed to mutate refs —
+  // they are not part of the React state model.
+  const folderRef = useRef(folderPath);
+  folderRef.current = folderPath;
+  const watchModeRef = useRef<string | undefined>(opts.watchMode);
+  watchModeRef.current = opts.watchMode;
+
   const editingRef = useRef<EditingState>(editing);
   useEffect(() => {
     editingRef.current = editing;
@@ -205,15 +221,30 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // from any one of them could clobber the others (PR #75 review).
   const requestGenRef = useRef(0);
 
+  // loadingTokenRef is bumped *only* by loadInternal (the paths that set
+  // `loading: true`). The spinner-release in loadInternal's finally checks
+  // this token, not requestGenRef — otherwise a watcher event arriving while
+  // a manual Load is awaiting would bump the shared generation, the manual
+  // Load's stale-check would skip setLoading(false), and the spinner would
+  // hang because the watcher path never touched `loading` in the first place
+  // (PR #75 review).
+  const loadingTokenRef = useRef(0);
+
   const loadInternal = useCallback(
-    async (path: string) => {
+    async (
+      path: string,
+    ): Promise<classification.LoadResult | null> => {
       const myGen = ++requestGenRef.current;
+      const myLoadToken = ++loadingTokenRef.current;
       setLoading(true);
       setError(null);
       try {
         const res = await LoadClassification(path);
-        // Discard if a newer Load (from any path) has started.
-        if (myGen !== requestGenRef.current) return res;
+        // Stale → return null so callers (openFolder / autoLoad) skip
+        // postLoadFlow against a now-superseded folder. Returning the
+        // success result let the caller's downstream side-effects fire
+        // against the wrong folder (PR #75 review thread #1).
+        if (myGen !== requestGenRef.current) return null;
         setLoadResult(res);
         return res;
       } catch (e) {
@@ -224,10 +255,11 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         toast(`読み込みに失敗しました: ${msg}`, "error");
         return null;
       } finally {
-        // Only the latest generation flips the loading flag back; a stale
-        // request leaves it true because the newer one is still in flight
-        // (or has already cleared it).
-        if (myGen === requestGenRef.current) {
+        // Only the latest loadInternal invocation releases the spinner.
+        // Watcher / replay Loads don't touch loadingTokenRef, so they can
+        // never strand it; manual Loads supersede each other and only the
+        // newest one clears.
+        if (myLoadToken === loadingTokenRef.current) {
           setLoading(false);
         }
       }
@@ -305,11 +337,21 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       return;
     }
     if (!picked) return; // user cancelled
+    // Sync folderRef synchronously before triggering the state update so
+    // any in-flight watcher event for the OLD folder is rejected by the
+    // handler's "payload.folder === folderRef.current" check, instead of
+    // sneaking through during the gap between setFolderPath() and the
+    // next render (PR #75 review).
+    folderRef.current = picked;
     setFolderPath(picked);
     // Folder change invalidates filename-keyed selection (and its anchor).
     setSelected(new Set());
     setSelectAnchor(null);
     const res = await loadInternal(picked);
+    // loadInternal returns null on stale (a newer Load superseded us) as
+    // well as on error. In both cases the postLoadFlow's merge / create-
+    // empty prompts must not run against an already-superseded folder
+    // (PR #75 review thread #1).
     if (!res) return;
     await postLoadFlow(picked, res);
   }, [loadInternal, postLoadFlow, toast]);
@@ -442,6 +484,14 @@ export function useClassification(opts: Opts): UseClassificationReturn {
 
   const handleWatcherPayload = useCallback(
     async (payload: ChangedPayload) => {
+      if (watchModeRef.current === WATCH_MODE_OFF) {
+        // The user disabled monitoring; StopFolderWatch() can't recall
+        // events that were already dispatched into JS land. Drop them at
+        // the handler boundary so a payload in flight at the moment of
+        // off-switch doesn't auto-merge after the user opted out
+        // (PR #75 review thread#3).
+        return;
+      }
       if (payload.folder !== folderRef.current) {
         // Stale residual from a watcher that hadn't been torn down yet, or
         // the user switched folders mid-flush. Drop quietly.
@@ -474,6 +524,11 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       // Discard the success result for the same reasons.
       if (myGen !== requestGenRef.current) return;
       if (folderRef.current !== payload.folder) return;
+      // Successful Load (including silent self-echo paths) is a
+      // confirmation that the folder is readable; clear any leftover
+      // error from a previous failed reload so the UI doesn't keep
+      // showing it after we've recovered (PR #75 review suppressed-c).
+      setError(null);
 
       // Self-echo / no-op detection. Our own Save/Delete IPCs cause watcher
       // events too, and surfacing "外部で更新されました" for them is just
@@ -554,13 +609,28 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       // immediately want a Start (PR #75 review).
       return;
     }
-    if (!folderPath || watchMode === "off") {
-      // Either no folder to watch or the user disabled monitoring; Stop is
-      // a no-op when nothing is running.
-      void StopFolderWatch();
+    if (!folderPath || watchMode === WATCH_MODE_OFF) {
+      // Either no folder to watch or the user disabled monitoring. Stop is
+      // a no-op when nothing is running. Also drop any parked auto-merge
+      // result — replaying it later (when an editing popover closes) would
+      // surprise a user who explicitly opted out (PR #75 review
+      // suppressed-g).
+      pendingResultRef.current = null;
+      void StopFolderWatch().catch((e) => {
+        // Swallow into the log so an unhandled rejection doesn't bubble
+        // up through window.onerror (PR #75 review suppressed-f).
+        logger.warn("watcher", "stop failed", { err: errorMessage(e) });
+      });
       return;
     }
     void StartFolderWatch(folderPath).catch((e) => {
+      // Stale check: if the user has switched folders or disabled
+      // monitoring since this Start was issued, the failure belongs to a
+      // watcher we no longer care about — surfacing it would mis-attribute
+      // a Start("A") failure to the current Start("B") (PR #75 review
+      // suppressed-e).
+      if (folderRef.current !== folderPath) return;
+      if (watchModeRef.current !== WATCH_MODE_AUTO) return;
       const msg = errorMessage(e);
       toast(
         "自動監視を開始できませんでした (再読み込みボタンで手動更新してください)",
@@ -621,6 +691,13 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   const performReplay = useCallback(async () => {
     const pending = pendingResultRef.current;
     if (!pending) return;
+    if (watchModeRef.current === WATCH_MODE_OFF) {
+      // The user disabled monitoring while we held this parked auto-merge
+      // result. Commit-on-defer-close would surprise them by reflecting an
+      // external change they opted out of (PR #75 review suppressed-g).
+      pendingResultRef.current = null;
+      return;
+    }
     if (pending.folder !== folderRef.current) {
       // Folder switched while parked; the stored result is for the wrong
       // tab. Drop it; a fresh watcher event for the current folder will
@@ -629,6 +706,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       return;
     }
     let fresh = pending.fresh;
+    let reloadedFresh = false;
     const cur = loadResultRef.current;
     if (cur && cur.mtime !== fresh.mtime) {
       // mtime advanced past the park snapshot, which means we (or another
@@ -640,6 +718,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       const myGen = ++requestGenRef.current;
       try {
         fresh = await LoadClassification(folderRef.current);
+        reloadedFresh = true;
       } catch (e) {
         // Drop if a newer request superseded us mid-await (the watcher
         // handler's success path will commit instead).
@@ -660,6 +739,12 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       // back (PR #75 review).
       if (myGen !== requestGenRef.current) return;
       if (folderRef.current !== pending.folder) return;
+    }
+    if (reloadedFresh) {
+      // Clear any leftover error from a previous failed reload — the
+      // replay succeeded so the UI should not keep showing it
+      // (PR #75 review suppressed-d).
+      setError(null);
     }
     const fnames = new Set(fresh.entries.map((e) => e.filename));
     const action = decideAutoMerge({
