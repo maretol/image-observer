@@ -1,5 +1,6 @@
 import type { Settings } from "../useSettings";
 import { Field, Segment } from "../SettingsFields";
+import { WATCH_MODE_AUTO, WATCH_MODE_OFF } from "../watchMode";
 
 const MULTI_SELECT_MODES: Array<{
   value: string;
@@ -19,6 +20,23 @@ const MULTI_SELECT_MODES: Array<{
   },
 ];
 
+const WATCH_MODES: Array<{
+  value: string;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: WATCH_MODE_AUTO,
+    label: "自動",
+    hint: "外部で追加 / 削除された画像と分類データの変更を自動反映",
+  },
+  {
+    value: WATCH_MODE_OFF,
+    label: "オフ",
+    hint: "再読み込みボタンを押した時だけ更新",
+  },
+];
+
 export function ListSection({
   data,
   onChange,
@@ -27,16 +45,29 @@ export function ListSection({
   onChange: (patch: Partial<Settings>) => void;
 }) {
   return (
-    <Field
-      label="複数選択 UI"
-      hint="チェックボックスは Card 左上のチェックで操作、修飾キーは Ctrl+クリック (トグル) と Shift+クリック (範囲選択) で操作します"
-    >
-      <Segment
-        name="multiSelectMode"
-        options={MULTI_SELECT_MODES}
-        value={data.multiSelectMode}
-        onChange={(v) => onChange({ multiSelectMode: v })}
-      />
-    </Field>
+    <>
+      <Field
+        label="複数選択 UI"
+        hint="チェックボックスは Card 左上のチェックで操作、修飾キーは Ctrl+クリック (トグル) と Shift+クリック (範囲選択) で操作します"
+      >
+        <Segment
+          name="multiSelectMode"
+          options={MULTI_SELECT_MODES}
+          value={data.multiSelectMode}
+          onChange={(v) => onChange({ multiSelectMode: v })}
+        />
+      </Field>
+      <Field
+        label="フォルダ自動監視"
+        hint="自動: 外部で画像が追加 / 削除されたり _classification.json が書き換えられると、短い遅延の後に一覧へ反映されます。オフ: 自動更新を行わず、再読み込みボタンを押した時のみ最新化します"
+      >
+        <Segment
+          name="watchMode"
+          options={WATCH_MODES}
+          value={data.watchMode}
+          onChange={(v) => onChange({ watchMode: v })}
+        />
+      </Field>
+    </>
   );
 }

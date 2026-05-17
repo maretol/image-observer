@@ -129,6 +129,7 @@ function AppInner({ initialState }: AppInnerProps) {
   const classification = useClassification({
     initialList: initialState?.list ?? null,
     confirm,
+    watchMode: settings.data?.watchMode,
   });
 
   // List-tab scroll position (#40). Owned here so it survives the

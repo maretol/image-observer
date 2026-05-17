@@ -181,6 +181,7 @@ export namespace settings {
 	    thumbnailWorkerCount: number;
 	    tagColors: Record<string, string>;
 	    uiScalePercent: number;
+	    watchMode: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsData(source);
@@ -198,6 +199,7 @@ export namespace settings {
 	        this.thumbnailWorkerCount = source["thumbnailWorkerCount"];
 	        this.tagColors = source["tagColors"];
 	        this.uiScalePercent = source["uiScalePercent"];
+	        this.watchMode = source["watchMode"];
 	    }
 	}
 

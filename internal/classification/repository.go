@@ -81,15 +81,37 @@ func (fileRepo) SaveJSON(folderPath string, c *Classification, expectedMtime int
 
 	// Conflict check: if expectedMtime is set, compare against current mtime.
 	if expectedMtime > 0 {
-		if info, err := os.Stat(jsonPath); err == nil {
+		info, err := os.Stat(jsonPath)
+		switch {
+		case err == nil:
+			// A directory now occupies the sidecar path (e.g. the user
+			// or an external tool replaced the file with a same-named
+			// dir between Load and Save). Mtime may even match by
+			// coincidence, so the equality check below isn't enough.
+			// The subsequent backup / WriteFile / Rename would fail
+			// with an opaque IO error far from the actual cause;
+			// surface it as ErrConflict so the frontend's standard
+			// conflict dialog gives the user a choice, same as the
+			// file-gone case below (PR #75 25th, thread B).
+			if info.IsDir() {
+				return 0, ErrConflict
+			}
 			if info.ModTime().UnixMilli() != expectedMtime {
 				return 0, ErrConflict
 			}
-		} else if !os.IsNotExist(err) {
+		case os.IsNotExist(err):
+			// The file went away entirely between Load and Save (the
+			// user was editing, an external delete removed the sidecar).
+			// expectedMtime was non-zero, meaning the caller observed
+			// the file at Load — re-creating it silently here would
+			// silently overwrite whatever caused the delete (e.g. an
+			// AI tool resetting state). Surface as ErrConflict so the
+			// frontend's standard conflict dialog gives the user a
+			// choice (PR #75 16th, thread E).
+			return 0, ErrConflict
+		default:
 			return 0, fmt.Errorf("stat for conflict check: %w", err)
 		}
-		// If the file went away entirely, treat that as a conflict too —
-		// the user's edits no longer have a target they expected to update.
 	}
 
 	// Backup existing JSON (best-effort; missing is fine for first save).

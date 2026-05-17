@@ -66,6 +66,14 @@ export function SaveState(arg1) {
   return window['go']['main']['App']['SaveState'](arg1);
 }
 
+export function StartFolderWatch(arg1) {
+  return window['go']['main']['App']['StartFolderWatch'](arg1);
+}
+
+export function StopFolderWatch() {
+  return window['go']['main']['App']['StopFolderWatch']();
+}
+
 export function UpdateClassificationEntry(arg1, arg2, arg3) {
   return window['go']['main']['App']['UpdateClassificationEntry'](arg1, arg2, arg3);
 }
