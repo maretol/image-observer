@@ -69,16 +69,23 @@ export type AutoMergeAction =
 
 /**
  * decideAutoMerge picks the right reaction to an incoming `classification:changed`
- * event. The policy is:
+ * event. Per spec-folder-watch.md §5.3 / §13.8:
  *
  *   - mergePrompt or conflict open → defer (their semantics depend on the
  *     captured mtime / preview being stable until the user resolves)
- *   - editing open + the edited file is GONE in fresh entries →
- *     "commit-editing-removed" (spec §5.3 exception, close popover + warn)
- *   - editing open + file still present → commit (the popover keeps its local
- *     draft; loadResult patches around it cleanly because EditPopover looks
- *     entries up by filename each render)
+ *   - editing open AND the edited file is gone in fresh entries →
+ *     "commit-editing-removed" exception: close the popover with a warn and
+ *     commit immediately (the user can't usefully save a deleted target)
+ *   - editing open AND the edited file still exists → defer; if we committed
+ *     here we'd advance `loadResult.mtime` to the externally-bumped value
+ *     and the user's next save (still using the old draft) would slip past
+ *     the mtime-conflict check, silently overwriting the external change
+ *     (PR #75 review thread #1)
  *   - otherwise → commit
+ *
+ * The deferral-close handler in useClassification replays the parked
+ * payload through this same function so the exception still fires if the
+ * editing target was removed while we were deferring.
  */
 export function decideAutoMerge(ctx: AutoMergeContext): AutoMergeAction {
   if (ctx.mergePromptOpen || ctx.conflictOpen) {
@@ -91,6 +98,7 @@ export function decideAutoMerge(ctx: AutoMergeContext): AutoMergeAction {
         filename: ctx.editingFilename,
       };
     }
+    return { kind: "defer" };
   }
   return { kind: "commit" };
 }

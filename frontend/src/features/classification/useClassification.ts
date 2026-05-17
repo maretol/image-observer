@@ -377,6 +377,36 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // It reads decision-relevant state via refs so the listener can stay
   // bound for the full (folderPath, watchMode) lifetime; otherwise we'd
   // tear down + re-subscribe on every keystroke or selection change.
+  //
+  // loadResultRef mirrors loadResult so the handler can compare the incoming
+  // re-Load to what we already display without depending on loadResult
+  // (which would force a re-subscribe each render).
+  const loadResultRef = useRef<classification.LoadResult | null>(loadResult);
+  useEffect(() => {
+    loadResultRef.current = loadResult;
+  }, [loadResult]);
+
+  // commitFreshResult swaps loadResult to the watcher-supplied snapshot AND
+  // drops any selected filenames that no longer exist on disk. The bulk
+  // toolbar / "open many" actions otherwise hand stale paths to the viewer
+  // (PR #75 review).
+  const commitFreshResult = useCallback(
+    (fresh: classification.LoadResult, fnames: ReadonlySet<string>) => {
+      setLoadResult(fresh);
+      setSelected((cur) => {
+        if (cur.size === 0) return cur;
+        let changed = false;
+        const next = new Set<string>();
+        for (const f of cur) {
+          if (fnames.has(f)) next.add(f);
+          else changed = true;
+        }
+        return changed ? next : cur;
+      });
+    },
+    [],
+  );
+
   const handleWatcherPayload = useCallback(
     async (payload: ChangedPayload) => {
       if (payload.folder !== folderRef.current) {
@@ -384,16 +414,18 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         // the user switched folders mid-flush. Drop quietly.
         return;
       }
-      const summary = formatChangeSummary(payload);
-      if (summary) toast(summary, "info");
 
       let fresh: classification.LoadResult | null = null;
       try {
         fresh = await LoadClassification(folderRef.current);
       } catch (e) {
-        logger.warn("classification", "auto-merge load failed", {
-          err: errorMessage(e),
-        });
+        // Mirror the manual-reload error path so a deleted / unreadable
+        // folder surfaces to the user instead of silently leaving a stale
+        // grid (PR #75 review).
+        const msg = errorMessage(e);
+        setError(msg);
+        toast(`読み込みに失敗しました: ${msg}`, "error");
+        logger.warn("classification", "auto-merge load failed", { err: msg });
         return;
       }
       if (folderRef.current !== payload.folder) {
@@ -401,6 +433,28 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         // to avoid clobbering the new folder's state with the old one.
         return;
       }
+
+      // Self-echo / no-op detection. Our own Save/Delete IPCs cause watcher
+      // events too, and surfacing "外部で更新されました" for them is just
+      // noise (PR #75 review thread #3, spec §5.4). When entries content
+      // matches what we already display:
+      //   - mtime also equal → fully silent (true no-op or self-echo)
+      //   - mtime differs    → silent update so the user's next save still
+      //     uses the freshest expectedMtime in the conflict check
+      const cur = loadResultRef.current;
+      const entriesUnchanged =
+        cur != null && entriesEquivalent(cur.entries, fresh.entries);
+      if (entriesUnchanged && cur != null && cur.mtime === fresh.mtime) {
+        return;
+      }
+      if (entriesUnchanged) {
+        setLoadResult(fresh);
+        return;
+      }
+
+      const summary = formatChangeSummary(payload);
+      if (summary) toast(summary, "info");
+
       const fnames = new Set(fresh.entries.map((e) => e.filename));
       const action = decideAutoMerge({
         editingOpen: editingRef.current.open,
@@ -417,14 +471,14 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         case "commit-editing-removed":
           toast(`${action.filename} は外部で削除されました`, "warn");
           setEditing({ open: false, filename: null });
-          setLoadResult(fresh);
+          commitFreshResult(fresh, fnames);
           return;
         case "commit":
-          setLoadResult(fresh);
+          commitFreshResult(fresh, fnames);
           return;
       }
     },
-    [toast],
+    [toast, commitFreshResult],
   );
 
   // Lifecycle is split into two effects to avoid a Start/Stop IPC race when
@@ -443,6 +497,14 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   //      is alive is when watchMode flips to "off" or folderPath clears
   //      (handled in effect 1's early-return branch).
   useEffect(() => {
+    if (watchMode == null) {
+      // Settings haven't arrived yet; do nothing. Starting now would briefly
+      // run a watcher for a user who has explicitly persisted watchMode = "off"
+      // (their preference loads a few hundred ms after mount, see App.tsx →
+      // useSettings). Stopping now would race with a settings-load that may
+      // immediately want a Start (PR #75 review).
+      return;
+    }
     if (!folderPath || watchMode === "off") {
       // Either no folder to watch or the user disabled monitoring; Stop is
       // a no-op when nothing is running.
@@ -485,8 +547,9 @@ export function useClassification(opts: Opts): UseClassificationReturn {
 
   // Deferral-close: when both conflict and mergePrompt are closed AND a
   // pending result has been parked, commit it (re-running the decision so
-  // an editing-target-removed exception that arose while deferred still
-  // fires the warn + close path).
+  // the editing-target-removed exception still fires if it arose while we
+  // were deferring; if editing is still open with target present we keep
+  // deferring — saved by the *next* close trigger).
   const wasInDeferRef = useRef(false);
   useEffect(() => {
     const inDefer = mergePrompt.open || conflict !== null;
@@ -495,7 +558,6 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     if (!(wasInDefer && !inDefer)) return;
     const fresh = pendingResultRef.current;
     if (!fresh) return;
-    pendingResultRef.current = null;
     const fnames = new Set(fresh.entries.map((e) => e.filename));
     const action = decideAutoMerge({
       editingOpen: editingRef.current.open,
@@ -504,12 +566,35 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       mergePromptOpen: false,
       freshFilenames: fnames,
     });
+    if (action.kind === "defer") {
+      // editing is still open with target present → keep the result parked
+      // until editing closes (closeEdit's effect below picks it up).
+      return;
+    }
+    pendingResultRef.current = null;
     if (action.kind === "commit-editing-removed") {
       toast(`${action.filename} は外部で削除されました`, "warn");
       setEditing({ open: false, filename: null });
     }
-    setLoadResult(fresh);
-  }, [mergePrompt.open, conflict, toast]);
+    commitFreshResult(fresh, fnames);
+  }, [mergePrompt.open, conflict, toast, commitFreshResult]);
+
+  // Editing-close replay: editing.open transitioning false → true never
+  // matters here; false → true matters when there's a parked payload.
+  const wasEditingOpenRef = useRef(editing.open);
+  useEffect(() => {
+    const wasOpen = wasEditingOpenRef.current;
+    wasEditingOpenRef.current = editing.open;
+    if (!(wasOpen && !editing.open)) return;
+    // editing just closed; don't replay if conflict/merge still hold the
+    // defer (they'll trigger their own replay when they close).
+    if (mergePromptOpenRef.current || conflictRef.current !== null) return;
+    const fresh = pendingResultRef.current;
+    if (!fresh) return;
+    pendingResultRef.current = null;
+    const fnames = new Set(fresh.entries.map((e) => e.filename));
+    commitFreshResult(fresh, fnames);
+  }, [editing.open, commitFreshResult]);
 
   const openEdit = useCallback((filename: string) => {
     setEditing({ open: true, filename });
@@ -828,4 +913,30 @@ function normalizeConfidence(c: string): Confidence | "all" {
     default:
       return "all";
   }
+}
+
+// entriesEquivalent: order-sensitive shallow compare of every Entry field
+// the user cares about. Used by the watcher auto-merge handler to detect
+// "the fresh re-Load matches what we already display" so we don't spam the
+// user with toast notifications for our own Save/Delete echoes
+// (PR #75 review thread #3). Service.Load returns entries in a stable
+// (sidecar-order then alphabetical) sequence so ordered comparison is safe.
+function entriesEquivalent(
+  a: classification.Entry[],
+  b: classification.Entry[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.filename !== y.filename ||
+      x.folder !== y.folder ||
+      x.confidence !== y.confidence ||
+      x.note !== y.note
+    ) {
+      return false;
+    }
+  }
+  return true;
 }

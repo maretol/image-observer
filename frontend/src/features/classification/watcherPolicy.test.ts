@@ -68,7 +68,11 @@ describe("decideAutoMerge", () => {
     expect(out).toEqual({ kind: "defer" });
   });
 
-  it("commits when editing is open and the target still exists", () => {
+  it("defers when editing is open and the target still exists", () => {
+    // Per spec-folder-watch.md §13.8 we must defer rather than commit here:
+    // committing would refresh loadResult.mtime to the just-bumped external
+    // value, and the user's next save (still based on their pre-edit mtime
+    // snapshot) would slip past the conflict-detection check.
     const out = decideAutoMerge(
       baseCtx({
         editingOpen: true,
@@ -76,7 +80,7 @@ describe("decideAutoMerge", () => {
         freshFilenames: new Set(["a.png", "b.jpg"]),
       }),
     );
-    expect(out).toEqual({ kind: "commit" });
+    expect(out).toEqual({ kind: "defer" });
   });
 
   it("commit-editing-removed when editing target is gone", () => {
