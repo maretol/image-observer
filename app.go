@@ -16,24 +16,51 @@ import (
 	"image-observer/internal/settings"
 	"image-observer/internal/state"
 	"image-observer/internal/thumb"
+	"image-observer/internal/watcher"
 )
+
+// classificationChangedEvent is the Wails event name the watcher emits on.
+// Frontend subscribes via `EventsOn("classification:changed", ...)` —
+// see docs/spec-folder-watch.md §4.2 / §6.2.
+const classificationChangedEvent = "classification:changed"
 
 type App struct {
 	ctx            context.Context
 	classification *classification.Service
+	watch          *watcher.Manager
 }
 
 func NewApp() *App {
-	return &App{
+	a := &App{
 		classification: classification.NewService(
 			classification.NewFileRepository(),
 			classification.NewFileScanner(),
 		),
 	}
+	// The Manager is constructed early so Start/Stop bindings always have a
+	// non-nil receiver; the actual EventsEmit needs ctx, so the emit callback
+	// closes over `a` and pulls a.ctx lazily at flush time.
+	a.watch = watcher.NewManager(func(p watcher.ChangedPayload) {
+		if a.ctx == nil {
+			return
+		}
+		runtime.EventsEmit(a.ctx, classificationChangedEvent, p)
+	})
+	return a
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+// shutdown is invoked from main's OnShutdown hook. Tears down the active
+// folder watch so inotify FDs / goroutines don't leak on app close.
+//
+// The ctx parameter is unused — Wails just calls this with the same context
+// passed to OnStartup, but the watcher's lifecycle is managed via its own
+// stop channel internally so we don't need the ctx here.
+func (a *App) shutdown(_ context.Context) {
+	_ = a.watch.Stop()
 }
 
 // OpenFolderDialog opens the native folder selection dialog.
@@ -175,6 +202,39 @@ func (a *App) DeleteImage(folderPath, filename string) error {
 	logging.Info("imgfile", "deleted",
 		"folder", cleanedFolder, "filename", cleanedName, "mode", "trash")
 	return nil
+}
+
+// StartFolderWatch begins (or restarts) the file-system watcher on
+// folderPath. While active, the watcher emits the "classification:changed"
+// Wails event after every 200 ms of quiet — see docs/spec-folder-watch.md.
+//
+// folderPath must be absolute. Calling Start on the currently-watched
+// folder is a no-op; calling Start with a different folder transparently
+// stops the old watch first.
+//
+// Errors are non-fatal for the app: the frontend treats Start failure as
+// "degraded mode" (manual reload only). The frontend is responsible for
+// honoring settings.WatchMode — Go side just starts whenever asked.
+func (a *App) StartFolderWatch(folderPath string) error {
+	cleaned := strings.TrimSpace(folderPath)
+	if cleaned == "" {
+		return fmt.Errorf("watcher: folderPath must not be empty")
+	}
+	if !filepath.IsAbs(cleaned) {
+		return fmt.Errorf("watcher: folderPath must be absolute: %q", cleaned)
+	}
+	if err := a.watch.Start(cleaned); err != nil {
+		logging.Warn("watcher", "start failed",
+			"folder", cleaned, "err", err.Error())
+		return err
+	}
+	return nil
+}
+
+// StopFolderWatch tears down the active watch (if any). Idempotent — calling
+// when nothing is watched returns nil.
+func (a *App) StopFolderWatch() error {
+	return a.watch.Stop()
 }
 
 // classificationError tags conflict errors with a "CONFLICT:" prefix so the

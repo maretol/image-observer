@@ -45,6 +45,9 @@ func TestLoad_Missing_ReturnsDefaults(t *testing.T) {
 	if s.UIScalePercent != defaultUIScalePercent {
 		t.Errorf("UIScalePercent default: got %d, want %d", s.UIScalePercent, defaultUIScalePercent)
 	}
+	if s.WatchMode != WatchModeAuto {
+		t.Errorf("WatchMode default: got %q, want %q", s.WatchMode, WatchModeAuto)
+	}
 	if len(s.TagColors) == 0 {
 		t.Errorf("TagColors default should be a non-empty map (defaultTagColors)")
 	}
@@ -67,6 +70,7 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	in.ThumbnailWorkerCount = 4
 	in.TagColors = map[string]string{"alpha": "#abcdef", "beta": "#000000"}
 	in.UIScalePercent = 125
+	in.WatchMode = WatchModeOff
 	if err := Save(in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -97,6 +101,9 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	}
 	if out.UIScalePercent != 125 {
 		t.Errorf("UIScalePercent: got %d", out.UIScalePercent)
+	}
+	if out.WatchMode != WatchModeOff {
+		t.Errorf("WatchMode: got %q", out.WatchMode)
 	}
 }
 
@@ -157,6 +164,11 @@ func TestSave_RejectsInvalid(t *testing.T) {
 	if err := Save(bad); err == nil {
 		t.Errorf("Save should reject UIScalePercent above max")
 	}
+	bad = DefaultSettings()
+	bad.WatchMode = "polling"
+	if err := Save(bad); err == nil {
+		t.Errorf("Save should reject invalid WatchMode")
+	}
 }
 
 func TestSave_StampsVersion(t *testing.T) {
@@ -212,7 +224,8 @@ func TestLoad_PerFieldFallbackKeepsValidFields(t *testing.T) {
 		"thumbnailMode":        "stretch",              // invalid
 		"thumbnailWorkerCount": 8,                      // valid
 		"tagColors":            map[string]string{"keep": "#abc123", "drop": "garbage"},
-		"uiScalePercent":       9999, // out of range — should fall back
+		"uiScalePercent":       9999,     // out of range — should fall back
+		"watchMode":            "polling", // invalid → fall back
 	})
 	if err := os.WriteFile(p, bad, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -247,6 +260,9 @@ func TestLoad_PerFieldFallbackKeepsValidFields(t *testing.T) {
 	}
 	if s.UIScalePercent != defaultUIScalePercent {
 		t.Errorf("out-of-range UIScalePercent should fall back, got %d", s.UIScalePercent)
+	}
+	if s.WatchMode != WatchModeAuto {
+		t.Errorf("invalid WatchMode should fall back, got %q", s.WatchMode)
 	}
 }
 
@@ -283,6 +299,9 @@ func TestLoad_NewFieldsMissing_GetDefaults(t *testing.T) {
 	}
 	if s.UIScalePercent != defaultUIScalePercent {
 		t.Errorf("missing UIScalePercent should default, got %d", s.UIScalePercent)
+	}
+	if s.WatchMode != WatchModeAuto {
+		t.Errorf("missing WatchMode should default, got %q", s.WatchMode)
 	}
 }
 

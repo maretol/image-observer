@@ -47,6 +47,12 @@ const (
 	ThumbnailModeCrop      = "crop"
 )
 
+// Allowed values for SettingsData.WatchMode.
+const (
+	WatchModeAuto = "auto" // default: start fsnotify watcher when a folder opens
+	WatchModeOff  = "off"  // never start the watcher; user reloads manually
+)
+
 // Defaults / bounds for the numeric fields. Bounds are intentionally generous
 // — the goal is to catch garbage (negative / absurdly huge) without preventing
 // legitimate tuning.
@@ -91,6 +97,11 @@ var validThumbnailModes = map[string]struct{}{
 	ThumbnailModeCrop:      {},
 }
 
+var validWatchModes = map[string]struct{}{
+	WatchModeAuto: {},
+	WatchModeOff:  {},
+}
+
 // defaultTagColors is the seed palette used when settings.json has no
 // `tagColors` field. The frontend ships an identical literal so that
 // uninstalled / clean-config users see consistent badge colors before
@@ -133,6 +144,7 @@ type SettingsData struct {
 	ThumbnailWorkerCount int               `json:"thumbnailWorkerCount"`
 	TagColors            map[string]string `json:"tagColors"`
 	UIScalePercent       int               `json:"uiScalePercent"`
+	WatchMode            string            `json:"watchMode"`
 }
 
 // settingsFilePathOverride lets tests redirect away from the user config dir.
@@ -163,6 +175,7 @@ func DefaultSettings() SettingsData {
 		ThumbnailWorkerCount: 0, // auto
 		TagColors:            cloneTagColors(defaultTagColors),
 		UIScalePercent:       defaultUIScalePercent,
+		WatchMode:            WatchModeAuto,
 	}
 }
 
@@ -251,6 +264,9 @@ func Validate(s *SettingsData) error {
 		return fmt.Errorf("uiScalePercent out of range (%d..%d)",
 			minUIScalePercent, maxUIScalePercent)
 	}
+	if _, ok := validWatchModes[s.WatchMode]; !ok {
+		return errors.New("invalid watchMode: " + s.WatchMode)
+	}
 	for k, v := range s.TagColors {
 		if !isValidHexColor(v) {
 			return fmt.Errorf("tagColors[%q] is not a valid #rrggbb color: %q", k, v)
@@ -285,6 +301,9 @@ func applyFieldDefaults(s *SettingsData) {
 	}
 	if s.UIScalePercent < minUIScalePercent || s.UIScalePercent > maxUIScalePercent {
 		s.UIScalePercent = defaultUIScalePercent
+	}
+	if _, ok := validWatchModes[s.WatchMode]; !ok {
+		s.WatchMode = WatchModeAuto
 	}
 	// nil (field absent in JSON, e.g. upgrading from a build before this
 	// field existed) seeds the defaults so the user starts with badge colors.

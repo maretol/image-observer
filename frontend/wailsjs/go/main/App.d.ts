@@ -38,6 +38,10 @@ export function SaveClassification(arg1:string,arg2:Array<classification.Entry>,
 
 export function SaveState(arg1:state.StateData):Promise<void>;
 
+export function StartFolderWatch(arg1:string):Promise<void>;
+
+export function StopFolderWatch():Promise<void>;
+
 export function UpdateClassificationEntry(arg1:string,arg2:classification.Entry,arg3:number):Promise<classification.SaveOutput>;
 
 export function UpdateSettings(arg1:settings.SettingsData):Promise<settings.SettingsData>;

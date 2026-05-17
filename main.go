@@ -96,6 +96,9 @@ func main() {
 				runtime.WindowSetPosition(ctx, persisted.Window.X, persisted.Window.Y)
 			}
 		},
+		OnShutdown: func(ctx context.Context) {
+			app.shutdown(ctx)
+		},
 		Bind: []any{
 			app,
 		},
