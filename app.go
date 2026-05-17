@@ -216,16 +216,24 @@ func (a *App) DeleteImage(folderPath, filename string) error {
 // "degraded mode" (manual reload only). The frontend is responsible for
 // honoring settings.WatchMode — Go side just starts whenever asked.
 func (a *App) StartFolderWatch(folderPath string) error {
-	cleaned := strings.TrimSpace(folderPath)
-	if cleaned == "" {
+	// TrimSpace is only consulted to reject empty/whitespace-only input.
+	// Past Start / IsAbs we pass the original folderPath through unchanged
+	// because (a) frontend uses the un-trimmed string as folderRef.current
+	// and matches it against payload.folder for self-echo detection, and
+	// (b) silently trimming surrounding whitespace could switch the watch
+	// to a *different* on-disk folder when one of the trimmed/un-trimmed
+	// forms happens to exist. A path with stray whitespace is correctly
+	// rejected by IsAbs (Linux requires leading "/"), so we don't need to
+	// trim defensively.
+	if strings.TrimSpace(folderPath) == "" {
 		return fmt.Errorf("watcher: folderPath must not be empty")
 	}
-	if !filepath.IsAbs(cleaned) {
-		return fmt.Errorf("watcher: folderPath must be absolute: %q", cleaned)
+	if !filepath.IsAbs(folderPath) {
+		return fmt.Errorf("watcher: folderPath must be absolute: %q", folderPath)
 	}
-	if err := a.watch.Start(cleaned); err != nil {
+	if err := a.watch.Start(folderPath); err != nil {
 		logging.Warn("watcher", "start failed",
-			"folder", cleaned, "err", err.Error())
+			"folder", folderPath, "err", err.Error())
 		return err
 	}
 	return nil

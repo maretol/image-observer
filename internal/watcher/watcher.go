@@ -379,6 +379,17 @@ func (m *Manager) loop(st *watchState) {
 				if timer != nil {
 					timer.Stop()
 				}
+				// Stop concurrency: if an explicit Stop landed before we got
+				// here, honour the "discard pending" contract — the user
+				// already asked monitoring off and a trailing
+				// "watch root vanished" warn + flush after StopFolderWatch
+				// returned would be doubly misleading (no callback wanted,
+				// and root vanish is a noisy state for a folder we no longer
+				// care about). Mirrors the timer / Events !ok / st.stop
+				// branches that all skip the trailing flush on stopRequested.
+				if st.stopRequested.Load() {
+					return
+				}
 				logging.Warn("watcher", "watch root vanished",
 					"folder", st.root, "op", ev.Op.String())
 				pending.anyChange = true

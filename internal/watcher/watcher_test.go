@@ -234,6 +234,72 @@ func TestStart_SidecarWriteFlagsSidecarChanged(t *testing.T) {
 	}
 }
 
+// TestStart_SidecarRemoveFlagsSidecarChanged pins the Remove half of the
+// sidecar branch: an external delete of `_classification.json` must flip
+// SidecarChanged so the frontend's auto-merge picks up the absence
+// (entries-equivalent comparison against fresh.entries == empty entries).
+// The classify branch handles Create / Write / Remove / Rename uniformly,
+// but only Write was integration-tested before (PR #75 26th, thread C).
+func TestStart_SidecarRemoveFlagsSidecarChanged(t *testing.T) {
+	dir := t.TempDir()
+	sidecar := filepath.Join(dir, "_classification.json")
+	if err := os.WriteFile(sidecar, []byte(`{"version":1,"entries":[]}`), 0o644); err != nil {
+		t.Fatalf("seed sidecar: %v", err)
+	}
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(dir); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	if err := os.Remove(sidecar); err != nil {
+		t.Fatalf("remove sidecar: %v", err)
+	}
+
+	got := cap.waitForPayload(t, 1, time.Second)
+	if !got[0].SidecarChanged {
+		t.Errorf("SidecarChanged: got false, want true (payloads=%+v)", got)
+	}
+	if got[0].AddedFiles != 0 || got[0].RemovedFiles != 0 || got[0].RenamedFiles != 0 {
+		t.Errorf("sidecar Remove should leave file counters at 0, got %+v", got[0])
+	}
+}
+
+// TestStart_SidecarRenameSourceFlagsSidecarChanged pins the Rename source
+// half: a mv of `_classification.json` out of the watched tree must flip
+// SidecarChanged (analogous to Remove). The destination is a separate
+// unwatched tempdir so only the Rename event reaches us — keeps the
+// assertion focused on the source-side classification (PR #75 26th, thread C).
+func TestStart_SidecarRenameSourceFlagsSidecarChanged(t *testing.T) {
+	dir := t.TempDir()
+	otherDir := t.TempDir()
+	sidecar := filepath.Join(dir, "_classification.json")
+	if err := os.WriteFile(sidecar, []byte(`{"version":1,"entries":[]}`), 0o644); err != nil {
+		t.Fatalf("seed sidecar: %v", err)
+	}
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(dir); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	if err := os.Rename(sidecar, filepath.Join(otherDir, "_classification.json")); err != nil {
+		t.Fatalf("rename sidecar: %v", err)
+	}
+
+	got := cap.waitForPayload(t, 1, time.Second)
+	if !got[0].SidecarChanged {
+		t.Errorf("SidecarChanged: got false, want true (payloads=%+v)", got)
+	}
+	if got[0].AddedFiles != 0 || got[0].RemovedFiles != 0 || got[0].RenamedFiles != 0 {
+		t.Errorf("sidecar Rename should leave file counters at 0, got %+v", got[0])
+	}
+}
+
 func TestStop_HaltsFurtherEmits(t *testing.T) {
 	dir := t.TempDir()
 	cap := newCaptured()
