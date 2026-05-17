@@ -119,3 +119,63 @@ func TestDeleteImage_PathValidation(t *testing.T) {
 		}
 	})
 }
+
+// TestStartFolderWatch_PathValidation exercises the input-validation
+// portion of StartFolderWatch (empty / relative rejection) plus the
+// happy-path delegation to watcher.Manager. The Manager itself is
+// covered by internal/watcher tests; this suite makes sure the app-layer
+// wrapper doesn't silently regress its validation contract or its wiring
+// to a.watch (which NewApp constructs eagerly so bindings always have a
+// non-nil receiver — see app.go NewApp).
+//
+// PR #75 review 19th: app_test.go previously had no coverage for this
+// binding, so a regression in the wrapper would only surface at runtime.
+func TestStartFolderWatch_PathValidation(t *testing.T) {
+	app := NewApp()
+	t.Cleanup(func() { _ = app.StopFolderWatch() })
+
+	t.Run("rejects empty folderPath", func(t *testing.T) {
+		if err := app.StartFolderWatch(""); err == nil {
+			t.Fatal("expected error for empty folderPath")
+		}
+	})
+
+	t.Run("rejects whitespace-only folderPath", func(t *testing.T) {
+		// TrimSpace runs before the empty check, so "   " collapses to "".
+		if err := app.StartFolderWatch("   "); err == nil {
+			t.Fatal("expected error for whitespace-only folderPath")
+		}
+	})
+
+	t.Run("rejects relative folderPath", func(t *testing.T) {
+		err := app.StartFolderWatch("relative/folder")
+		if err == nil {
+			t.Fatal("expected error for relative folderPath")
+		}
+		if !strings.Contains(err.Error(), "absolute") {
+			t.Fatalf("error message should mention 'absolute', got: %v", err)
+		}
+	})
+
+	t.Run("accepts absolute existing directory (happy path)", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := app.StartFolderWatch(dir); err != nil {
+			t.Fatalf("expected Start to succeed on tempdir, got: %v", err)
+		}
+		// Stop is the documented way to release the inotify FD; the
+		// t.Cleanup above also calls it, but doing it here keeps the
+		// "no leaked watch between subtests" property explicit.
+		if err := app.StopFolderWatch(); err != nil {
+			t.Fatalf("Stop after happy-path Start should succeed, got: %v", err)
+		}
+	})
+
+	t.Run("Stop is idempotent when nothing is watched", func(t *testing.T) {
+		// After the previous subtest's Stop, no watch is active. A second
+		// Stop must not error — the docstring on StopFolderWatch promises
+		// idempotency.
+		if err := app.StopFolderWatch(); err != nil {
+			t.Fatalf("second Stop should be idempotent, got: %v", err)
+		}
+	})
+}
