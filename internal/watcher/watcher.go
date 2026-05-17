@@ -9,9 +9,12 @@
 //   - filter that emits on: image-file Create/Remove/Rename, sidecar JSON
 //     events, directory Create (with recursive Add of descendants), and
 //     directory / non-image Remove/Rename (treated as anyChange so the
-//     frontend re-Loads when a subtree disappears). Everything else
-//     (Write on existing files, Chmod-only, hidden paths) is silently
-//     ignored.
+//     frontend re-Loads when a subtree disappears). Image-file Write events
+//     do NOT emit on their own — counters stay unchanged — but they DO
+//     extend the debounce timer so a large image's Create→Write→Write…
+//     sequence keeps the quiet window open until the writes settle (see
+//     spec §7.2 / classifyAndAccumulate for the Write branch). Chmod-only
+//     and hidden paths are silently ignored.
 //
 // The watcher is *not* responsible for re-loading classification entries; it
 // only signals that "something inside the folder changed". The frontend
@@ -293,6 +296,27 @@ func (m *Manager) loop(st *watchState) {
 				"op", ev.Op.String(), "path", ev.Name)
 			if classifyAndAccumulate(&pending, ev, st.watcher) {
 				resetTimer()
+			}
+			// Root vanished: a Remove / Rename on the watched root itself
+			// (e.g. the user deleted or moved the folder out from under us)
+			// leaves Linux inotify's watch dangling via IN_IGNORED; we'd
+			// keep this goroutine alive forever waiting on a dead fd, and
+			// since Manager.Start short-circuits on same-root + live
+			// goroutine the next openFolder of the same path would also
+			// no-op (PR #75 9th, thread F). Flush whatever was pending so
+			// the frontend at least re-Loads (and surfaces the absence),
+			// then exit the loop. `goroutineExited` flips true via the
+			// deferred close(st.done), so the next Start of any path
+			// rebuilds from scratch.
+			if (ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename)) && ev.Name == st.root {
+				if timer != nil {
+					timer.Stop()
+				}
+				logging.Warn("watcher", "watch root vanished",
+					"folder", st.root, "op", ev.Op.String())
+				pending.anyChange = true
+				flush()
+				return
 			}
 		case err, ok := <-errCh:
 			if !ok {

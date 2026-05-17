@@ -515,6 +515,54 @@ func TestStart_SymlinkToExternalDirNotFollowed(t *testing.T) {
 	cap.expectNoPayload(t, shortDebounce*4)
 }
 
+func TestStart_RootVanishedAllowsRestart(t *testing.T) {
+	// PR #75 9th, thread F: when the watched root itself is removed /
+	// renamed, the inotify watch goes dangling (Linux IN_IGNORED). The
+	// loop must detect this and exit so that
+	//   1) `goroutineExited(st)` returns true on the next Start,
+	//   2) Manager.Start's same-root short-circuit doesn't no-op into
+	//      a dead watch when the user recreates the folder and reopens.
+	parent := t.TempDir()
+	root := filepath.Join(parent, "vanishes")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(root); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	if err := os.Remove(root); err != nil {
+		t.Fatalf("rm root: %v", err)
+	}
+	// The loop should flush an anyChange payload and exit. Wait for the
+	// payload first.
+	_ = cap.waitForPayload(t, 1, time.Second)
+
+	// Poll for the goroutine actually being gone (defer close(st.done)).
+	// Looking at m.Current() indirectly — if the loop exited, Current()
+	// still returns root until Stop / Start, but Start can detect zombie
+	// via goroutineExited. We check the recovery path by recreating root
+	// and Start-ing again: this should rebuild rather than no-op.
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatalf("mkdir recreated root: %v", err)
+	}
+	cap.reset()
+	if err := m.Start(root); err != nil {
+		t.Fatalf("Start after root vanished: %v", err)
+	}
+	// Verify the rebuilt watch is live by writing an image and waiting
+	// for the resulting payload.
+	writeImage(t, filepath.Join(root, "after-recovery.png"))
+	got := cap.waitForPayload(t, 1, time.Second)
+	if got[0].AddedFiles != 1 {
+		t.Errorf("rebuilt watch should see new image, got %+v", got[0])
+	}
+}
+
 func TestStart_ImageExtensionSymlinkCountedAsAddedFile(t *testing.T) {
 	// PR #75 review 8th, thread E: classification.scanner.go includes any
 	// path with an image extension in entries regardless of symlink status
