@@ -668,13 +668,57 @@ func TestClassify_DirCreateThenSamePathImageCreate_NoDoubleCount(t *testing.T) {
 	}
 }
 
+// TestStart_SubdirRenameOutUnwatchesDescendants verifies that renaming a
+// subdirectory out of the watched tree unwatches not just the subdirectory
+// itself but also all of its descendant directories. Linux inotify tracks
+// watches by inode (not path), so after a rename the descendant watches
+// stay alive and continue to deliver events labelled with the OLD path —
+// violating the "current folder only" invariant unless we explicitly
+// w.Remove every descendant (PR #75 15th, threads B/C).
+func TestStart_SubdirRenameOutUnwatchesDescendants(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+	parent := filepath.Join(root, "parent")
+	child := filepath.Join(parent, "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("mkdir tree: %v", err)
+	}
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(root); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// Move parent out of the watched root.
+	dst := filepath.Join(external, "moved-parent")
+	if err := os.Rename(parent, dst); err != nil {
+		t.Fatalf("rename out: %v", err)
+	}
+	// Wait for the rename event(s) to flush.
+	_ = cap.waitForPayload(t, 1, time.Second)
+	cap.reset()
+
+	// Write an image into the moved-out child. If the descendant watch
+	// was properly cleaned up, no event surfaces. If it leaked, the
+	// payload would include AddedFiles=1 for an external path.
+	writeImage(t, filepath.Join(dst, "child", "leaked.png"))
+	cap.expectNoPayload(t, shortDebounce*4)
+}
+
 // TestStart_ImageExtensionDirRemovedAsAnyChange verifies that removing a
 // directory whose name happens to carry an image extension (e.g.
 // `photos.jpg/`) does NOT bump removedFiles. PR #75 14th, thread D: the
 // classification scanner ignores directories entirely, so reporting "image
 // removed" for a removed dir over-counts. We detect the dir-vs-file
-// distinction via w.Remove's return value (non-nil = path wasn't a
-// watched dir) and surface dir removal as a generic anyChange.
+// distinction via `watchState.watchedDirs` (a per-Manager set populated by
+// addSubtree*). The earlier draft used w.Remove's return value but that
+// is timing-dependent — Linux inotify processes IN_IGNORED asynchronously
+// and may have already evicted the watch internally by the time the
+// IN_DELETE event reaches our hand-call, so the return value falsely
+// reports "not in watch list" and the path falls through to the image
+// branch. The shared dir-set avoids that race entirely.
 func TestStart_ImageExtensionDirRemovedAsAnyChange(t *testing.T) {
 	root := t.TempDir()
 	dirPath := filepath.Join(root, "looks-like-image.png")

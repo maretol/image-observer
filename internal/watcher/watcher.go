@@ -227,9 +227,15 @@ func (m *Manager) stopLocked() error {
 	return err
 }
 
-// Current returns the root of the active watch, or "" when stopped. Used by
-// tests / debug callers; production code should track the intended folder
-// independently rather than poll this.
+// Current returns the root of the last-built watcher state, or "" when no
+// state exists (= Stop'd, or never Started). Note: a non-empty return does
+// NOT guarantee the loop goroutine is still running — root vanish or a
+// backend close leaves `m.state` as a "zombie" with `goroutineExited(st) ==
+// true` until the next Stop or Start tears it down. Callers that need
+// "is monitoring actually live for this folder?" should ALSO check that
+// the next Start would no-op (i.e., not consult Current alone). Used by
+// tests / debug callers; production code tracks the intended folder
+// independently via folderRef on the JS side instead of polling this.
 func (m *Manager) Current() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -441,7 +447,14 @@ func (c *changedAccumulator) snapshot(folder string) ChangedPayload {
 func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, st *watchState) bool {
 	w := st.watcher
 	base := filepath.Base(ev.Name)
-	if isHiddenName(base) {
+	// Hidden filter applies to descendants only. The root itself is always
+	// monitored — the user explicitly opened it via the folder picker, so
+	// it deserves the same treatment scanner / addSubtree give it (= no
+	// hidden gating). Skipping the root here would drop its own
+	// Remove / Rename event when the user picked a `.foo` directory, so
+	// the root-vanish branch below never fires and the loop keeps
+	// waiting on a dead inotify fd (PR #75 15th, thread A).
+	if ev.Name != st.root && isHiddenName(base) {
 		return false
 	}
 
@@ -548,14 +561,7 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, st *watch
 	if !imgfile.IsImage(base) {
 		if ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename) {
 			// Dedup against acc.removedPaths so the IN_IGNORED / IN_DELETE_SELF
-			// follow-ups don't re-trigger this branch's anyChange flush
-			// (functionally OK but wasteful). Drop from st.watchedDirs and
-			// w.Remove the vanished path best-effort — on Linux inotify a
-			// Rename of a watched subdirectory tracks the inode (not the
-			// path), so without an explicit Remove the moved-out subtree's
-			// later events would keep flowing into THIS root's
-			// classification:changed stream — breaking the "current folder
-			// only" contract (PR #75 review).
+			// follow-ups don't re-trigger this branch's anyChange flush.
 			if acc.removedPaths == nil {
 				acc.removedPaths = make(map[string]struct{})
 			}
@@ -563,8 +569,15 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, st *watch
 				return true
 			}
 			acc.removedPaths[ev.Name] = struct{}{}
-			delete(st.watchedDirs, ev.Name)
-			_ = w.Remove(ev.Name)
+			// Unwatch the path AND all of its descendants. The vanished
+			// path may itself have been a watched subdirectory, and Linux
+			// inotify tracks watches by inode (not path) — after a rename
+			// the descendant inodes still belong to OUR watch set and
+			// would keep streaming events labelled with the original
+			// path, violating "current folder only" (PR #75 15th,
+			// thread B). removeSubtreeFromWatch is a no-op if ev.Name
+			// wasn't a watched dir (common case for regular files).
+			removeSubtreeFromWatch(st, ev.Name)
 			acc.anyChange = true
 			return true
 		}
@@ -608,8 +621,12 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, st *watch
 		// anyChange instead. For real image files we never Add'd, the
 		// path isn't in watchedDirs → bump normally (PR #75 14th, thread D).
 		if _, wasDir := st.watchedDirs[ev.Name]; wasDir {
-			delete(st.watchedDirs, ev.Name)
-			_ = w.Remove(ev.Name) // best-effort cleanup; may already be auto-evicted
+			// Unwatch the whole subtree, not just this path — see
+			// removeSubtreeFromWatch comment / PR #75 15th, thread C.
+			// Image-extension dirs (`photos.jpg/`) can have arbitrary
+			// nested watched dirs, and a rename moves all of their
+			// inode-tracked watches out of the tree.
+			removeSubtreeFromWatch(st, ev.Name)
 			acc.anyChange = true
 		} else {
 			acc.removedFiles++
@@ -642,6 +659,26 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, st *watch
 // hidden attribute is not consulted (deliberate v1 limit).
 func isHiddenName(name string) bool {
 	return strings.HasPrefix(name, ".")
+}
+
+// removeSubtreeFromWatch unwatches every path in st.watchedDirs that is
+// equal to or under `prefix`, calling w.Remove for each. Used when a
+// watched directory disappears from the tree (Remove / Rename) — without
+// removing its descendants too, their inotify watches stay alive (Linux
+// tracks them by inode, so a rename moves the watched inode out of our
+// tree while we still receive its events labelled with the original
+// path), violating the "current folder only" invariant (PR #75 15th,
+// threads B/C). w.Remove errors are ignored: a watch may already have
+// been auto-evicted via IN_IGNORED.
+func removeSubtreeFromWatch(st *watchState, prefix string) {
+	sep := string(filepath.Separator)
+	prefixWithSep := prefix + sep
+	for d := range st.watchedDirs {
+		if d == prefix || strings.HasPrefix(d, prefixWithSep) {
+			delete(st.watchedDirs, d)
+			_ = st.watcher.Remove(d)
+		}
+	}
 }
 
 // addSubtree adds root + every non-hidden descendant directory to w and

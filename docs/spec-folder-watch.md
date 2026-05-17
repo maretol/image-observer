@@ -113,6 +113,16 @@
   追記 (`w.Remove` 戻り値はタイミング依存で IN_IGNORED 処理順で誤判定される)。
   あわせて Remove/Rename の inotify 多発 (IN_DELETE + IN_DELETE_SELF + IN_IGNORED)
   を `acc.removedPaths` で per-window dedup。
+- 2026-05-17 PR #75 15th レビュー対応: (1) §7.2 hidden filter の説明に「root は
+  filter から除外」を明記 (root が `.foo` のとき root vanish event 自体が hidden
+  filter で捨てられて loop が dead fd で hang する問題)。(2) §7.2 Remove/Rename
+  処理に「`removeSubtreeFromWatch` で prefix 配下の watchedDirs + w を一括解除」
+  を追加 (subdir rename out で inode-tracked watch が残り subtree 違反する問題、
+  thread B/C)。(3) §7.1 の Start 擬似コードを実装と整合 (root 明示 Add で fatal /
+  子孫は warn して継続、WalkDir 内 w.Add error を return しない)。(4) §10.2
+  watcher channel 不期 close 後の復旧経路を「フォルダ切替 / 手動 reload 両方」と
+  明示 (Round 11 で reload も dispatchWatchIntent を呼ぶ実装になっていたが
+  spec が「次回フォルダ切替で復旧」と限定したままだった)。
 
 ---
 
@@ -415,16 +425,27 @@ Wails の `generate module` は **EventsEmit の payload 型を TS namespace 化
 func (m *Manager) Start(root string) error {
     w, err := fsnotify.NewWatcher()
     if err != nil { return err }
+    // Root は明示的に最初に Add し、失敗したら Start 全体を fail させる
+    // (root が監視できなければ何もできない)。子孫の Add 失敗は warn して
+    // 続行する best-effort 戦略 (§7.5 で詳述、partial coverage beats none)。
+    // w.Add の第 2 引数 op マスクは gofsnotify/fsnotify v0.0.6 が要求する
+    // シグネチャ (原 fsnotify は単引数だが採用 fork はオペレーションマスクを
+    // 取る) — fsnotify.All で全 op を購読する。
+    if err := w.Add(root, fsnotify.All); err != nil {
+        _ = w.Close()
+        return fmt.Errorf("watcher: cannot watch root: %w", err)
+    }
     // 全サブフォルダを WalkDir で列挙 (classification.scanner と同じ
-    // isHiddenName 規則で隠しディレクトリを除外)。w.Add の第 2 引数 op マスクは
-    // gofsnotify/fsnotify v0.0.6 が要求するシグネチャ (原 fsnotify は単引数だが
-    // 採用 fork はオペレーションマスクを取る) — fsnotify.All で全 op を購読する。
-    err = filepath.WalkDir(root, func(p string, d fs.DirEntry, _ error) error {
-        if !d.IsDir() { return nil }
-        if isHiddenName(d.Name()) && p != root { return fs.SkipDir }
-        return w.Add(p, fsnotify.All)
+    // isHiddenName 規則で隠しディレクトリを除外)。各 dir Add 失敗は warn 出力
+    // のみで継続し WalkDir 自体は止めない。
+    _ = filepath.WalkDir(root, func(p string, d fs.DirEntry, _ error) error {
+        if p == root || !d.IsDir() { return nil }
+        if isHiddenName(d.Name()) { return fs.SkipDir }
+        if err := w.Add(p, fsnotify.All); err != nil {
+            logging.Warn("watcher", "add dir failed", "dir", p, "err", err.Error())
+        }
+        return nil
     })
-    if err != nil { /* cleanup + return */ }
     m.watcher = w
     go m.loop()
     return nil
@@ -596,7 +617,9 @@ state schema / settings schema bump なし。新フィールドは per-field fal
 ときに限り** `logging.Warn("watcher", "events channel closed unexpectedly",
 "folder", root)` を残し、pending を 1 度 flush してから終了する。フロントには
 「現在の watch が死んだ」イベントを emit しない (= 静かに degraded 化)。
-次回フォルダ切替で新規 watcher が張られる。
+**フォルダ切替 / 手動 reload のどちらでも** `dispatchWatchIntent` が再 dispatch
+され、`Manager.Start` の `goroutineExited` 判定で zombie state を tear down →
+新規 watcher を構築する経路で復旧する (§6.3 / 11th-12th 対応)。
 
 明示的 Stop で同じ分岐に来た場合 (`stopRequested == true`) はログも flush も
 せずに即 return する — Stop の意図は「いま積んでいる変更は捨てる」だから
