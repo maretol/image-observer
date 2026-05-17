@@ -193,22 +193,43 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     folder: string;
   } | null>(null);
 
+  // requestGenRef gates every `setLoadResult` / `setError` commit triggered
+  // by an asynchronous Load so that out-of-order completions can't roll back
+  // a newer result. Bumped at the entry of:
+  //   - loadInternal (manual reload / openFolder / auto-load on mount /
+  //     conflict-resolve / merge-resolve / delete-conflict-retry)
+  //   - handleWatcherPayload (each watcher event)
+  //   - performReplay's reload branch
+  // Every commit path checks `myGen === current` before touching state.
+  // Without a single shared generation across all of these, a stale Load
+  // from any one of them could clobber the others (PR #75 review).
+  const requestGenRef = useRef(0);
+
   const loadInternal = useCallback(
     async (path: string) => {
+      const myGen = ++requestGenRef.current;
       setLoading(true);
       setError(null);
       try {
         const res = await LoadClassification(path);
+        // Discard if a newer Load (from any path) has started.
+        if (myGen !== requestGenRef.current) return res;
         setLoadResult(res);
         return res;
       } catch (e) {
+        if (myGen !== requestGenRef.current) return null;
         const msg = errorMessage(e);
         setError(msg);
         setLoadResult(null);
         toast(`読み込みに失敗しました: ${msg}`, "error");
         return null;
       } finally {
-        setLoading(false);
+        // Only the latest generation flips the loading flag back; a stale
+        // request leaves it true because the newer one is still in flight
+        // (or has already cleared it).
+        if (myGen === requestGenRef.current) {
+          setLoading(false);
+        }
       }
     },
     [toast],
@@ -397,15 +418,6 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   useEffect(() => {
     loadResultRef.current = loadResult;
   }, [loadResult]);
-
-  // requestGenRef bumps on every payload arrival. Each handler invocation
-  // captures its own generation and checks `current === mine` at every
-  // commit point. Because the listener fires `void handlerRef.current(...)`
-  // without awaiting, two debounce flushes arriving close together would
-  // otherwise overlap their LoadClassification round-trips and the slower
-  // (older) result could land *after* the faster (newer) one, rewinding
-  // the displayed entries to a stale snapshot (PR #75 review).
-  const requestGenRef = useRef(0);
 
   // commitFreshResult swaps loadResult to the watcher-supplied snapshot AND
   // drops any selected filenames that no longer exist on disk. The bulk
