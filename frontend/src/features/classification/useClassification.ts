@@ -282,12 +282,22 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   const postLoadFlow = useCallback(
     async (path: string, res: classification.LoadResult) => {
       if (res.hasSidecar) return;
+      // Each await point below is a potential window for the user to
+      // switch folders. Without these guards we'd surface the OLD
+      // folder's merge prompt / "create sidecar?" confirm against the
+      // NEW folder's UI (a real UX bug — the user sees a prompt they
+      // never asked for) (PR #75 12th preemptive, postLoadFlow stale
+      // check). The CreateEmptyClassification / loadInternal at the end
+      // still run because they're disk-level operations the user
+      // originally requested on `path` — only the user-facing surfacing
+      // of state (setMergePrompt / confirm) needs the stale check.
       let preview: classification.MergePreview | null = null;
       try {
         preview = await PreviewChildSidecars(path);
       } catch {
         preview = null;
       }
+      if (folderRef.current !== path) return;
       if (preview && preview.hasNonTrivial) {
         setMergePrompt({ open: true, preview, folderPath: path });
         return;
@@ -295,13 +305,19 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       const create = await confirm(
         "サイドカー (_classification.json) がありません。\n新規作成しますか?",
       );
+      if (folderRef.current !== path) return;
       if (!create) return;
       try {
         await CreateEmptyClassification(path);
       } catch (e) {
-        toast(`サイドカー作成に失敗しました: ${errorMessage(e)}`, "error");
+        if (folderRef.current === path) {
+          toast(`サイドカー作成に失敗しました: ${errorMessage(e)}`, "error");
+        }
         return;
       }
+      // loadInternal is gen-aware: if the user switched folders, the
+      // new openFolder's loadInternal already bumped the gen and our
+      // result will be discarded via the stale-null return.
       await loadInternal(path);
     },
     [confirm, loadInternal, toast],
@@ -1125,6 +1141,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     if (!cur) return;
     try {
       const out = await UpdateClassificationEntry(cur, conflict.draft, 0);
+      // Bump gen immediately after the disk write so any in-flight
+      // watcher / replay / silent recheck Load whose LoadClassification
+      // started before our forced overwrite is now stale — without this
+      // there's a small flicker window between UpdateClassificationEntry
+      // returning and reload() bumping where a pre-write Load could
+      // briefly commit pre-overwrite state (same rule as saveEdit /
+      // deleteOne, PR #75 10th thread A pattern; preemptive sweep for
+      // the remaining mutation IPC sites).
+      ++requestGenRef.current;
       setConflict(null);
       setEditing({ open: false, filename: null });
       // Refresh with the truth on disk so we pick up any other external changes.
@@ -1154,6 +1179,11 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       logger.error("classification", "merge failed", { folder: target, err: msg });
       return;
     }
+    // Bump gen after the merge write so an in-flight watcher / silent
+    // recheck Load that started before the merge is stale-discarded —
+    // same flicker-prevention rule as saveEdit / deleteOne (PR #75 10th
+    // thread A pattern; preemptive sweep).
+    ++requestGenRef.current;
     await loadInternal(target);
   }, [mergePrompt, loadInternal, toast]);
 
@@ -1167,6 +1197,8 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       toast(`サイドカー作成に失敗しました: ${errorMessage(e)}`, "error");
       return;
     }
+    // Same gen-bump rule as resolveMergeMerge above.
+    ++requestGenRef.current;
     await loadInternal(target);
   }, [mergePrompt, loadInternal, toast]);
 
