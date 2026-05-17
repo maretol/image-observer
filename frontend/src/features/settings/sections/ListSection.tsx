@@ -1,5 +1,6 @@
 import type { Settings } from "../useSettings";
 import { Field, Segment } from "../SettingsFields";
+import { WATCH_MODE_AUTO, WATCH_MODE_OFF } from "../watchMode";
 
 const MULTI_SELECT_MODES: Array<{
   value: string;
@@ -25,12 +26,12 @@ const WATCH_MODES: Array<{
   hint: string;
 }> = [
   {
-    value: "auto",
+    value: WATCH_MODE_AUTO,
     label: "自動",
     hint: "外部で追加 / 削除された画像と分類データの変更を自動反映",
   },
   {
-    value: "off",
+    value: WATCH_MODE_OFF,
     label: "オフ",
     hint: "再読み込みボタンを押した時だけ更新",
   },

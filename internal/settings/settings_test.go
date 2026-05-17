@@ -351,3 +351,18 @@ func TestIsValidHexColor(t *testing.T) {
 		}
 	}
 }
+
+// TestWatchModeValues pins the literal strings of WatchModeAuto / WatchModeOff.
+// AGENTS.md D-1: the TS side ships the same literals in
+// `frontend/src/features/settings/watchMode.ts` (locked there by
+// `watchMode.test.ts`). Renaming one side without the other lets the settings
+// UI persist a value that Validate then rejects, silently snapping the user's
+// choice back to the default.
+func TestWatchModeValues(t *testing.T) {
+	if WatchModeAuto != "auto" {
+		t.Errorf("WatchModeAuto = %q, want %q (TS side pins the same literal)", WatchModeAuto, "auto")
+	}
+	if WatchModeOff != "off" {
+		t.Errorf("WatchModeOff = %q, want %q (TS side pins the same literal)", WatchModeOff, "off")
+	}
+}
