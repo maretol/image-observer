@@ -204,9 +204,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // resolving. `folder` is captured at park time so a folder-switch while
   // deferred causes the replay to discard the now-stale result instead of
   // splatting the wrong folder's entries onto the new one (PR #75 review).
+  // `capturedGen` is the `requestGenRef` value at park time — if anything
+  // else (manual reload / mutation / another watcher event) bumps the gen
+  // while the user resolves the defer, the replay drops this pending so a
+  // mtime-equal-but-entries-different commit can't roll back the newer
+  // state (PR #75 11th, suppressed-A).
   const pendingResultRef = useRef<{
     fresh: classification.LoadResult;
     folder: string;
+    capturedGen: number;
   } | null>(null);
 
   // requestGenRef gates every `setLoadResult` / `setError` commit triggered
@@ -360,6 +366,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     const cur = folderRef.current;
     if (!cur) return;
     await loadInternal(cur);
+    // Also kick the watcher reconciliation: if a previous root vanished
+    // (the Go-side loop exited but Manager.state went zombie until the
+    // next Start), the folder-watch effect won't re-fire on its own
+    // because folderPath/watchMode didn't change. Dispatching here
+    // bridges that gap so a user pressing "再読み込み" after recreating
+    // the folder also restores auto-monitoring. Manager.Start's
+    // goroutineExited zombie-detection then tears down the dead state
+    // and builds a fresh watcher (PR #75 11th, thread B).
+    dispatchWatchIntentRef.current();
   }, [loadInternal]);
 
   const setFilter = useCallback((patch: Partial<ListTabFilter>) => {
@@ -601,9 +616,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       });
       switch (action.kind) {
         case "defer":
-          // Park the fresh result *with* its folder so the deferral-close
-          // replay can discard it if the user switched folders meanwhile.
-          pendingResultRef.current = { fresh, folder: payload.folder };
+          // Park the fresh result *with* its folder + current generation
+          // so the deferral-close replay can discard it if the user
+          // switched folders or another commit landed meanwhile
+          // (PR #75 11th, suppressed-A).
+          pendingResultRef.current = {
+            fresh,
+            folder: payload.folder,
+            capturedGen: requestGenRef.current,
+          };
           return;
         case "commit-editing-removed":
           toast(`${action.filename} は外部で削除されました`, "warn");
@@ -627,11 +648,21 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // editing-open et al. are still honored (PR #75 9th, thread I).
   const silentRecheckAfterStart = useCallback(
     (folder: string) => {
-      // Generation-aware like every other async LoadClassification path
-      // (PR #75 10th, suppressed-A). If a manual reload / watcher payload
-      // / local mutation supersedes us while we're awaiting, our result
-      // is discarded so we can't roll back the newer commit.
-      const myGen = ++requestGenRef.current;
+      // Snapshot the current generation WITHOUT bumping (PR #75 11th,
+      // thread A). Two requirements to satisfy at once:
+      //   1) silent recheck must NOT supersede in-flight initial-load
+      //      paths (openFolder / auto-load on mount). If we bumped, the
+      //      ongoing `loadInternal` would see itself as stale and return
+      //      null, and openFolder's `postLoadFlow` (sidecar-create
+      //      prompt / child-sidecar merge prompt) would silently skip —
+      //      a real regression triggered by the Round 10 suppressed-A
+      //      fix that incorrectly bumped here.
+      //   2) silent recheck must NOT roll back a newer commit that
+      //      landed during our await. Snapshot + check at commit time
+      //      handles this: if anything else bumps the gen while we wait,
+      //      our myGen !== requestGenRef.current branches return.
+      // Snapshot satisfies both.
+      const myGen = requestGenRef.current;
       void LoadClassification(folder)
         .then((fresh) => {
           if (myGen !== requestGenRef.current) return;
@@ -674,7 +705,13 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           });
           switch (action.kind) {
             case "defer":
-              pendingResultRef.current = { fresh, folder };
+              // Park with capturedGen so the replay can discard if another
+              // commit lands (PR #75 11th, suppressed-A).
+              pendingResultRef.current = {
+                fresh,
+                folder,
+                capturedGen: requestGenRef.current,
+              };
               return;
             case "commit-editing-removed":
               toast(`${action.filename} は外部で削除されました`, "warn");
@@ -889,6 +926,17 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       pendingResultRef.current = null;
       return;
     }
+    if (pending.capturedGen !== requestGenRef.current) {
+      // Generation drifted: a manual reload / local mutation / another
+      // watcher payload committed (and bumped requestGenRef) since this
+      // pending was parked. The on-screen state already reflects a newer
+      // truth; committing the pending could roll it back even if mtime
+      // happens to match (entries-only changes don't bump sidecar mtime,
+      // so the mtime check below misses this case — PR #75 11th,
+      // suppressed-A).
+      pendingResultRef.current = null;
+      return;
+    }
     let fresh = pending.fresh;
     let reloadedFresh = false;
     const cur = loadResultRef.current;
@@ -961,9 +1009,14 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       freshFilenames: fnames,
     });
     if (action.kind === "defer") {
-      // Re-park with the possibly-fresher snapshot so the next close
-      // trigger replays from the latest known state.
-      pendingResultRef.current = { fresh, folder: pending.folder };
+      // Re-park with the possibly-fresher snapshot AND the current gen
+      // (the snapshot was just refreshed by our reload, so this becomes
+      // the new baseline against which future gen drift is measured).
+      pendingResultRef.current = {
+        fresh,
+        folder: pending.folder,
+        capturedGen: requestGenRef.current,
+      };
       return;
     }
     pendingResultRef.current = null;
@@ -1197,7 +1250,18 @@ export function useClassification(opts: Opts): UseClassificationReturn {
                 sidecarErr = errorMessage(e2);
               }
             } else {
-              sidecarErr = "reload failed";
+              // fresh === null can mean a real Load failure (in which
+              // case loadInternal already toasted) OR that a newer
+              // watcher payload / manual reload superseded us mid-await.
+              // In the supersede case the local state already reflects
+              // a fresher truth via the winner's commit, so patching
+              // with our pre-supersede `entriesAfter` would roll it
+              // back, and bumping the gen would stale-ify the newer
+              // result we just merged into. Skip the local patch +
+              // gen bump entirely — the file is already off disk, so
+              // the next watcher event (or the winning Load) reconciles
+              // the sidecar drift (PR #75 11th, suppressed-B).
+              return true;
             }
           } else {
             sidecarErr = msg;
