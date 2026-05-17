@@ -482,6 +482,51 @@ func TestStart_ChmodOnly_NotEmitted(t *testing.T) {
 	cap.expectNoPayload(t, shortDebounce*4)
 }
 
+// classifyAndAccumulate-level unit test for the dir-Create / image-Create
+// dedup (PR #75 5th-round review). When addSubtree's WalkDir already counted
+// an image file, a subsequent inotify Create for the same path must NOT
+// double-count it.
+func TestClassify_DirCreateThenSamePathImageCreate_NoDoubleCount(t *testing.T) {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	defer w.Close()
+
+	acc := &changedAccumulator{}
+	// Simulate: addSubtree found an image at /staged/photo.png and parked
+	// the path for dedup. The accumulator state we craft here matches what
+	// the dir-Create branch would produce after WalkDir.
+	acc.addedFiles = 1
+	acc.anyChange = true
+	acc.discoveredImagePaths = map[string]struct{}{
+		"/staged/photo.png": {},
+	}
+
+	// Now the concurrent inotify Create arrives for the same path. Without
+	// dedup we'd hit addedFiles=2; with dedup we stay at 1 and consume the
+	// parked entry.
+	ev := fsnotify.Event{Name: "/staged/photo.png", Op: fsnotify.Create}
+	if !classifyAndAccumulate(acc, ev, w) {
+		t.Errorf("Create should still trigger debounce reset even when deduped")
+	}
+	if acc.addedFiles != 1 {
+		t.Errorf("dedup failed: addedFiles got %d, want 1", acc.addedFiles)
+	}
+	if _, still := acc.discoveredImagePaths["/staged/photo.png"]; still {
+		t.Errorf("dedup entry should be consumed (one-shot)")
+	}
+
+	// A second Create for the same path *now* (post-consume) counts as a
+	// genuine new addition.
+	if !classifyAndAccumulate(acc, ev, w) {
+		t.Errorf("second Create should trigger")
+	}
+	if acc.addedFiles != 2 {
+		t.Errorf("post-consume re-Create: addedFiles got %d, want 2", acc.addedFiles)
+	}
+}
+
 // classifyAndAccumulate-level unit test for the Write-extends-debounce
 // behavior (PR #75 4th-round review). Write on an existing image must:
 //   - return true so the loop resets the debounce timer (= keep the quiet
