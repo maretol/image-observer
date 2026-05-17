@@ -19,11 +19,6 @@ import (
 	"image-observer/internal/watcher"
 )
 
-// classificationChangedEvent is the Wails event name the watcher emits on.
-// Frontend subscribes via `EventsOn("classification:changed", ...)` —
-// see docs/spec-folder-watch.md §4.2 / §6.2.
-const classificationChangedEvent = "classification:changed"
-
 type App struct {
 	ctx            context.Context
 	classification *classification.Service
@@ -40,11 +35,15 @@ func NewApp() *App {
 	// The Manager is constructed early so Start/Stop bindings always have a
 	// non-nil receiver; the actual EventsEmit needs ctx, so the emit callback
 	// closes over `a` and pulls a.ctx lazily at flush time.
+	//
+	// Event name lives in internal/watcher (single source of truth on the Go
+	// side); the frontend mirrors it via CLASSIFICATION_CHANGED_EVENT with a
+	// vitest assertion that pins both literals to the same string.
 	a.watch = watcher.NewManager(func(p watcher.ChangedPayload) {
 		if a.ctx == nil {
 			return
 		}
-		runtime.EventsEmit(a.ctx, classificationChangedEvent, p)
+		runtime.EventsEmit(a.ctx, watcher.ClassificationChangedEvent, p)
 	})
 	return a
 }
@@ -205,8 +204,9 @@ func (a *App) DeleteImage(folderPath, filename string) error {
 }
 
 // StartFolderWatch begins (or restarts) the file-system watcher on
-// folderPath. While active, the watcher emits the "classification:changed"
-// Wails event after every 200 ms of quiet — see docs/spec-folder-watch.md.
+// folderPath. While active, the watcher emits the
+// watcher.ClassificationChangedEvent Wails event after every quiet
+// window (watcher.DefaultDebounce) — see docs/spec-folder-watch.md.
 //
 // folderPath must be absolute. Calling Start on the currently-watched
 // folder is a no-op; calling Start with a different folder transparently

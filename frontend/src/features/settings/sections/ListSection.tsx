@@ -58,7 +58,7 @@ export function ListSection({
       </Field>
       <Field
         label="フォルダ自動監視"
-        hint="自動: 外部で画像が追加 / 削除されたり _classification.json が書き換えられると、一覧に約 200ms 遅延で反映されます。オフ: 自動更新を行わず、再読み込みボタンを押した時のみ最新化します"
+        hint="自動: 外部で画像が追加 / 削除されたり _classification.json が書き換えられると、短い遅延の後に一覧へ反映されます。オフ: 自動更新を行わず、再読み込みボタンを押した時のみ最新化します"
       >
         <Segment
           name="watchMode"
