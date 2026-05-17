@@ -491,9 +491,13 @@ func TestStart_SymlinkToExternalDirNotFollowed(t *testing.T) {
 
 	// Create the symlink. This Create event hits the dir-Create branch via
 	// Lstat → ModeSymlink detection.
+	// On Windows, os.Symlink requires Developer Mode or
+	// SeCreateSymbolicLinkPrivilege; without those it returns a permission
+	// error. Skip rather than fail in that case so `go test ./...` from a
+	// stock Windows developer machine doesn't error out (PR #75 8th, thread D).
 	linkPath := filepath.Join(root, "link-to-external")
 	if err := os.Symlink(external, linkPath); err != nil {
-		t.Fatalf("symlink: %v", err)
+		t.Skipf("symlink unavailable in this environment: %v", err)
 	}
 	got := cap.waitForPayload(t, 1, time.Second)
 	if got[0].AddedFiles != 0 {
@@ -509,6 +513,36 @@ func TestStart_SymlinkToExternalDirNotFollowed(t *testing.T) {
 	// installed).
 	writeImage(t, filepath.Join(external, "would-not-show.png"))
 	cap.expectNoPayload(t, shortDebounce*4)
+}
+
+func TestStart_ImageExtensionSymlinkCountedAsAddedFile(t *testing.T) {
+	// PR #75 review 8th, thread E: classification.scanner.go includes any
+	// path with an image extension in entries regardless of symlink status
+	// (it uses Lstat-derived DirEntry and checks extension only). For the
+	// emitted payload's addedFiles count to match what the next re-Load
+	// surfaces, an image-extension symlink Create must bump addedFiles, not
+	// just flag generic anyChange. Same Windows symlink-permission caveat
+	// as above — skip rather than fail when symlink is unavailable.
+	root := t.TempDir()
+	external := t.TempDir()
+	target := filepath.Join(external, "real.png")
+	writeImage(t, target)
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(root); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	linkPath := filepath.Join(root, "image-link.png")
+	if err := os.Symlink(target, linkPath); err != nil {
+		t.Skipf("symlink unavailable in this environment: %v", err)
+	}
+	got := cap.waitForPayload(t, 1, time.Second)
+	if got[0].AddedFiles != 1 {
+		t.Errorf("image-extension symlink should bump addedFiles, got %+v", got[0])
+	}
 }
 
 func TestStart_ChmodOnly_NotEmitted(t *testing.T) {

@@ -131,9 +131,14 @@ func (m *Manager) Start(root string) error {
 	}
 
 	// Root must succeed: without it we can't see top-level changes (image
-	// add/remove directly in `root`). Descendants are best-effort.
-	rootAdded, _ := addSubtree(w, root)
-	if !rootAdded {
+	// add/remove directly in `root`). Descendants are best-effort. The
+	// initial walk doesn't need the discovered-image dedup set (that's
+	// only relevant when a *new* directory is created mid-watch — the
+	// dedup guards against a concurrent inotify Create racing with the
+	// walk), so we use the collect-free overload to avoid allocating
+	// thousands of POSIX path strings just to discard them when scanning
+	// a large image folder (PR #75 8th, thread C).
+	if !addSubtree(w, root) {
 		_ = w.Close()
 		return fmt.Errorf("watcher: cannot watch root %q", root)
 	}
@@ -410,22 +415,31 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnoti
 		// fall through to the regular file branches below so the image
 		// classifier still has a chance to act on a synthetic event.
 		if info, err := os.Lstat(ev.Name); err == nil {
-			if info.Mode()&os.ModeSymlink != 0 {
-				// Symlink to file or directory. We deliberately don't
-				// traverse the target — see comment above. Flag anyChange
-				// so the user sees the new entry surface on the next
-				// re-Load (the classification scanner will skip it
-				// consistently).
+			isSymlink := info.Mode()&os.ModeSymlink != 0
+			if isSymlink && !imgfile.IsImage(base) {
+				// Symlink to a non-image (directory or other). We never
+				// traverse the target (the classification scanner doesn't
+				// follow symlinks either, so doing so here would surface
+				// events from paths the user never picked). Flag anyChange
+				// so the user sees something happened (PR #75 7th).
 				acc.anyChange = true
 				return true
 			}
-			if info.IsDir() {
-				// Incremental add: root-failure is non-fatal (the parent
-				// dir's watch is what gave us this Create event, so we
-				// already have some visibility — we just lose the new
-				// subdir's nested activity). anyChange stays true so the
-				// frontend re-Loads.
-				_, discovered := addSubtree(w, ev.Name)
+			// Image-extension symlinks intentionally fall through to the
+			// regular image Create branch below — the classification
+			// scanner includes any path with an image extension regardless
+			// of symlink status (it uses Lstat-derived DirEntry and checks
+			// extension only — see internal/classification/scanner.go:58-68),
+			// so bumping addedFiles here keeps the emitted payload count
+			// consistent with what the next re-Load surfaces in entries
+			// (PR #75 8th, thread E).
+			if !isSymlink && info.IsDir() {
+				// Real directory: incremental add. Root-failure here is
+				// non-fatal (the parent dir's watch is what gave us this
+				// Create event, so we already have some visibility — we
+				// just lose the new subdir's nested activity). anyChange
+				// stays true so the frontend re-Loads.
+				_, discovered := addSubtreeCollect(w, ev.Name)
 				acc.addedFiles += len(discovered)
 				if len(discovered) > 0 {
 					if acc.discoveredImagePaths == nil {
@@ -530,22 +544,37 @@ func isHiddenName(name string) bool {
 	return strings.HasPrefix(name, ".")
 }
 
-// addSubtree adds root + every non-hidden descendant directory to w, and
-// returns (rootAdded, discoveredImagePaths): whether the root itself could
-// be watched and the absolute paths of image files encountered in the walk.
-// Used by both
-//   - Start (initial enumeration; root failure is fatal, so the caller
-//     checks rootAdded and bails out — the discovered paths are unused
-//     because no inotify Create events are queued yet for those files)
-//   - the per-event handler when a directory is Created or moved into the
-//     watched tree (the parent watch fired the Create, so root failure
-//     here is non-fatal — we still want anyChange flagged; discovered
-//     paths feed the changedAccumulator dedup so a concurrent Create
-//     event for the same path doesn't double-count)
+// addSubtree adds root + every non-hidden descendant directory to w and
+// returns rootAdded (= whether the root itself could be watched).
+// Used by Start for the initial enumeration: root failure is fatal so
+// the caller checks the bool and bails out. Image paths discovered during
+// the walk are intentionally NOT returned — at Start time no inotify
+// Create events are queued for them, so there is nothing to dedup against;
+// allocating thousands of POSIX path strings just to discard them would
+// spike memory on a large image folder (PR #75 8th, thread C).
 //
 // Failures on descendant Add calls are logged and skipped rather than
 // aborting the walk — partial coverage beats none.
-func addSubtree(w *fsnotify.Watcher, root string) (rootAdded bool, discovered []string) {
+func addSubtree(w *fsnotify.Watcher, root string) bool {
+	rootAdded, _ := addSubtreeImpl(w, root, false)
+	return rootAdded
+}
+
+// addSubtreeCollect is the per-event variant: in addition to adding watches
+// it also returns the absolute paths of image files encountered. This is
+// only relevant when a *new* directory is created mid-watch — the caller
+// parks the paths in changedAccumulator.discoveredImagePaths so a
+// concurrent inotify Create racing with the WalkDir (e.g. a writer dropping
+// files into the just-created dir) doesn't double-count addedFiles.
+// Returns (rootAdded, discoveredImagePaths). Root failure is non-fatal at
+// the call site: the parent dir's watch is what gave us the Create event,
+// so we already have some visibility and only lose the new subdir's nested
+// activity.
+func addSubtreeCollect(w *fsnotify.Watcher, root string) (rootAdded bool, discovered []string) {
+	return addSubtreeImpl(w, root, true)
+}
+
+func addSubtreeImpl(w *fsnotify.Watcher, root string, collect bool) (rootAdded bool, discovered []string) {
 	// Add root explicitly first so callers can distinguish "root failed"
 	// from "some descendant failed".
 	if err := w.Add(root, fsnotify.All); err != nil {
@@ -577,7 +606,7 @@ func addSubtree(w *fsnotify.Watcher, root string) (rootAdded bool, discovered []
 			}
 			return nil
 		}
-		if imgfile.IsImage(d.Name()) {
+		if collect && imgfile.IsImage(d.Name()) {
 			discovered = append(discovered, p)
 		}
 		return nil
