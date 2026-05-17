@@ -109,12 +109,19 @@ func TestStart_BurstCoalescedIntoOnePayload(t *testing.T) {
 	}
 
 	got := cap.waitForPayload(t, 1, time.Second)
-	if len(got) != 1 {
-		t.Fatalf("expected exactly 1 coalesced payload, got %d: %+v",
-			len(got), got)
-	}
 	if got[0].AddedFiles != 5 {
 		t.Errorf("AddedFiles: got %d, want 5", got[0].AddedFiles)
+	}
+
+	// waitForPayload returns as soon as 1 payload arrives, which doesn't
+	// prove coalescing held. Wait one more full debounce window with no
+	// further writes and verify no extra payloads were emitted.
+	time.Sleep(shortDebounce * 4)
+	cap.mu.Lock()
+	totalAfter := len(cap.payloads)
+	cap.mu.Unlock()
+	if totalAfter != 1 {
+		t.Fatalf("expected exactly 1 coalesced payload, got %d", totalAfter)
 	}
 }
 
@@ -271,9 +278,84 @@ func TestStart_SameRootTwiceIsNoOp(t *testing.T) {
 }
 
 func TestStart_FailsOnMissingRoot(t *testing.T) {
+	// Compose the missing path inside a fresh t.TempDir so the test cannot
+	// be defeated by a stale leftover directory from a prior run in
+	// the OS-wide temp area (PR #75 review).
 	m := NewManagerWithDebounce(func(ChangedPayload) {}, shortDebounce)
-	if err := m.Start(filepath.Join(os.TempDir(), "does-not-exist-watcher-test")); err == nil {
+	missing := filepath.Join(t.TempDir(), "definitely-missing")
+	if err := m.Start(missing); err == nil {
 		t.Errorf("Start on missing root should fail")
+	}
+}
+
+func TestStart_ImageRemoveBumpsRemovedFiles(t *testing.T) {
+	// PR #75 review: image Remove / Rename were the headline Phase 1
+	// behaviors but had no integration coverage.
+	dir := t.TempDir()
+	img := filepath.Join(dir, "victim.png")
+	writeImage(t, img)
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(dir); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	if err := os.Remove(img); err != nil {
+		t.Fatalf("rm: %v", err)
+	}
+	got := cap.waitForPayload(t, 1, time.Second)
+	if got[0].RemovedFiles != 1 {
+		t.Errorf("RemovedFiles: got %d, want 1 (payloads=%+v)",
+			got[0].RemovedFiles, got)
+	}
+	if got[0].AddedFiles != 0 {
+		t.Errorf("AddedFiles should be 0, got %d", got[0].AddedFiles)
+	}
+}
+
+func TestStart_ImageRenameBumpsRenamedAndAdded(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "before.png")
+	dst := filepath.Join(dir, "after.png")
+	writeImage(t, src)
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(dir); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	if err := os.Rename(src, dst); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	got := cap.waitForPayload(t, 1, time.Second)
+	// Rename within the same watched dir surfaces as Rename (source) +
+	// Create (dest). classifyAndAccumulate counts the source's Remove
+	// portion AND the renamedFiles tick on the Rename op, then the dest
+	// path's Create bumps AddedFiles. Net: +1 added, +1 removed, +1 renamed.
+	if got[0].RenamedFiles != 1 {
+		t.Errorf("RenamedFiles: got %d, want 1 (payloads=%+v)",
+			got[0].RenamedFiles, got)
+	}
+	if got[0].AddedFiles != 1 {
+		t.Errorf("AddedFiles: got %d, want 1", got[0].AddedFiles)
+	}
+	if got[0].RemovedFiles != 1 {
+		t.Errorf("RemovedFiles: got %d, want 1", got[0].RemovedFiles)
+	}
+}
+
+// TestClassificationChangedEventName pins the literal value so a Go-side
+// rename without a paired TS-side rename trips CI. The frontend ships a
+// matching assertion in features/classification/watcherPolicy.test.ts.
+// AGENTS.md D-1 (cross-language constant drift detection).
+func TestClassificationChangedEventName(t *testing.T) {
+	if ClassificationChangedEvent != "classification:changed" {
+		t.Errorf("event name drifted: got %q, want %q",
+			ClassificationChangedEvent, "classification:changed")
 	}
 }
 
