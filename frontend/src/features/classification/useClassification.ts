@@ -623,24 +623,60 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       });
       return;
     }
-    void StartFolderWatch(folderPath).catch((e) => {
-      // Stale check: if the user has switched folders or disabled
-      // monitoring since this Start was issued, the failure belongs to a
-      // watcher we no longer care about — surfacing it would mis-attribute
-      // a Start("A") failure to the current Start("B") (PR #75 review
-      // suppressed-e).
-      if (folderRef.current !== folderPath) return;
-      if (watchModeRef.current !== WATCH_MODE_AUTO) return;
-      const msg = errorMessage(e);
-      toast(
-        "自動監視を開始できませんでした (再読み込みボタンで手動更新してください)",
-        "warn",
-      );
-      logger.warn("watcher", "start failed", {
-        folder: folderPath,
-        err: msg,
-      });
-    });
+    // tryStart wraps StartFolderWatch with a success-side stale check.
+    // Wails-level IPC ordering across distinct Start/Stop calls is not
+    // guaranteed (each call dispatches into Go via its own goroutine),
+    // so a later Start/Stop can race past our Start at Go's mu lock and
+    // leave the Go side watching the wrong folder. Re-issuing the
+    // *current* intent on success is safe because:
+    //   - StartFolderWatch on the same root that's already being watched
+    //     is a no-op at Go (Manager.Start same-root + live goroutine
+    //     short-circuits without re-walking)
+    //   - StopFolderWatch is idempotent
+    // so a duplicate IPC just confirms the intended state; a corrective
+    // IPC fixes the race (PR #75 review 7th, thread C).
+    const tryStart = (folder: string): void => {
+      void StartFolderWatch(folder)
+        .then(() => {
+          const curFolder = folderRef.current;
+          const curMode = watchModeRef.current;
+          if (curMode == null) return;
+          if (curFolder === folder && curMode === WATCH_MODE_AUTO) {
+            // Intent matches what we just told Go; nothing to correct.
+            return;
+          }
+          if (!curFolder || curMode === WATCH_MODE_OFF) {
+            // User opted out / cleared the folder while our Start was
+            // in flight. Issue Stop so Go releases the FD / goroutine.
+            void StopFolderWatch().catch((e) =>
+              logger.warn("watcher", "stop failed (stale start correction)", {
+                err: errorMessage(e),
+              }),
+            );
+            return;
+          }
+          // Different folder is now intended. Re-issue Start for it.
+          // Recurses through tryStart so its own success path is also
+          // stale-checked (in case state keeps moving).
+          tryStart(curFolder);
+        })
+        .catch((e) => {
+          // Stale check: if the user has switched folders or disabled
+          // monitoring since this Start was issued, the failure belongs
+          // to a watcher we no longer care about — surfacing it would
+          // mis-attribute a Start("A") failure to the current Start("B")
+          // (PR #75 review suppressed-e).
+          if (folderRef.current !== folder) return;
+          if (watchModeRef.current !== WATCH_MODE_AUTO) return;
+          const msg = errorMessage(e);
+          toast(
+            "自動監視を開始できませんでした (再読み込みボタンで手動更新してください)",
+            "warn",
+          );
+          logger.warn("watcher", "start failed", { folder, err: msg });
+        });
+    };
+    tryStart(folderPath);
   }, [folderPath, watchMode, toast]);
 
   // Keep a ref to the latest handler so the EventsOn subscription below can
