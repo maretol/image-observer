@@ -133,6 +133,8 @@ var defaultTagColors = map[string]string{
 //     restart-required (the worker pool is initialized once at startup)
 //   - TagColors: tag-name → CSS color override for the classification badges
 //   - UIScalePercent: global UI scale as an integer percent (100 = native)
+//   - WatchMode: "auto" | "off" — drives the fsnotify auto-merge in the
+//     classification tab (see docs/spec-folder-watch.md)
 type SettingsData struct {
 	Version              int               `json:"version"`
 	LogLevel             string            `json:"logLevel"`
