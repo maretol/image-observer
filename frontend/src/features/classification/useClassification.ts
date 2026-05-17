@@ -219,6 +219,35 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     capturedGen: number;
   } | null>(null);
 
+  // resetEntriesDependentState clears every piece of state whose meaning is
+  // tied to the entries list (= the file we were editing, the conflict
+  // draft for a specific file, the merge prompt for a specific folder, a
+  // parked auto-merge result, the filename-keyed selection). Call this
+  // alongside `setLoadResult(null)` in error-driven catch paths so that
+  // when the entries we were operating on disappear, the dependent state
+  // doesn't strand:
+  //   - editing.open=true with EditPopover showing entry=null is visually
+  //     harmless but causes the next watcher event to defer (the handler
+  //     treats it as "still open"), and re-surfaces the popover if the
+  //     same filename reappears.
+  //   - conflict / mergePrompt similarly carry stale folder / draft
+  //     pointers that surface in misleading ways on next render.
+  //   - pendingResultRef would replay against a now-empty loadResult.
+  //   - filename-keyed selection becomes nonsensical without entries.
+  // (PR #75 13th, thread A). Called from all three catch sites that null
+  // loadResult: loadInternal, handleWatcherPayload, performReplay reload.
+  // Declared here (before loadInternal) so the useCallback dep list works
+  // — moving it after loadInternal would put it in TDZ at useCallback
+  // dispatch time.
+  const resetEntriesDependentState = useCallback(() => {
+    setEditing({ open: false, filename: null });
+    setConflict(null);
+    setMergePrompt({ open: false, preview: null, folderPath: "" });
+    pendingResultRef.current = null;
+    setSelected((cur) => (cur.size === 0 ? cur : new Set()));
+    setSelectAnchor(null);
+  }, []);
+
   // requestGenRef gates every `setLoadResult` / `setError` commit triggered
   // by an asynchronous Load so that out-of-order completions can't roll back
   // a newer result. Bumped at the entry of:
@@ -274,6 +303,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         const msg = errorMessage(e);
         setError(msg);
         setLoadResult(null);
+        // Clear entries-dependent state so a stranded editing popover /
+        // conflict draft / mergePrompt / pending replay doesn't survive
+        // the load failure (PR #75 13th, thread A).
+        resetEntriesDependentState();
         toast(`読み込みに失敗しました: ${msg}`, "error");
         return null;
       } finally {
@@ -286,7 +319,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         }
       }
     },
-    [toast],
+    [toast, resetEntriesDependentState],
   );
 
   // postLoadFlow runs after a successful Load when the parent has no sidecar.
@@ -579,6 +612,9 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         const msg = errorMessage(e);
         setError(msg);
         setLoadResult(null);
+        // Clear entries-dependent state alongside loadResult — same rule
+        // as loadInternal's catch (PR #75 13th, thread A).
+        resetEntriesDependentState();
         toast(`読み込みに失敗しました: ${msg}`, "error");
         logger.warn("classification", "auto-merge load failed", { err: msg });
         return;
@@ -668,7 +704,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           return;
       }
     },
-    [toast, commitFreshResult],
+    [toast, commitFreshResult, resetEntriesDependentState],
   );
 
   // silentRecheckAfterStart bridges the gap between the initial / restore
@@ -779,7 +815,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           });
         });
     },
-    [toast, commitFreshResult],
+    [toast, commitFreshResult, resetEntriesDependentState],
   );
 
   // Lifecycle is split into two effects to avoid a Start/Stop IPC race when
@@ -1013,6 +1049,9 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         const msg = errorMessage(e);
         setError(msg);
         setLoadResult(null);
+        // Clear entries-dependent state alongside loadResult — same rule
+        // as loadInternal's catch (PR #75 13th, thread A).
+        resetEntriesDependentState();
         toast(`読み込みに失敗しました: ${msg}`, "error");
         logger.warn("classification", "replay reload failed", { err: msg });
         return;
@@ -1071,7 +1110,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       setEditing({ open: false, filename: null });
     }
     commitFreshResult(fresh, fnames);
-  }, [toast, commitFreshResult]);
+  }, [toast, commitFreshResult, resetEntriesDependentState]);
 
   // Replay triggers: any of conflict / mergePrompt / editing transitioning
   // open → closed. performReplay drops itself if any *other* defer source

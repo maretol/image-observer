@@ -91,6 +91,13 @@
   旧フォルダ prompt 漏れを防ぐ」を追記。(5) §6.1 に「`resolveConflictForce` /
   `resolveMergeMerge` / `resolveMergeSkip` も mutation IPC 成功直後に gen bump」
   を追記 (Round 10 ルールの全 mutation 経路展開)。
+- 2026-05-17 PR #75 13th レビュー対応: §5.4 / §6.1 に「Load 失敗で `loadResult`
+  を null にする 3 catch 経路 (loadInternal / handleWatcherPayload /
+  performReplay reload) では `resetEntriesDependentState` ヘルパで editing /
+  conflict / mergePrompt / pendingResultRef / selected / selectAnchor も同時に
+  clear する」を追記。entries に依存する state を残すと、EditPopover は entry=null
+  で非表示でも内部 state が "open" のまま残り、後続の watcher event が defer 判定
+  に流れたり、同名ファイル復活時に popover が再表示されたりする問題があった。
 
 ---
 
