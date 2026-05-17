@@ -367,28 +367,38 @@ informational のみ、内部ロジックは add / remove ペアで一貫)。
 ### 7.3 Debounce / Coalesce
 
 ```go
-// 擬似コード
+// 擬似コード (現行 DI 形)
 const debounceWindow = 200 * time.Millisecond
 
-func (m *Manager) loop() {
+// Manager は wails runtime を import せず、emit を DI で受け取る。
+// 本番では app.go が `func(p) { runtime.EventsEmit(a.ctx,
+// watcher.ClassificationChangedEvent, p) }` を渡す。
+type Manager struct {
+    emit     EmitFunc
+    debounce time.Duration
+    // ...
+}
+
+func (m *Manager) loop(st *watchState) {
     var (
         timer   *time.Timer
         pending changedAccumulator
     )
     flush := func() {
         if pending.empty() { return }
-        runtime.EventsEmit(m.ctx, "classification:changed", pending.snapshot())
+        payload := pending.snapshot(st.root)
         pending.reset()
+        m.emit(payload) // ← wails runtime 依存はここに居ない
     }
     for {
         select {
-        case ev := <-m.watcher.Events:
+        case ev := <-st.watcher.Events:
             pending.accumulate(ev)
             if timer != nil { timer.Stop() }
-            timer = time.AfterFunc(debounceWindow, flush)
-        case err := <-m.watcher.Errors:
+            timer = time.AfterFunc(m.debounce, flush)
+        case err := <-st.watcher.Errors:
             logging.Warn("watcher", "channel error", "err", err.Error())
-        case <-m.stop:
+        case <-st.stop:
             if timer != nil { timer.Stop() }
             // 明示的 Stop は pending を discard する。Stop 直後に flush
             // すると、watchMode = "off" 切替やアプリ終了直後に
