@@ -461,6 +461,16 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     loadResultRef.current = loadResult;
   }, [loadResult]);
 
+  // inFlightDeletesRef tracks filenames whose Delete IPC has fired but whose
+  // sidecar save / local state patch hasn't completed yet. The watcher fires
+  // a Remove event almost immediately, well before our SaveClassification
+  // round-trip lands, so by the time the 200ms debounce flushes and the
+  // handler does LoadClassification, the fresh entries list already lacks
+  // the file while our local loadResult still has it. Without filtering,
+  // the entriesEquivalent self-echo check would miss this case and toast
+  // "外部で更新されました" for the user's own delete (PR #75 9th, thread J).
+  const inFlightDeletesRef = useRef<Set<string>>(new Set());
+
   // commitFreshResult swaps loadResult to the watcher-supplied snapshot AND
   // drops any selected filenames that no longer exist on disk. The bulk
   // toolbar / "open many" actions otherwise hand stale paths to the viewer
@@ -547,9 +557,27 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       //   - mtime also equal → fully silent (true no-op or self-echo)
       //   - mtime differs    → silent update so the user's next save still
       //     uses the freshest expectedMtime in the conflict check
+      //
+      // entriesEquivalent compares both sides AFTER filtering out
+      // in-flight deletes — the local loadResult still has the entry the
+      // user just asked us to delete (our setLoadResult patch happens
+      // post-sidecar-save), while the fresh re-Load already lacks it. If
+      // the only difference is one of those in-flight deletes, treat as
+      // self-echo and skip the toast (PR #75 9th, thread J).
       const cur = loadResultRef.current;
+      const inFlightDeletes = inFlightDeletesRef.current;
+      const stripInFlight = (
+        entries: classification.Entry[],
+      ): classification.Entry[] =>
+        inFlightDeletes.size === 0
+          ? entries
+          : entries.filter((e) => !inFlightDeletes.has(e.filename));
       const entriesUnchanged =
-        cur != null && entriesEquivalent(cur.entries, fresh.entries);
+        cur != null &&
+        entriesEquivalent(
+          stripInFlight(cur.entries),
+          stripInFlight(fresh.entries),
+        );
       if (entriesUnchanged && cur != null && cur.mtime === fresh.mtime) {
         return;
       }
@@ -586,6 +614,80 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           commitFreshResult(fresh, fnames);
           return;
       }
+    },
+    [toast, commitFreshResult],
+  );
+
+  // silentRecheckAfterStart bridges the gap between the initial / restore
+  // LoadClassification and StartFolderWatch actually being live: files
+  // dropped into the folder during that window aren't in the cached entries
+  // nor the fsnotify stream. We re-Load (no loading flag flicker, no toast
+  // on success / silent on diff) and route the result through the same
+  // defer / mode / generation logic as a regular watcher payload so
+  // editing-open et al. are still honored (PR #75 9th, thread I).
+  const silentRecheckAfterStart = useCallback(
+    (folder: string) => {
+      void LoadClassification(folder)
+        .then((fresh) => {
+          // Stale guards mirror handleWatcherPayload.
+          if (folderRef.current !== folder) return;
+          if (watchModeRef.current !== WATCH_MODE_AUTO) return;
+          const cur = loadResultRef.current;
+          const inFlightDeletes = inFlightDeletesRef.current;
+          const stripInFlight = (
+            entries: classification.Entry[],
+          ): classification.Entry[] =>
+            inFlightDeletes.size === 0
+              ? entries
+              : entries.filter((e) => !inFlightDeletes.has(e.filename));
+          const entriesUnchanged =
+            cur != null &&
+            entriesEquivalent(
+              stripInFlight(cur.entries),
+              stripInFlight(fresh.entries),
+            );
+          if (entriesUnchanged && cur != null && cur.mtime === fresh.mtime) {
+            return;
+          }
+          if (entriesUnchanged) {
+            setLoadResult(fresh);
+            return;
+          }
+          // A genuine diff existed between initial Load and watcher Start.
+          // No toast (silent — the user didn't ask, and it isn't strictly
+          // an "external change" event), but go through decideAutoMerge so
+          // an open editing popover / conflict / merge prompt parks the
+          // result instead of being clobbered.
+          const fnames = new Set(fresh.entries.map((e) => e.filename));
+          const action = decideAutoMerge({
+            editingOpen: editingRef.current.open,
+            editingFilename: editingRef.current.filename,
+            conflictOpen: conflictRef.current !== null,
+            mergePromptOpen: mergePromptOpenRef.current,
+            freshFilenames: fnames,
+          });
+          switch (action.kind) {
+            case "defer":
+              pendingResultRef.current = { fresh, folder };
+              return;
+            case "commit-editing-removed":
+              toast(`${action.filename} は外部で削除されました`, "warn");
+              setEditing({ open: false, filename: null });
+              commitFreshResult(fresh, fnames);
+              return;
+            case "commit":
+              commitFreshResult(fresh, fnames);
+              return;
+          }
+        })
+        .catch((e) => {
+          // Silent recheck stays silent on failure too — the user will
+          // see the next manual reload's error if there's a real problem.
+          logger.warn("watcher", "post-start silent recheck failed", {
+            folder,
+            err: errorMessage(e),
+          });
+        });
     },
     [toast, commitFreshResult],
   );
@@ -652,7 +754,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           const curMode = watchModeRef.current;
           if (curMode == null) return;
           if (curFolder === folder && curMode === WATCH_MODE_AUTO) {
-            // Intent matches what we just told Go; nothing to correct.
+            // Intent matches what we just told Go; the only thing left
+            // to do is bridge the gap between the (already-completed)
+            // initial LoadClassification and this watcher actually being
+            // live. Files added during that window are missing from both
+            // the cached entries and the fsnotify stream, so we re-Load
+            // silently and merge any diff through the same defer / mode
+            // / gen logic as a regular watcher payload (PR #75 9th,
+            // thread I).
+            silentRecheckAfterStart(folder);
             return;
           }
           if (!curFolder || curMode === WATCH_MODE_OFF) {
@@ -687,7 +797,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         });
     };
     tryStart(folderPath);
-  }, [folderPath, watchMode, toast]);
+  }, [folderPath, watchMode, toast, silentRecheckAfterStart]);
 
   // Keep a ref to the latest handler so the EventsOn subscription below can
   // bind once and never need to re-bind on state-derived identity changes.
@@ -997,76 +1107,100 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       );
       if (!proceed) return false;
 
+      // Mark the file as "we're deleting this" BEFORE DeleteImage so the
+      // watcher Remove event (which can fire within a few ms of the IPC
+      // round-trip — well before our subsequent SaveClassification +
+      // setLoadResult patch lands) is recognised as a self-echo rather
+      // than as an unexplained external removal that triggers a toast +
+      // possible commit. Cleared in the finally below regardless of the
+      // sidecar outcome (PR #75 9th, thread J).
+      inFlightDeletesRef.current.add(filename);
       try {
-        await DeleteImage(cur, filename);
-      } catch (e) {
-        const msg = errorMessage(e);
-        toast("削除に失敗しました (詳細はログ)", "error");
-        logger.error("classification", "delete failed", { filename, err: msg });
-        return false;
-      }
+        try {
+          await DeleteImage(cur, filename);
+        } catch (e) {
+          const msg = errorMessage(e);
+          toast("削除に失敗しました (詳細はログ)", "error");
+          logger.error("classification", "delete failed", {
+            filename,
+            err: msg,
+          });
+          return false;
+        }
 
-      // File is gone on disk. From here we are best-effort on the sidecar.
-      const removeFiltered = (entries: classification.Entry[]) =>
-        entries.filter((e) => e.filename !== filename);
+        // File is gone on disk. From here we are best-effort on the sidecar.
+        const removeFiltered = (entries: classification.Entry[]) =>
+          entries.filter((e) => e.filename !== filename);
 
-      let entriesAfter = removeFiltered(loadResult.entries);
-      let nextMtime = loadResult.mtime;
-      let sidecarErr: string | null = null;
+        let entriesAfter = removeFiltered(loadResult.entries);
+        let nextMtime = loadResult.mtime;
+        let sidecarErr: string | null = null;
 
-      try {
-        const out = await SaveClassification(cur, entriesAfter, loadResult.mtime);
-        nextMtime = out.mtime;
-      } catch (e) {
-        const msg = errorMessage(e);
-        if (msg.startsWith(CONFLICT_PREFIX)) {
-          // Pick up external edits then re-apply the delete with the fresh mtime.
-          const fresh = await loadInternal(cur);
-          if (fresh) {
-            entriesAfter = removeFiltered(fresh.entries);
-            try {
-              const out = await SaveClassification(cur, entriesAfter, fresh.mtime);
-              nextMtime = out.mtime;
-            } catch (e2) {
-              sidecarErr = errorMessage(e2);
+        try {
+          const out = await SaveClassification(
+            cur,
+            entriesAfter,
+            loadResult.mtime,
+          );
+          nextMtime = out.mtime;
+        } catch (e) {
+          const msg = errorMessage(e);
+          if (msg.startsWith(CONFLICT_PREFIX)) {
+            // Pick up external edits then re-apply the delete with the
+            // fresh mtime.
+            const fresh = await loadInternal(cur);
+            if (fresh) {
+              entriesAfter = removeFiltered(fresh.entries);
+              try {
+                const out = await SaveClassification(
+                  cur,
+                  entriesAfter,
+                  fresh.mtime,
+                );
+                nextMtime = out.mtime;
+              } catch (e2) {
+                sidecarErr = errorMessage(e2);
+              }
+            } else {
+              sidecarErr = "reload failed";
             }
           } else {
-            sidecarErr = "reload failed";
+            sidecarErr = msg;
           }
-        } else {
-          sidecarErr = msg;
         }
-      }
 
-      setLoadResult((prev) => {
-        if (!prev) return prev;
-        return classification.LoadResult.createFrom({
-          ...prev,
-          entries: entriesAfter,
-          mtime: nextMtime,
+        setLoadResult((prev) => {
+          if (!prev) return prev;
+          return classification.LoadResult.createFrom({
+            ...prev,
+            entries: entriesAfter,
+            mtime: nextMtime,
+          });
         });
-      });
-      setSelected((curSel) => {
-        if (!curSel.has(filename)) return curSel;
-        const next = new Set(curSel);
-        next.delete(filename);
-        return next;
-      });
+        setSelected((curSel) => {
+          if (!curSel.has(filename)) return curSel;
+          const next = new Set(curSel);
+          next.delete(filename);
+          return next;
+        });
 
-      if (sidecarErr) {
-        toast(
-          `${filename} を削除しましたが、サイドカー更新に失敗しました (詳細はログ)`,
-          "warn",
-        );
-        logger.warn("classification", "delete sidecar save failed", {
-          filename,
-          err: sidecarErr,
-        });
-      } else {
-        toast(`${filename} をゴミ箱に送りました`, "info");
-        logger.info("classification", "deleted", { filename });
+        if (sidecarErr) {
+          toast(
+            `${filename} を削除しましたが、サイドカー更新に失敗しました (詳細はログ)`,
+            "warn",
+          );
+          logger.warn("classification", "delete sidecar save failed", {
+            filename,
+            err: sidecarErr,
+          });
+        } else {
+          toast(`${filename} をゴミ箱に送りました`, "info");
+          logger.info("classification", "deleted", { filename });
+        }
+        return true;
+      } finally {
+        inFlightDeletesRef.current.delete(filename);
       }
-      return true;
     },
     [confirm, loadInternal, loadResult, toast],
   );
