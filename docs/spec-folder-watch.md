@@ -176,6 +176,36 @@
   方針表を区分ベースに再構成 — root vanish / file root / image Remove /
   symlink / subtree rename-out / image-ext dir / IN_IGNORED dedup など現行
   回帰範囲を反映 (件数は grep 参照、thread H)。
+- 2026-05-17 PR #75 21st レビュー対応: (1) **実装側**: `inFlightDeletesRef` を
+  `Map<folder, Set<filename>>` に変更し、`payload.folder` (handler) / 引数
+  `folder` (silentRecheckAfterStart) でスコープして引く。フォルダ切替時に旧
+  folder の削除中 filename が新 folder の watcher self-echo 判定に混入して
+  entriesEquivalent が差分を消し一覧が古いまま残る race を解消 (§5.4 本文も
+  同期、thread A)。(2) **実装側**: `Manager.Start` の root 検証を `os.Stat`
+  から `os.Lstat` に変更し、symlink-to-dir root を明示拒否 (`filepath.WalkDir`
+  が root を Lstat する都合で symlink を辿らず子孫 watch が張れない状態の
+  予防。`TestStart_FailsOnSymlinkRoot` で pin、thread F)。20th 改訂履歴の
+  `os.Stat` 記述はこの commit で `os.Lstat` に置換済。(3) **実装側**: basename
+  が `_classification.json` でもパスが dir なら sidecar 早期 return せず
+  dir-Create / non-image Remove 分岐へ流す (Create は `os.Lstat`、Remove/Rename
+  は `st.watchedDirs` で dir 判別。`TestStart_SidecarNamedDirectoryHandledAsDir`
+  で pin、thread G)。(4) §7.1 起動シーケンス擬似コードの先頭に `os.Lstat`
+  による dir / symlink 拒否を追加し現行実装と整合 (thread B)。(5) §6.2
+  EventsEmit の API 例を `watcher.ClassificationChangedEvent` 経由に修正 +
+  D-1 ドリフト検知意図を明記 (thread C)。(6) §6.3 ライフサイクル責務を
+  「`openFolder` / auto-load effect → `folderPath` 更新のみ。Start/Stop は
+  folder-watch effect が `dispatchWatchIntentRef` 経由で発行する単一導管」
+  に書き直し、intent reconcile の設計点を明記 (thread D)。(7) AGENTS.md H-8
+  race matrix の `silentRecheckAfterStart` 行を実装 (entry=– / post-await=✓
+  / error clear=✓) に同期 (thread E)。
+- 2026-05-17 PR #75 22nd レビュー対応: (1) **実装側**: `Manager.Start` で
+  「異なる root への切替時」は新 root の `Lstat` / symlink / dir 検証より前に
+  `stopLocked()` で旧 watch をテアダウン。検証失敗で early return しても Go は
+  no-active-watch 状態になり、JS の degraded 意図と整合する。`same-root + live`
+  判定は検証より前に維持 (一時的 Lstat 失敗で動いている watch を壊さない)。
+  `TestStart_FailedNewRootStopsExisting` で「Start(a) success → Start(file)
+  失敗 → `Current()==''`」を pin (thread H)。本 spec の変更は説明追加のみ、
+  挙動側は §10 の degraded mode 遷移と整合している。
 
 ---
 
@@ -345,10 +375,20 @@ severity = `info`。`useToastFn` を流用。連続バーストは Go 側の 200
 - `conflict !== null` (競合ダイアログ表示中)
 - `mergePrompt.open === true` (子→親マージ確認中)
 
-遅延中はイベントを内部フラグ (`pendingResultRef`) に保持し、上記いずれかが閉じた
-瞬間に **再度 `decideAutoMerge` を評価して** commit する。再評価は重要で、
-deferred 中に編集対象が削除されているケースがあれば、replay 時に
-`commit-editing-removed` 経路で popover を閉じる必要がある。
+遅延中はイベントを内部フラグ (`pendingResultRef`) に `{ fresh, folder, capturedGen }`
+の 3 フィールドで保持し、上記いずれかが閉じた瞬間に **再度 `decideAutoMerge` を評価して**
+commit する。再評価は重要で、deferred 中に編集対象が削除されているケースがあれば、
+replay 時に `commit-editing-removed` 経路で popover を閉じる必要がある。
+
+replay (`performReplay`) 起動時の破棄条件 (どれかに該当すれば pending を捨てる):
+
+- `folder !== folderRef.current` — 編集中にフォルダを切り替えた → 旧 folder の
+  `LoadResult` を現フォルダに commit しない
+- `watchModeRef.current === WATCH_MODE_OFF` — 編集中に監視を off にした → 保留分も破棄
+- `capturedGen !== requestGenRef.current` — park 後に他経路 (手動 reload / mutation /
+  別 watcher payload) が gen を bump した → 他経路の commit が既に走っているため
+  pending は古い。`sidecar mtime` 比較だけだと entries だけ変化のケースで巻き戻し可能
+  (PR #75 11th)。
 
 **例外**: 編集ポップオーバーの対象 filename が再 Load 後の entries に **存在
 しない** 場合は即座に:
@@ -390,6 +430,16 @@ entries 内容 (filename / folder / confidence / note を順序込み深比較) 
 これにより通常の編集 / 削除操作で誤通知が出ない。entries 比較は
 `Service.Load` の戻り順序 (sidecar 順 → アルファベット順) が決定的なので
 順序込み比較で安全。
+
+`DeleteImage` 経由の self-echo は entries 比較だけでは sidecar save の完了タイミングに
+依存して取り逃すため、別途 `inFlightDeletesRef: Map<folder, Set<filename>>` で
+folder スコープで削除中 filename を保持する。`deleteOne` の冒頭で `(folder, filename)` を
+add → finally で必ず delete。watcher handler / `silentRecheckAfterStart` の
+entriesEquivalent 判定では `payload.folder` (handler) または引数 `folder` (recheck) で
+Map 引きしてから両側の entries / fresh から in-flight filename を strip して比較する。
+**Map の key を folder にしている**のは、フォルダ切替後に旧 folder で進行中だった
+delete の filename が新 folder の watcher self-echo 判定に混入して差分を消す race を
+避けるため (PR #75 21st thread A)。
 
 **競合**: ユーザがちょうど編集 → 保存しようとしたタイミングで sidecar が更新
 されると、既存の mtime 競合検出 (`SaveJSON` の `ErrConflict`) に乗る。§5.3 の
@@ -436,8 +486,9 @@ func (a *App) StopFolderWatch() error
 `Start` の順で再構築する。`StopFolderWatch` は idempotent (未起動でも no-op)。
 `StartFolderWatch(root)` を同 root で連続呼び出しした場合は、live goroutine が走って
 いる限り Go 側で no-op (`Manager.Start` の same-root short-circuit)。これにより
-フロントが Start 完了後の stale 判定で `tryStart(curFolder)` を再 dispatch しても、
-Go 側で重複 walk は走らない (PR #75 7th)。
+フロントが Start 完了後の stale 判定で `dispatchWatchIntentRef.current()` を再 dispatch しても、
+Go 側で重複 walk は走らない (PR #75 7th)。`useClassification` には `tryStart` のような
+個別ヘルパは持たず、Start/Stop は §6.3 の単一導管 `dispatchWatchIntentRef` に集約する。
 
 **フロント側 stale 検出**: Wails IPC は call ごとに別 goroutine で dispatch される
 ため、JS 側で連続発行した `Start("A")` → `Start("B")` が Go 側 `m.mu` の取得順で
