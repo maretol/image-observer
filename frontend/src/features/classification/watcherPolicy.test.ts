@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CLASSIFICATION_CHANGED_EVENT } from "./useClassification";
 import {
   decideAutoMerge,
   formatChangeSummary,
@@ -22,6 +23,15 @@ const payload = (over: Partial<ChangedPayload> = {}): ChangedPayload => ({
   renamedFiles: 0,
   sidecarChanged: false,
   ...over,
+});
+
+// AGENTS.md D-1 drift-detector. The Go side has the matching
+// TestClassificationChangedEventName in internal/watcher/watcher_test.go;
+// both pin the literal to the same string so a one-sided rename trips CI.
+describe("CLASSIFICATION_CHANGED_EVENT", () => {
+  it("matches the Go-side ClassificationChangedEvent literal", () => {
+    expect(CLASSIFICATION_CHANGED_EVENT).toBe("classification:changed");
+  });
 });
 
 describe("formatChangeSummary", () => {

@@ -26,13 +26,15 @@ import {
   type ChangedPayload,
 } from "./watcherPolicy";
 
-// classificationChangedEvent must match the Go-side constant in app.go.
-// Single source: this string IS the event name and the Go constant just
-// happens to spell it the same. If you rename one, rename both — there is
-// no shared definition because the watcher namespace isn't auto-generated
-// by wails generate module (the payload type never appears in a binding
-// signature).
-const CLASSIFICATION_CHANGED_EVENT = "classification:changed";
+// CLASSIFICATION_CHANGED_EVENT mirrors the Go-side
+// `watcher.ClassificationChangedEvent`. There is no auto-generated TS
+// namespace for the watcher package (Wails only emits TS for types that
+// appear in binding signatures, and EventsEmit payloads do not), so the
+// string literal is duplicated. A vitest assertion in
+// `watcherPolicy.test.ts` pins this constant to the same literal as the
+// Go-side test (`internal/watcher.TestClassificationChangedEventName`);
+// renaming one without the other trips CI (AGENTS.md D-1).
+export const CLASSIFICATION_CHANGED_EVENT = "classification:changed";
 
 const CONFLICT_PREFIX = "CONFLICT:";
 
@@ -114,8 +116,10 @@ type Opts = {
   initialList?: wstate.ListTabState | null;
   confirm: ConfirmFn;
   // settings.watchMode: "auto" | "off". Undefined while settings are still
-  // loading; we treat that as "auto" so the first folder open still gets a
-  // watch (it will be torn down + restarted if the user explicitly set "off").
+  // loading; the watch effect intentionally waits in that state — Start
+  // would briefly run a watcher for users who have persisted watchMode =
+  // "off", and Stop would race with a settings-load that immediately wants
+  // a Start. The effect kicks in once settings hydrate.
   watchMode?: string;
 };
 
@@ -178,9 +182,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   }, [mergePrompt.open]);
 
   // pendingResultRef parks a LoadClassification result that arrived during a
-  // defer state (conflict or mergePrompt). The deferral-close effect below
-  // commits it when the user finishes resolving.
-  const pendingResultRef = useRef<classification.LoadResult | null>(null);
+  // defer state (conflict, mergePrompt, or editing-open with target intact).
+  // The deferral-close effects below commit it when the user finishes
+  // resolving. `folder` is captured at park time so a folder-switch while
+  // deferred causes the replay to discard the now-stale result instead of
+  // splatting the wrong folder's entries onto the new one (PR #75 review).
+  const pendingResultRef = useRef<{
+    fresh: classification.LoadResult;
+    folder: string;
+  } | null>(null);
 
   const loadInternal = useCallback(
     async (path: string) => {
@@ -374,17 +384,27 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   //
   // handleWatcherPayload runs on every flushed "classification:changed"
   // event from the Go watcher (see internal/watcher + docs/spec-folder-watch.md).
-  // It reads decision-relevant state via refs so the listener can stay
-  // bound for the full (folderPath, watchMode) lifetime; otherwise we'd
-  // tear down + re-subscribe on every keystroke or selection change.
+  // It reads decision-relevant state via refs so its identity can change on
+  // each render without us needing to re-bind the EventsOn listener (see
+  // the mount-once subscription effect below + handlerRef indirection).
   //
   // loadResultRef mirrors loadResult so the handler can compare the incoming
   // re-Load to what we already display without depending on loadResult
-  // (which would force a re-subscribe each render).
+  // directly (which would force a new handleWatcherPayload identity each
+  // render and grow the dep churn).
   const loadResultRef = useRef<classification.LoadResult | null>(loadResult);
   useEffect(() => {
     loadResultRef.current = loadResult;
   }, [loadResult]);
+
+  // requestGenRef bumps on every payload arrival. Each handler invocation
+  // captures its own generation and checks `current === mine` at every
+  // commit point. Because the listener fires `void handlerRef.current(...)`
+  // without awaiting, two debounce flushes arriving close together would
+  // otherwise overlap their LoadClassification round-trips and the slower
+  // (older) result could land *after* the faster (newer) one, rewinding
+  // the displayed entries to a stale snapshot (PR #75 review).
+  const requestGenRef = useRef(0);
 
   // commitFreshResult swaps loadResult to the watcher-supplied snapshot AND
   // drops any selected filenames that no longer exist on disk. The bulk
@@ -414,6 +434,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         // the user switched folders mid-flush. Drop quietly.
         return;
       }
+      const myGen = ++requestGenRef.current;
 
       let fresh: classification.LoadResult | null = null;
       try {
@@ -421,18 +442,21 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       } catch (e) {
         // Mirror the manual-reload error path so a deleted / unreadable
         // folder surfaces to the user instead of silently leaving a stale
-        // grid (PR #75 review).
+        // grid (PR #75 review). Also drop the on-screen result — leaving
+        // it in place after a load failure invites the user to act on
+        // entries that no longer exist on disk.
         const msg = errorMessage(e);
         setError(msg);
+        setLoadResult(null);
         toast(`読み込みに失敗しました: ${msg}`, "error");
         logger.warn("classification", "auto-merge load failed", { err: msg });
         return;
       }
-      if (folderRef.current !== payload.folder) {
-        // Folder switched while LoadClassification was in flight; discard
-        // to avoid clobbering the new folder's state with the old one.
-        return;
-      }
+      // Discard the result if a newer payload has already started its own
+      // round-trip (out-of-order Load completion) or if the folder switched
+      // while we were awaiting Load.
+      if (myGen !== requestGenRef.current) return;
+      if (folderRef.current !== payload.folder) return;
 
       // Self-echo / no-op detection. Our own Save/Delete IPCs cause watcher
       // events too, and surfacing "外部で更新されました" for them is just
@@ -465,8 +489,9 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       });
       switch (action.kind) {
         case "defer":
-          // Park the fresh result; deferral-close effect commits it.
-          pendingResultRef.current = fresh;
+          // Park the fresh result *with* its folder so the deferral-close
+          // replay can discard it if the user switched folders meanwhile.
+          pendingResultRef.current = { fresh, folder: payload.folder };
           return;
         case "commit-editing-removed":
           toast(`${action.filename} は外部で削除されました`, "warn");
@@ -556,8 +581,16 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     const wasInDefer = wasInDeferRef.current;
     wasInDeferRef.current = inDefer;
     if (!(wasInDefer && !inDefer)) return;
-    const fresh = pendingResultRef.current;
-    if (!fresh) return;
+    const pending = pendingResultRef.current;
+    if (!pending) return;
+    if (pending.folder !== folderRef.current) {
+      // Folder switched while parked; the stored result is for the wrong
+      // tab. Drop it; a fresh watcher event for the current folder will
+      // arrive on its own (PR #75 review).
+      pendingResultRef.current = null;
+      return;
+    }
+    const { fresh } = pending;
     const fnames = new Set(fresh.entries.map((e) => e.filename));
     const action = decideAutoMerge({
       editingOpen: editingRef.current.open,
@@ -579,8 +612,8 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     commitFreshResult(fresh, fnames);
   }, [mergePrompt.open, conflict, toast, commitFreshResult]);
 
-  // Editing-close replay: editing.open transitioning false → true never
-  // matters here; false → true matters when there's a parked payload.
+  // Editing-close replay: editing.open transitioning true → false matters
+  // when there's a parked payload waiting for the popover to close.
   const wasEditingOpenRef = useRef(editing.open);
   useEffect(() => {
     const wasOpen = wasEditingOpenRef.current;
@@ -589,9 +622,14 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     // editing just closed; don't replay if conflict/merge still hold the
     // defer (they'll trigger their own replay when they close).
     if (mergePromptOpenRef.current || conflictRef.current !== null) return;
-    const fresh = pendingResultRef.current;
-    if (!fresh) return;
+    const pending = pendingResultRef.current;
+    if (!pending) return;
+    if (pending.folder !== folderRef.current) {
+      pendingResultRef.current = null;
+      return;
+    }
     pendingResultRef.current = null;
+    const { fresh } = pending;
     const fnames = new Set(fresh.entries.map((e) => e.filename));
     commitFreshResult(fresh, fnames);
   }, [editing.open, commitFreshResult]);
