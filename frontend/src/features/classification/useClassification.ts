@@ -165,9 +165,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   }, [folderPath]);
 
   // Refs that the watcher event handler reads. Mirrored from state so the
-  // single EventsOn callback (registered once per folder/watchMode change)
-  // always sees the latest decision-relevant values without needing a fresh
-  // closure on every state change.
+  // single EventsOn callback (registered once for the hook's lifetime — see
+  // the empty-deps subscription effect below) always sees the latest
+  // decision-relevant values without needing a fresh closure on every state
+  // change.
   const editingRef = useRef<EditingState>(editing);
   useEffect(() => {
     editingRef.current = editing;
@@ -440,11 +441,17 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       try {
         fresh = await LoadClassification(folderRef.current);
       } catch (e) {
+        // Suppress this catch if the failure belongs to a stale request
+        // (newer payload already in flight, or folder switched out from
+        // under us). Without these guards a slow-failing older Load could
+        // wipe a successfully-displayed newer result (PR #75 review).
+        if (myGen !== requestGenRef.current) return;
+        if (folderRef.current !== payload.folder) return;
         // Mirror the manual-reload error path so a deleted / unreadable
         // folder surfaces to the user instead of silently leaving a stale
-        // grid (PR #75 review). Also drop the on-screen result — leaving
-        // it in place after a load failure invites the user to act on
-        // entries that no longer exist on disk.
+        // grid. Also drop the on-screen result — leaving it in place
+        // after a load failure invites the user to act on entries that
+        // no longer exist on disk.
         const msg = errorMessage(e);
         setError(msg);
         setLoadResult(null);
@@ -452,9 +459,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         logger.warn("classification", "auto-merge load failed", { err: msg });
         return;
       }
-      // Discard the result if a newer payload has already started its own
-      // round-trip (out-of-order Load completion) or if the folder switched
-      // while we were awaiting Load.
+      // Discard the success result for the same reasons.
       if (myGen !== requestGenRef.current) return;
       if (folderRef.current !== payload.folder) return;
 
@@ -476,8 +481,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         return;
       }
 
-      const summary = formatChangeSummary(payload);
-      if (summary) toast(summary, "info");
+      // formatChangeSummary always returns a non-empty string (PR #75
+      // review: counter-less anyChange payloads still warrant a generic
+      // notification, see watcherPolicy.ts).
+      toast(formatChangeSummary(payload), "info");
 
       const fnames = new Set(fresh.entries.map((e) => e.filename));
       const action = decideAutoMerge({
@@ -565,43 +572,69 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     );
     return () => {
       unsub();
-      // Hook is going away — make sure no detached goroutine survives in Go.
-      void StopFolderWatch();
+      // No explicit StopFolderWatch here. React.StrictMode runs cleanup
+      // → re-setup on the dev double-mount; queuing a Stop here would
+      // race with the next mount's StartFolderWatch and could land in
+      // Go *after* the new Start, leaving dev silently unmonitored
+      // (PR #75 review). For real app shutdown the watcher is torn down
+      // by main.go's OnShutdown calling app.shutdown → Manager.Stop,
+      // so the Go goroutine doesn't leak either way.
     };
   }, []);
 
-  // Deferral-close: when both conflict and mergePrompt are closed AND a
-  // pending result has been parked, commit it (re-running the decision so
-  // the editing-target-removed exception still fires if it arose while we
-  // were deferring; if editing is still open with target present we keep
-  // deferring — saved by the *next* close trigger).
-  const wasInDeferRef = useRef(false);
-  useEffect(() => {
-    const inDefer = mergePrompt.open || conflict !== null;
-    const wasInDefer = wasInDeferRef.current;
-    wasInDeferRef.current = inDefer;
-    if (!(wasInDefer && !inDefer)) return;
+  // performReplay handles the parked-payload commit for *any* defer-source
+  // closing (conflict, mergePrompt, or editing). It centralises four
+  // corner cases that the per-effect implementations kept getting subtly
+  // wrong as more cases piled up:
+  //   1) folder switched while deferred → drop pending
+  //   2) mtime advanced (user saved while deferred → pending.fresh is
+  //      pre-save) → re-Load instead of committing the stale snapshot,
+  //      otherwise the user's edit gets visually rolled back (PR #75
+  //      review)
+  //   3) re-running decideAutoMerge so editing-target-removed exception
+  //      still fires if it arose while deferring
+  //   4) re-parking when one defer source closed but another is still
+  //      open (e.g. conflict resolved → editing still open with target)
+  const performReplay = useCallback(async () => {
     const pending = pendingResultRef.current;
     if (!pending) return;
     if (pending.folder !== folderRef.current) {
       // Folder switched while parked; the stored result is for the wrong
       // tab. Drop it; a fresh watcher event for the current folder will
-      // arrive on its own (PR #75 review).
+      // arrive on its own.
       pendingResultRef.current = null;
       return;
     }
-    const { fresh } = pending;
+    let fresh = pending.fresh;
+    const cur = loadResultRef.current;
+    if (cur && cur.mtime !== fresh.mtime) {
+      // mtime advanced past the park snapshot, which means we (or another
+      // path) wrote the sidecar while deferred. The parked fresh is now
+      // pre-save state — committing it would visually undo the user's
+      // edit. Re-Load to pick up the latest entries + mtime.
+      pendingResultRef.current = null;
+      try {
+        fresh = await LoadClassification(folderRef.current);
+      } catch (e) {
+        logger.warn("classification", "replay reload failed", {
+          err: errorMessage(e),
+        });
+        return;
+      }
+      if (folderRef.current !== pending.folder) return;
+    }
     const fnames = new Set(fresh.entries.map((e) => e.filename));
     const action = decideAutoMerge({
       editingOpen: editingRef.current.open,
       editingFilename: editingRef.current.filename,
-      conflictOpen: false,
-      mergePromptOpen: false,
+      conflictOpen: conflictRef.current !== null,
+      mergePromptOpen: mergePromptOpenRef.current,
       freshFilenames: fnames,
     });
     if (action.kind === "defer") {
-      // editing is still open with target present → keep the result parked
-      // until editing closes (closeEdit's effect below picks it up).
+      // Re-park with the possibly-fresher snapshot so the next close
+      // trigger replays from the latest known state.
+      pendingResultRef.current = { fresh, folder: pending.folder };
       return;
     }
     pendingResultRef.current = null;
@@ -610,29 +643,29 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       setEditing({ open: false, filename: null });
     }
     commitFreshResult(fresh, fnames);
-  }, [mergePrompt.open, conflict, toast, commitFreshResult]);
+  }, [toast, commitFreshResult]);
 
-  // Editing-close replay: editing.open transitioning true → false matters
-  // when there's a parked payload waiting for the popover to close.
+  // Replay triggers: any of conflict / mergePrompt / editing transitioning
+  // open → closed. performReplay drops itself if any *other* defer source
+  // is still open.
+  const wasInDeferRef = useRef(false);
+  useEffect(() => {
+    const inDefer = mergePrompt.open || conflict !== null;
+    const wasInDefer = wasInDeferRef.current;
+    wasInDeferRef.current = inDefer;
+    if (wasInDefer && !inDefer) {
+      void performReplay();
+    }
+  }, [mergePrompt.open, conflict, performReplay]);
+
   const wasEditingOpenRef = useRef(editing.open);
   useEffect(() => {
     const wasOpen = wasEditingOpenRef.current;
     wasEditingOpenRef.current = editing.open;
-    if (!(wasOpen && !editing.open)) return;
-    // editing just closed; don't replay if conflict/merge still hold the
-    // defer (they'll trigger their own replay when they close).
-    if (mergePromptOpenRef.current || conflictRef.current !== null) return;
-    const pending = pendingResultRef.current;
-    if (!pending) return;
-    if (pending.folder !== folderRef.current) {
-      pendingResultRef.current = null;
-      return;
+    if (wasOpen && !editing.open) {
+      void performReplay();
     }
-    pendingResultRef.current = null;
-    const { fresh } = pending;
-    const fnames = new Set(fresh.entries.map((e) => e.filename));
-    commitFreshResult(fresh, fnames);
-  }, [editing.open, commitFreshResult]);
+  }, [editing.open, performReplay]);
 
   const openEdit = useCallback((filename: string) => {
     setEditing({ open: true, filename });
