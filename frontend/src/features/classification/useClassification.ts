@@ -627,8 +627,14 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // editing-open et al. are still honored (PR #75 9th, thread I).
   const silentRecheckAfterStart = useCallback(
     (folder: string) => {
+      // Generation-aware like every other async LoadClassification path
+      // (PR #75 10th, suppressed-A). If a manual reload / watcher payload
+      // / local mutation supersedes us while we're awaiting, our result
+      // is discarded so we can't roll back the newer commit.
+      const myGen = ++requestGenRef.current;
       void LoadClassification(folder)
         .then((fresh) => {
+          if (myGen !== requestGenRef.current) return;
           // Stale guards mirror handleWatcherPayload.
           if (folderRef.current !== folder) return;
           if (watchModeRef.current !== WATCH_MODE_AUTO) return;
@@ -683,6 +689,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         .catch((e) => {
           // Silent recheck stays silent on failure too — the user will
           // see the next manual reload's error if there's a real problem.
+          if (myGen !== requestGenRef.current) return;
           logger.warn("watcher", "post-start silent recheck failed", {
             folder,
             err: errorMessage(e),
@@ -712,92 +719,113 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   //      a Stop fired here could land in Go after the next mount's Start.
   //      The final teardown on real app shutdown is handled by main.go's
   //      OnShutdown → app.shutdown → Manager.Stop instead.
-  useEffect(() => {
-    if (watchMode == null) {
-      // Settings haven't arrived yet; do nothing. Starting now would briefly
-      // run a watcher for a user who has explicitly persisted watchMode = "off"
-      // (their preference loads a few hundred ms after mount, see App.tsx →
-      // useSettings). Stopping now would race with a settings-load that may
-      // immediately want a Start (PR #75 review).
+  // dispatchWatchIntent is the single entry point for any Start/Stop IPC.
+  // Wails dispatches each Bind call into its own Go goroutine, so JS-side
+  // call ordering is NOT preserved at Go's mu lock — Start("A") → Start("B")
+  // from JS can land as Start("B") then Start("A"), leaving Go watching the
+  // wrong folder. To recover from any such reordering we re-evaluate the
+  // current intent (refs are synced render-time) after EVERY IPC completion
+  // and re-dispatch if it diverges. This converges to the latest intent
+  // regardless of arrival order:
+  //   - Start on same root + live goroutine: Go-side Manager.Start
+  //     short-circuits to no-op (no walk).
+  //   - Stop: idempotent.
+  // so re-dispatching is always safe — at worst a duplicate IPC.
+  //
+  // Past variants this resolves (one per round, PR #75):
+  //   - Round 7 thread C: Start success-side stale check
+  //   - Round 10 suppressed-B: Start failure left Go without any watch
+  //     because Manager.Start tears down old root BEFORE Add'ing new
+  //   - Round 10 suppressed-C: mode-switch Stop completing after a
+  //     later Start arrived stopped the wrong watcher
+  //   - Round 10 suppressed-D: stale-start correction Stop completing
+  //     out of order with same effect
+  const dispatchWatchIntentRef = useRef<() => void>(() => {});
+  dispatchWatchIntentRef.current = () => {
+    const folder = folderRef.current;
+    const mode = watchModeRef.current;
+    if (mode == null) {
+      // Settings haven't arrived yet; do nothing. Starting now would
+      // briefly run a watcher for a user who has explicitly persisted
+      // watchMode = "off". The effect re-fires once watchMode hydrates.
       return;
     }
-    if (!folderPath || watchMode === WATCH_MODE_OFF) {
-      // Either no folder to watch or the user disabled monitoring. Stop is
-      // a no-op when nothing is running. Also drop any parked auto-merge
-      // result — replaying it later (when an editing popover closes) would
-      // surprise a user who explicitly opted out (PR #75 review
-      // suppressed-g).
+    if (!folder || mode === WATCH_MODE_OFF) {
+      // Drop any parked auto-merge result first — replaying it after
+      // off-switch would surprise a user who opted out (suppressed-g).
       pendingResultRef.current = null;
-      void StopFolderWatch().catch((e) => {
-        // Swallow into the log so an unhandled rejection doesn't bubble
-        // up through window.onerror (PR #75 review suppressed-f).
-        logger.warn("watcher", "stop failed", { err: errorMessage(e) });
-      });
-      return;
-    }
-    // tryStart wraps StartFolderWatch with a success-side stale check.
-    // Wails-level IPC ordering across distinct Start/Stop calls is not
-    // guaranteed (each call dispatches into Go via its own goroutine),
-    // so a later Start/Stop can race past our Start at Go's mu lock and
-    // leave the Go side watching the wrong folder. Re-issuing the
-    // *current* intent on success is safe because:
-    //   - StartFolderWatch on the same root that's already being watched
-    //     is a no-op at Go (Manager.Start same-root + live goroutine
-    //     short-circuits without re-walking)
-    //   - StopFolderWatch is idempotent
-    // so a duplicate IPC just confirms the intended state; a corrective
-    // IPC fixes the race (PR #75 review 7th, thread C).
-    const tryStart = (folder: string): void => {
-      void StartFolderWatch(folder)
+      void StopFolderWatch()
         .then(() => {
-          const curFolder = folderRef.current;
-          const curMode = watchModeRef.current;
-          if (curMode == null) return;
-          if (curFolder === folder && curMode === WATCH_MODE_AUTO) {
-            // Intent matches what we just told Go; the only thing left
-            // to do is bridge the gap between the (already-completed)
-            // initial LoadClassification and this watcher actually being
-            // live. Files added during that window are missing from both
-            // the cached entries and the fsnotify stream, so we re-Load
-            // silently and merge any diff through the same defer / mode
-            // / gen logic as a regular watcher payload (PR #75 9th,
-            // thread I).
-            silentRecheckAfterStart(folder);
-            return;
+          // After Stop completes, intent may have moved back to auto /
+          // a folder. Re-check and re-dispatch so the latest intent is
+          // honored even if this Stop landed at Go after a later Start
+          // (PR #75 10th, suppressed-C / -D).
+          if (
+            folderRef.current &&
+            watchModeRef.current === WATCH_MODE_AUTO
+          ) {
+            dispatchWatchIntentRef.current();
           }
-          if (!curFolder || curMode === WATCH_MODE_OFF) {
-            // User opted out / cleared the folder while our Start was
-            // in flight. Issue Stop so Go releases the FD / goroutine.
-            void StopFolderWatch().catch((e) =>
-              logger.warn("watcher", "stop failed (stale start correction)", {
-                err: errorMessage(e),
-              }),
-            );
-            return;
-          }
-          // Different folder is now intended. Re-issue Start for it.
-          // Recurses through tryStart so its own success path is also
-          // stale-checked (in case state keeps moving).
-          tryStart(curFolder);
         })
         .catch((e) => {
-          // Stale check: if the user has switched folders or disabled
-          // monitoring since this Start was issued, the failure belongs
-          // to a watcher we no longer care about — surfacing it would
-          // mis-attribute a Start("A") failure to the current Start("B")
-          // (PR #75 review suppressed-e).
-          if (folderRef.current !== folder) return;
-          if (watchModeRef.current !== WATCH_MODE_AUTO) return;
+          // Swallow into the log so an unhandled rejection doesn't
+          // bubble up (PR #75 review suppressed-f).
+          logger.warn("watcher", "stop failed", { err: errorMessage(e) });
+          // Same intent-reconcile pass on error.
+          if (
+            folderRef.current &&
+            watchModeRef.current === WATCH_MODE_AUTO
+          ) {
+            dispatchWatchIntentRef.current();
+          }
+        });
+      return;
+    }
+    // mode === auto && folder !== ""
+    void StartFolderWatch(folder)
+      .then(() => {
+        const curFolder = folderRef.current;
+        const curMode = watchModeRef.current;
+        if (curMode === WATCH_MODE_AUTO && curFolder === folder) {
+          // Intent matches what we just told Go. Bridge the initial
+          // LoadClassification ↔ watch-live gap with a silent recheck
+          // (PR #75 9th, thread I).
+          silentRecheckAfterStart(folder);
+          return;
+        }
+        // Intent moved while we were awaiting. Reconcile by re-dispatching.
+        dispatchWatchIntentRef.current();
+      })
+      .catch((e) => {
+        const curFolder = folderRef.current;
+        const curMode = watchModeRef.current;
+        if (curFolder === folder && curMode === WATCH_MODE_AUTO) {
+          // Current intent matches the one we just failed to start —
+          // surface the failure to the user.
           const msg = errorMessage(e);
           toast(
             "自動監視を開始できませんでした (再読み込みボタンで手動更新してください)",
             "warn",
           );
           logger.warn("watcher", "start failed", { folder, err: msg });
-        });
-    };
-    tryStart(folderPath);
-  }, [folderPath, watchMode, toast, silentRecheckAfterStart]);
+          return;
+        }
+        // Intent moved AND our Start failed. Manager.Start tears down
+        // any prior watch BEFORE Add'ing the new root, so a stale failure
+        // means Go currently has no watch at all — we must re-dispatch
+        // to (re-)establish the latest intent (PR #75 10th, suppressed-B).
+        dispatchWatchIntentRef.current();
+      });
+  };
+
+  useEffect(() => {
+    dispatchWatchIntentRef.current();
+    // folderPath / watchMode are dependencies but the body reads from refs
+    // (which are render-time synced) to keep the dispatcher itself
+    // closure-free. toast / silentRecheckAfterStart are stable useCallbacks
+    // so omitting them from deps is intentional.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderPath, watchMode]);
 
   // Keep a ref to the latest handler so the EventsOn subscription below can
   // bind once and never need to re-bind on state-derived identity changes.
@@ -985,6 +1013,13 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           entry,
           loadResult.mtime,
         );
+        // Bump the shared generation BEFORE patching local state so any
+        // watcher / replay / silent-recheck / manual reload whose
+        // LoadClassification started before our save returned is now
+        // marked stale and its setLoadResult is skipped. Without this a
+        // pre-save Load returning out-of-order would visually undo the
+        // user's edit (PR #75 10th, thread A).
+        ++requestGenRef.current;
         // Patch the loadResult locally so the grid updates without a full reload.
         setLoadResult((prev) => {
           if (!prev) return prev;
@@ -1169,6 +1204,12 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           }
         }
 
+        // Bump generation before patching local state so any in-flight
+        // LoadClassification (watcher / replay / silent recheck / manual
+        // reload) that started before our delete + sidecar save returned
+        // is now stale and won't re-introduce the deleted entry via its
+        // setLoadResult (PR #75 10th, thread A).
+        ++requestGenRef.current;
         setLoadResult((prev) => {
           if (!prev) return prev;
           return classification.LoadResult.createFrom({
