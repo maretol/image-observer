@@ -51,13 +51,24 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Stage embed placeholder for main package
+        # `main.go` has `//go:embed all:frontend/dist`, which fails to
+        # compile if the directory is missing. The directory is gitignored
+        # and normally produced by `wails build` — but we want `go test ./...`
+        # to also cover the root `app_test.go` (App.DeleteImage path
+        # validation) without invoking a full Wails build. Touching a
+        # placeholder file is enough for `//go:embed all:` to succeed; the
+        # test doesn't read the embedded FS.
+        run: |
+          mkdir -p frontend/dist
+          touch frontend/dist/.ci-placeholder
+
       - name: Go test
-        # `./...` would also try to build the `main` package, which has
-        # `//go:embed all:frontend/dist` — that directory is gitignored and
-        # only produced by `wails build`. All Go tests live under
-        # `internal/`, so scope to that and skip the frontend build here.
-        # `wails build` (in release.yml) is what actually verifies main.
-        run: go test ./internal/...
+        # `./...` covers both `internal/...` and root `app_test.go`. The
+        # embed placeholder above keeps the main package buildable here;
+        # the real `frontend/dist` is produced by `wails build` in
+        # release.yml.
+        run: go test ./...
 
       - name: Frontend install
         working-directory: frontend
