@@ -43,6 +43,19 @@
   分割。初期 Start で大きなフォルダの画像 path 文字列を確保→GC するスパイクを回避。
   (3) §5.4 / §10 に「watcher handler / performReplay の await 後にも watchMode を
   再確認 (in-flight payload が off 切替後に処理されないように)」を追記。
+- 2026-05-17 PR #75 9th レビュー対応: (1) §7.1 擬似コードの `w.Add(p)` を採用
+  fork のシグネチャ `w.Add(p, fsnotify.All)` に修正 (採用 fork は op マスクが必須)。
+  (2) §5.2 トースト「同種上書き」要件を削除 (現 ToastProvider が message/severity
+  完全一致のときだけ延長する実挙動と矛盾していた)。(3) §10.4 ログ仕様から
+  `watchCount` を削除 (Go 側実装は `folder` のみログしているため)。(4) §7.2 監視
+  root が Remove / Rename で消えた場合、loop が flush + return して
+  `goroutineExited` 判定で次回 Start が rebuild する経路を §10 / §6.1 接続規約に
+  記述 (本 commit より別ファイルの実装で対応、本 spec は説明追加)。(5) §6.1 /
+  §5.5 に「Start 成功時に silent re-Load を 1 回走らせて初期 LoadClassification
+  と watch 確立の間に追加されたファイルを吸収する」経路を追記。(6) §5.4 に
+  「自分の DeleteImage 発火後の self-echo は `inFlightDeletesRef: Set<string>`
+  でハンドラ側からフィルタする」を追記 (entriesEquivalent 単独では sidecar save
+  の完了タイミングに依存して self-echo を取り逃すため)。
 
 ---
 
@@ -191,9 +204,11 @@ silent auto-merge のたびに **小さな info トースト** を 1 個出す:
 | sidecar 変化のみ | `"分類データが外部で更新されました"` |
 | 両方変化 | `"フォルダと分類データの変更を検出しました (+N -M)"` |
 
-severity = `info`。`useToastFn` を流用。同種トーストが既に出ている場合は上書き
-(連続バーストで通知ががさ付かないように)。**バナー (案 B) は採用しない**。
-理由は §13.7 を参照。
+severity = `info`。`useToastFn` を流用。連続バーストは Go 側の 200ms debounce で 1 件に
+集約されるため通知ががさ付くことは少ない。同種トースト同士の表示上の重複抑制は
+現状 `ToastProvider` が message/severity 完全一致のときだけタイマーを延長する挙動に
+任せる (差分カウンタ `(+N -M)` が異なれば別トーストとして並ぶ)。**バナー (案 B) は
+採用しない**。理由は §13.7 を参照。
 
 ### 5.3 編集中 / 確認中の抑止
 
@@ -344,11 +359,13 @@ func (m *Manager) Start(root string) error {
     w, err := fsnotify.NewWatcher()
     if err != nil { return err }
     // 全サブフォルダを WalkDir で列挙 (classification.scanner と同じ
-    // isHiddenName 規則で隠しディレクトリを除外)
+    // isHiddenName 規則で隠しディレクトリを除外)。w.Add の第 2 引数 op マスクは
+    // gofsnotify/fsnotify v0.0.6 が要求するシグネチャ (原 fsnotify は単引数だが
+    // 採用 fork はオペレーションマスクを取る) — fsnotify.All で全 op を購読する。
     err = filepath.WalkDir(root, func(p string, d fs.DirEntry, _ error) error {
         if !d.IsDir() { return nil }
         if isHiddenName(d.Name()) && p != root { return fs.SkipDir }
-        return w.Add(p)
+        return w.Add(p, fsnotify.All)
     })
     if err != nil { /* cleanup + return */ }
     m.watcher = w
@@ -549,7 +566,7 @@ state schema / settings schema bump なし。新フィールドは per-field fal
 ### 10.4 ログ
 
 ```
-logger.info("watcher", "started", { folder, watchCount })       // Start 成功時
+logger.info("watcher", "started", { folder })                   // Start 成功時
 logger.warn("watcher", "start failed", { folder, err })         // Start 失敗時
 logger.warn("watcher", "add dir failed", { dir, err })          // 個別 Add 失敗時
 logger.debug("watcher", "event", { op, path })                  // raw event (DEBUG リング)
