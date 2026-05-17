@@ -108,6 +108,40 @@ func TestRepository_ConflictDetection(t *testing.T) {
 	}
 }
 
+// TestRepository_DeletedFileTreatedAsConflict verifies the docstring's
+// "If the file went away entirely, treat that as a conflict too" promise:
+// when expectedMtime > 0 (the caller observed the file at Load) and the
+// sidecar has been deleted before Save runs, the Save must return
+// ErrConflict instead of silently re-creating the file. Without this, an
+// edit-mid-delete sequence (user editing while an external tool removes
+// the sidecar) would silently overwrite whatever caused the delete.
+// PR #75 16th, thread E.
+func TestRepository_DeletedFileTreatedAsConflict(t *testing.T) {
+	dir := t.TempDir()
+	repo := NewFileRepository()
+	c := &Classification{Version: SchemaVersion, Entries: []Entry{{Filename: "a.jpg"}}}
+	mtime, err := repo.SaveJSON(dir, c, 0)
+	if err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+
+	// Simulate external deletion of the sidecar between Load and Save.
+	if err := os.Remove(filepath.Join(dir, SidecarJSON)); err != nil {
+		t.Fatalf("external delete: %v", err)
+	}
+
+	// Saving with the (now-stale) mtime must fail with ErrConflict, not
+	// silently re-create the file.
+	if _, err := repo.SaveJSON(dir, c, mtime); !errors.Is(err, ErrConflict) {
+		t.Errorf("delete-mid-edit save should be ErrConflict, got %v", err)
+	}
+
+	// And the file must still not exist (no silent re-create).
+	if _, err := os.Stat(filepath.Join(dir, SidecarJSON)); !os.IsNotExist(err) {
+		t.Errorf("conflict path must not re-create the file, got stat err = %v", err)
+	}
+}
+
 func TestRepository_ForceOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	repo := NewFileRepository()

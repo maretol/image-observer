@@ -780,6 +780,12 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           if (entriesUnchanged && cur != null && cur.mtime === fresh.mtime) {
             return;
           }
+          // Reaching here means silent recheck observed a successful re-Load.
+          // Clear any stale error from a prior failed initial / manual reload
+          // — leaving it visible after recovery is the same UI artifact the
+          // watcher handler / performReplay success paths already clear
+          // (PR #75 16th, thread D).
+          setError(null);
           if (entriesUnchanged) {
             setLoadResult(fresh);
             return;
