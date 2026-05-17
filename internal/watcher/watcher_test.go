@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gofsnotify/fsnotify"
 )
 
 // These tests rely on the host's real fsnotify backend (inotify on Linux,
@@ -478,6 +480,34 @@ func TestStart_ChmodOnly_NotEmitted(t *testing.T) {
 		t.Fatalf("chmod: %v", err)
 	}
 	cap.expectNoPayload(t, shortDebounce*4)
+}
+
+// classifyAndAccumulate-level unit test for the Write-extends-debounce
+// behavior (PR #75 4th-round review). Write on an existing image must:
+//   - return true so the loop resets the debounce timer (= keep the quiet
+//     window open while a large image is still being copied),
+//   - leave all counters at 0 and anyChange = false so the trailing flush
+//     does not emit a spurious empty payload.
+//
+// Integration timing tests are too flaky for the inotify Write cadence to
+// rely on; we hold the classifier honest here and let
+// TestStart_BurstCoalescedIntoOnePayload cover the broader scenario.
+func TestClassify_WriteOnImageTriggersTimerWithoutBumpingCounters(t *testing.T) {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	defer w.Close()
+
+	acc := &changedAccumulator{}
+	ev := fsnotify.Event{Name: "/anywhere/photo.png", Op: fsnotify.Write}
+	if !classifyAndAccumulate(acc, ev, w) {
+		t.Errorf("Write on an image should return true to extend debounce")
+	}
+	if acc.addedFiles != 0 || acc.removedFiles != 0 ||
+		acc.renamedFiles != 0 || acc.sidecarChanged || acc.anyChange {
+		t.Errorf("Write should not bump counters / anyChange, got %+v", acc)
+	}
 }
 
 func sprintN(i int) string {

@@ -405,6 +405,13 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnoti
 	// Chmod-only on non-image paths stays ignored.
 	if !imgfile.IsImage(base) {
 		if ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename) {
+			// Drop the watch on the vanished path best-effort. On Linux
+			// inotify a Rename of a watched subdirectory tracks the inode
+			// (not the path), so without an explicit Remove the moved-out
+			// subtree's later events would keep flowing into THIS root's
+			// classification:changed stream — breaking the "current folder
+			// only" contract (PR #75 review).
+			_ = w.Remove(ev.Name)
 			acc.anyChange = true
 			return true
 		}
@@ -430,11 +437,20 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnoti
 		triggered = true
 	}
 	// fsnotify.Write on an existing image leaves the entries set unchanged
-	// (filename is still there). Phase 1 deliberately ignores it; the
-	// frontend's useGridThumbnail cache is path-keyed so a content-only
-	// edit would not refresh the displayed thumbnail anyway. Surfacing
-	// content-edits is tracked for Phase 2 (would need a cache-invalidation
-	// hook on the frontend). Spec §7.2 / §13.14.
+	// (filename is still there) and the frontend's useGridThumbnail cache
+	// is path-keyed so a content-only edit wouldn't refresh the displayed
+	// thumbnail. We deliberately don't bump any counter for it — but we DO
+	// reset the debounce timer (return true without bumping) so that a
+	// large image being copied (Create → Write → Write → … sequence) keeps
+	// the quiet window alive until the writes actually settle. Without this
+	// the 200ms after Create would flush prematurely and the frontend would
+	// LoadClassification while the file is still being written, surfacing
+	// it as a broken / size-0 image (PR #75 review). Spec §7.2 / §13.14
+	// covers the Phase 2 cache-invalidation hook needed to surface content
+	// edits in the displayed thumbnail.
+	if ev.Op.Has(fsnotify.Write) {
+		triggered = true
+	}
 	return triggered
 }
 
