@@ -57,8 +57,12 @@ describe("formatChangeSummary", () => {
     expect(msg).toContain("-0");
   });
 
-  it("returns null on a fully empty payload (defensive)", () => {
-    expect(formatChangeSummary(payload())).toBeNull();
+  it("returns a generic 'change detected' message on a counter-less payload", () => {
+    // Go-side dir Remove / Rename fires anyChange without bumping any
+    // counter (the watcher can't tell whether the path was a dir or a
+    // non-image file), so this payload shape really does arrive. The
+    // generic message keeps the user aware that something moved.
+    expect(formatChangeSummary(payload())).toBe("フォルダの変更を検出しました");
   });
 });
 

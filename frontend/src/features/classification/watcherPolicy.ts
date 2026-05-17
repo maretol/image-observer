@@ -17,11 +17,17 @@ export type ChangedPayload = {
 };
 
 /**
- * formatChangeSummary returns the user-facing toast text for a payload, or
- * null when the payload carries no UI-visible change (defensive — the Go
- * side already drops empty flushes, so null here is unexpected in practice).
+ * formatChangeSummary returns the user-facing toast text for a payload.
+ *
+ * Counter-bearing payloads get the precise "+N -M" message; sidecar-only
+ * payloads get the dedicated phrasing. A counter-less, sidecar-less payload
+ * is still meaningful: the Go watcher emits one whenever a non-image / non-
+ * sidecar Remove or Rename fires (typically a subdirectory disappearing —
+ * see internal/watcher §7.2). For that case we return a generic "change
+ * detected" message so users still see a notification when an image-bearing
+ * subtree is moved out of the watched root (PR #75 review).
  */
-export function formatChangeSummary(p: ChangedPayload): string | null {
+export function formatChangeSummary(p: ChangedPayload): string {
   const filesChanged = p.addedFiles > 0 || p.removedFiles > 0;
   if (filesChanged && p.sidecarChanged) {
     return `フォルダと分類データの変更を検出しました (+${p.addedFiles} -${p.removedFiles})`;
@@ -32,7 +38,9 @@ export function formatChangeSummary(p: ChangedPayload): string | null {
   if (p.sidecarChanged) {
     return "分類データが外部で更新されました";
   }
-  return null;
+  // Subtree disappear / move-out — no per-file counts but the on-disk set
+  // changed. Phrasing intentionally generic.
+  return "フォルダの変更を検出しました";
 }
 
 /** Minimal view of the hook's UI state needed to decide what to do. */
