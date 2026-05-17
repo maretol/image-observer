@@ -335,6 +335,39 @@ func TestStart_FailsOnFileRoot(t *testing.T) {
 	}
 }
 
+// TestStart_FailedNewRootStopsExisting guards Thread H of PR #75 22nd:
+// when Start is called with a different root that fails validation (file /
+// symlink / missing), any previously active watch must be torn down so the
+// JS-side intent ("move away from old root") is honored on the Go side too.
+// Without this the user sees degraded mode (UI) while Go keeps the old fd /
+// goroutine alive, violating the "current folder only" invariant.
+func TestStart_FailedNewRootStopsExisting(t *testing.T) {
+	a := t.TempDir()
+	m := NewManagerWithDebounce(func(ChangedPayload) {}, shortDebounce)
+	if err := m.Start(a); err != nil {
+		t.Fatalf("Start a: %v", err)
+	}
+	if cur := m.Current(); cur != a {
+		t.Fatalf("Current after Start(a): got %q, want %q", cur, a)
+	}
+
+	// File root: validation must fail AND the previous watch on a must be
+	// torn down.
+	parent := t.TempDir()
+	file := filepath.Join(parent, "not-a-dir.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatalf("setup write: %v", err)
+	}
+	if err := m.Start(file); err == nil {
+		_ = m.Stop()
+		t.Fatal("Start on a file path should fail")
+	}
+	if cur := m.Current(); cur != "" {
+		_ = m.Stop()
+		t.Errorf("Current after failed Start(file): got %q, want \"\" (old watch must be torn down)", cur)
+	}
+}
+
 // TestStart_SidecarNamedDirectoryHandledAsDir guards Thread G of PR #75 21st:
 // a directory whose basename is exactly `_classification.json` must NOT be
 // treated as a sidecar file. Without dir-detection in the sidecar branch the

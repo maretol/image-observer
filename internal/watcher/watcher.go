@@ -128,6 +128,28 @@ func (m *Manager) Start(root string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Same-root + live goroutine: no-op. The existing watch was already
+	// validated when it started, so we can skip the dir/symlink checks
+	// for this branch. Done before any validation so a transient failure
+	// to Lstat the same root (e.g. a temporary permission glitch) doesn't
+	// tear down a working watch. Checking via the done channel keeps this
+	// lock-free on the loop side.
+	if m.state != nil && m.state.root == root && !goroutineExited(m.state) {
+		return nil
+	}
+
+	// Intent has moved to a different root (or the existing state is a
+	// zombie whose loop already exited). Tear down the old watch BEFORE
+	// validating the new root — otherwise a validation failure on the
+	// new root would leave the old watcher running while the JS-side
+	// intent has already moved away, breaking the "current folder only"
+	// invariant (JS treats the new root's Start failure as degraded mode
+	// + manual reload; Go must not silently keep watching the old root).
+	// PR #75 review 22nd, thread H.
+	if m.state != nil {
+		_ = m.stopLocked()
+	}
+
 	// Reject non-directory roots up front. inotify (and therefore
 	// fsnotify.Watcher.Add) happily watches single files, so without this
 	// check Start would succeed on a file path and then never deliver any
@@ -154,17 +176,6 @@ func (m *Manager) Start(root string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("watcher: root must be a directory, got %q (mode %s)",
 			root, info.Mode().Type())
-	}
-
-	if m.state != nil {
-		// No-op only when the live goroutine is still running; otherwise
-		// the state is a zombie (loop exited via watcher.Errors / Events
-		// close) and we must rebuild. Checking via the done channel keeps
-		// this lock-free on the loop side.
-		if m.state.root == root && !goroutineExited(m.state) {
-			return nil
-		}
-		_ = m.stopLocked()
 	}
 
 	w, err := fsnotify.NewWatcher()
