@@ -556,18 +556,28 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // inFlightDeletesRef tracks filenames whose Delete IPC has fired but whose
   // sidecar save / local state patch hasn't completed yet. The watcher fires
   // a Remove event almost immediately, well before our SaveClassification
-  // round-trip lands, so by the time the 200ms debounce flushes and the
-  // handler does LoadClassification, the fresh entries list already lacks
-  // the file while our local loadResult still has it. Without filtering,
-  // the entriesEquivalent self-echo check would miss this case and toast
-  // "外部で更新されました" for the user's own delete (PR #75 9th, thread J).
+  // round-trip lands, so by the time the debounced flush arrives at the
+  // handler and LoadClassification runs, the fresh entries list already
+  // lacks the file (the orphan-filter in Service.Load drops it) while our
+  // local loadResult still has it. Without filtering, the entriesEquivalent
+  // self-echo check would miss this case and toast "外部で更新されました"
+  // for the user's own delete (PR #75 9th, thread J).
+  //
+  // strip is applied **only to the stale-current side**, not to fresh. If
+  // an external writer recreated a file with the same name during our
+  // delete IPC round-trip, fresh.entries legitimately contains the new
+  // entry; stripping fresh as well would silently hide that re-creation
+  // (PR #75 25th, thread D). Asymmetric strip keeps the self-echo case
+  // working (cur stripped vs fresh that already lost the file = equivalent
+  // = no toast) while still surfacing the recreation case.
   //
   // Scoped per folder (Map<folder, Set<filename>>) so an in-flight delete on
   // folder A doesn't suppress a same-named-file diff in folder B if the user
   // switches folders before the delete IPC settles. Without folder scoping,
-  // stripInFlight would drop the same-named entry from the new folder's
-  // fresh entries and entriesEquivalent would falsely report "no change",
-  // leaving the listing stale until the next event (PR #75 21st, thread A).
+  // stripping cur with the wrong folder's in-flight set would drop a
+  // same-named entry from the new folder's cur side and entriesEquivalent
+  // would falsely report "no change", leaving the listing stale until the
+  // next event (PR #75 21st, thread A).
   const inFlightDeletesRef = useRef<Map<string, Set<string>>>(new Map());
 
   // commitFreshResult swaps loadResult to the watcher-supplied snapshot AND
@@ -669,7 +679,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       const cur = loadResultRef.current;
       // Scope in-flight delete filenames to payload.folder so a stale
       // delete pending on a different folder can't suppress this folder's
-      // diff (PR #75 21st, thread A).
+      // diff (PR #75 21st, thread A). Asymmetric strip: only the stale-cur
+      // side has the filename hidden, fresh is left untouched so an external
+      // re-creation during the IPC window still surfaces as a diff (PR #75
+      // 25th, thread D).
       const inFlightDeletes =
         inFlightDeletesRef.current.get(payload.folder) ?? null;
       const stripInFlight = (
@@ -680,10 +693,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           : entries.filter((e) => !inFlightDeletes.has(e.filename));
       const entriesUnchanged =
         cur != null &&
-        entriesEquivalent(
-          stripInFlight(cur.entries),
-          stripInFlight(fresh.entries),
-        );
+        entriesEquivalent(stripInFlight(cur.entries), fresh.entries);
       if (entriesUnchanged && cur != null && cur.mtime === fresh.mtime) {
         return;
       }
@@ -778,6 +788,9 @@ export function useClassification(opts: Opts): UseClassificationReturn {
           // See handleWatcherPayload: per-folder set, so a delete still in
           // flight on a different folder can't suppress this one's diff
           // (PR #75 21st, thread A).
+          // Asymmetric strip — only cur side is filtered, so an external
+          // re-creation racing our delete IPC is still detected as a diff
+          // (PR #75 25th, thread D; same reasoning as handleWatcherPayload).
           const inFlightDeletes =
             inFlightDeletesRef.current.get(folder) ?? null;
           const stripInFlight = (
@@ -788,10 +801,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
               : entries.filter((e) => !inFlightDeletes.has(e.filename));
           const entriesUnchanged =
             cur != null &&
-            entriesEquivalent(
-              stripInFlight(cur.entries),
-              stripInFlight(fresh.entries),
-            );
+            entriesEquivalent(stripInFlight(cur.entries), fresh.entries);
           if (entriesUnchanged && cur != null && cur.mtime === fresh.mtime) {
             return;
           }

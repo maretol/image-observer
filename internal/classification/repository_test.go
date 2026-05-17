@@ -142,6 +142,48 @@ func TestRepository_DeletedFileTreatedAsConflict(t *testing.T) {
 	}
 }
 
+// TestRepository_DirReplacedTreatedAsConflict verifies that when the sidecar
+// path has been replaced by a directory between Load and Save, the conflict
+// check returns ErrConflict instead of leaving the failure to the subsequent
+// copyFile / WriteFile / Rename steps (which would surface an opaque IO
+// error far from the actual cause). Mtime may even match by coincidence
+// when a dir replaces the file, so the equality check below isn't enough on
+// its own — the IsDir branch is added to the existing nil-err arm so the
+// frontend's standard conflict dialog can surface the user choice the same
+// way the file-gone case does. PR #75 25th, thread B.
+func TestRepository_DirReplacedTreatedAsConflict(t *testing.T) {
+	dir := t.TempDir()
+	repo := NewFileRepository()
+	c := &Classification{Version: SchemaVersion, Entries: []Entry{{Filename: "a.jpg"}}}
+	mtime, err := repo.SaveJSON(dir, c, 0)
+	if err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+
+	// Simulate the file being replaced by a directory while the caller still
+	// holds the original mtime. We remove the file first to release the
+	// inode, then mkdir at the same path. The directory's mtime will most
+	// likely differ but we don't want to depend on that — the IsDir check
+	// catches the case even if the mtime happens to coincide.
+	jsonPath := filepath.Join(dir, SidecarJSON)
+	if err := os.Remove(jsonPath); err != nil {
+		t.Fatalf("remove file: %v", err)
+	}
+	if err := os.Mkdir(jsonPath, 0o755); err != nil {
+		t.Fatalf("mkdir at sidecar path: %v", err)
+	}
+
+	if _, err := repo.SaveJSON(dir, c, mtime); !errors.Is(err, ErrConflict) {
+		t.Errorf("dir-replaced save should be ErrConflict, got %v", err)
+	}
+
+	// The directory must still be intact — the conflict path must not have
+	// rmdir'd or otherwise mutated it.
+	if info, err := os.Stat(jsonPath); err != nil || !info.IsDir() {
+		t.Errorf("conflict path must not mutate the replacement dir, got info=%+v err=%v", info, err)
+	}
+}
+
 func TestRepository_ForceOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	repo := NewFileRepository()

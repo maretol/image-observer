@@ -206,6 +206,25 @@
   `TestStart_FailedNewRootStopsExisting` で「Start(a) success → Start(file)
   失敗 → `Current()==''`」を pin (thread H)。本 spec の変更は説明追加のみ、
   挙動側は §10 の degraded mode 遷移と整合している。
+- 2026-05-18 PR #75 25th レビュー対応: (1) **実装側**: `useClassification.ts`
+  の watcher handler / `silentRecheckAfterStart` 両経路で `stripInFlight` を
+  fresh.entries にも適用していたのを、**cur 側だけに strip する asymmetric**
+  に修正。削除 IPC のラウンドトリップ中に外部で同名ファイルが再作成された
+  ケースで、両側 strip だと length が揃って equivalent=true となり再作成を
+  silently 隠していた問題を解消。純粋な self-echo (cur に削除前 / fresh は
+  削除後で不在) では cur stripped と fresh の length が揃って依然 no toast
+  に倒れる (thread D)。(2) **実装側**: `internal/classification/repository.go`
+  の `SaveJSON` conflict check に **`info.IsDir()` 分岐** を追加。`expectedMtime`
+  と現 mtime が偶然一致しつつ sidecar path がディレクトリに置換された場合に、
+  後続の `copyFile` / `WriteFile` / `Rename` が opaque な IO エラーで死ぬのを
+  予防し、`ErrConflict` で frontend の標準ダイアログに導く。`TestRepository_DirReplacedTreatedAsConflict`
+  で pin (thread B)。(3) コメント整合: `useClassification.ts` の inFlightDeletes
+  docstring と `.claude/context.md` line 101 / `docs/spec-folder-watch.md` §5.4
+  を asymmetric strip 説明に書き換え (thread D / E / F)。(4) `.claude/context.md`
+  の `runtime.EventsEmit` 例に `a.ctx` を含める修正 (現行 `app.go` の実呼び出しと
+  シグネチャを一致、thread C)。(5) `useClassification.ts` の inFlightDeletes
+  docstring から `200ms` リテラルを除去し、debounce 数値を直書きしない A-1 /
+  D-1 整合表現に書き換え (thread A)。
 - 2026-05-17 PR #75 24th レビュー対応: (1) **実装側**: `removeSubtreeFromWatch`
   に `tombstone map[string]struct{}` 引数を追加し、unwatch した descendant
   path をその場で `acc.removedPaths` に登録するように変更。subtree Remove
@@ -454,10 +473,17 @@ entries 内容 (filename / folder / confidence / note を順序込み深比較) 
 folder スコープで削除中 filename を保持する。`deleteOne` の冒頭で `(folder, filename)` を
 add → finally で必ず delete。watcher handler / `silentRecheckAfterStart` の
 entriesEquivalent 判定では `payload.folder` (handler) または引数 `folder` (recheck) で
-Map 引きしてから両側の entries / fresh から in-flight filename を strip して比較する。
+Map 引きしてから **cur (= 削除前の stale な現在表示) 側だけ** in-flight filename を
+strip して fresh と比較する。fresh 側は strip しない: 削除 IPC のラウンドトリップ中に
+**外部で同名ファイルが再作成された**ケースでは fresh.entries にその再作成エントリが
+通常通り現れるため、これを strip すると差分を取り逃して再作成を silently 隠すことに
+なる。cur 側だけ strip すれば、純粋な self-echo (cur が削除前 / fresh は削除後で
+filename 不在) では length が揃って equivalent = no toast、再作成ケースでは
+cur stripped vs fresh の length 差で diff が surface して通常の auto-merge トーストが
+出る (PR #75 25th thread D で symmetric strip → asymmetric に変更)。
 **Map の key を folder にしている**のは、フォルダ切替後に旧 folder で進行中だった
-delete の filename が新 folder の watcher self-echo 判定に混入して差分を消す race を
-避けるため (PR #75 21st thread A)。
+delete の filename が新 folder の cur 側 strip に混入して同名ファイルを誤って隠す
+race を避けるため (PR #75 21st thread A)。
 
 **競合**: ユーザがちょうど編集 → 保存しようとしたタイミングで sidecar が更新
 されると、既存の mtime 競合検出 (`SaveJSON` の `ErrConflict`) に乗る。§5.3 の

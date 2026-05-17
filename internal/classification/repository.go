@@ -84,6 +84,18 @@ func (fileRepo) SaveJSON(folderPath string, c *Classification, expectedMtime int
 		info, err := os.Stat(jsonPath)
 		switch {
 		case err == nil:
+			// A directory now occupies the sidecar path (e.g. the user
+			// or an external tool replaced the file with a same-named
+			// dir between Load and Save). Mtime may even match by
+			// coincidence, so the equality check below isn't enough.
+			// The subsequent backup / WriteFile / Rename would fail
+			// with an opaque IO error far from the actual cause;
+			// surface it as ErrConflict so the frontend's standard
+			// conflict dialog gives the user a choice, same as the
+			// file-gone case below (PR #75 25th, thread B).
+			if info.IsDir() {
+				return 0, ErrConflict
+			}
 			if info.ModTime().UnixMilli() != expectedMtime {
 				return 0, ErrConflict
 			}
