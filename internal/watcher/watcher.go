@@ -305,9 +305,13 @@ func (m *Manager) loop(st *watchState) {
 			// goroutine the next openFolder of the same path would also
 			// no-op (PR #75 9th, thread F). Flush whatever was pending so
 			// the frontend at least re-Loads (and surfaces the absence),
-			// then exit the loop. `goroutineExited` flips true via the
-			// deferred close(st.done), so the next Start of any path
-			// rebuilds from scratch.
+			// then tear down the fsnotify resources before exiting — leaving
+			// the Watcher open until the next explicit Stop/Start would
+			// leak its fd and reader goroutine for the entire window the
+			// user spends in the now-orphaned folder (PR #75 10th, thread B).
+			// stopLocked() detects `stopRequested` to remain idempotent if
+			// the user happens to call Stop concurrently while the loop is
+			// already on its way out.
 			if (ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename)) && ev.Name == st.root {
 				if timer != nil {
 					timer.Stop()
@@ -316,6 +320,14 @@ func (m *Manager) loop(st *watchState) {
 					"folder", st.root, "op", ev.Op.String())
 				pending.anyChange = true
 				flush()
+				// Mark stopRequested so the !ok branch above (which fires
+				// once st.watcher.Close drains the Events channel) treats
+				// the close as intentional and skips its log + flush
+				// duplication. The actual goroutine termination is via
+				// the `return` below — Close just releases fsnotify's
+				// internal goroutine / fd.
+				st.stopRequested.Store(true)
+				_ = st.watcher.Close()
 				return
 			}
 		case err, ok := <-errCh:
