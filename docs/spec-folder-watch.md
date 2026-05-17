@@ -65,6 +65,18 @@
   「ローカル mutation (saveEdit / deleteOne) 成功時にも `requestGenRef` を bump
   して in-flight Load を stale 化」と「Start/Stop IPC は完了後にも現 intent を
   再評価して必要なら再 dispatch (fixed-point 収束パターン)」を追記。
+- 2026-05-17 PR #75 11th レビュー対応: (1) §5.5 / §6.1 に「silent recheck は
+  `requestGenRef` を **snapshot only** (bump せず) で参加する」を明記 —
+  10th で gen bump も含めたため initial-load (openFolder の loadInternal) を
+  stale 化して postLoadFlow がスキップされる逆方向リグレッションが起きていた。
+  (2) §5.3 / §6.1 に「pending を park する時に `capturedGen` を保存し、replay 時
+  に gen drift があれば pending を破棄」を追記 (mtime だけでは entries-only
+  変化で巻き戻し可能だった)。(3) §6.3 に「フロント `reload()` で
+  `dispatchWatchIntent` も呼び、root vanish 後 zombie 化した watcher を手動
+  reload で復旧する経路」を追記。(4) §5.4 に「deleteOne の競合リトライで
+  `loadInternal` が null を返した場合は早期 return で local patch + gen bump
+  をスキップ (supersede と error の区別がつかないため、新しい Load や watcher
+  event に reconciliation を任せる)」を追記。
 
 ---
 
