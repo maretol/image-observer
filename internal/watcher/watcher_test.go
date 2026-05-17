@@ -656,6 +656,53 @@ func TestClassify_DirCreateThenSamePathImageCreate_NoDoubleCount(t *testing.T) {
 	}
 }
 
+// TestClassify_DirCreateSharesDiscoveredDedup verifies that two dir-Create
+// events whose walks discover overlapping image paths don't double-count.
+// PR #75 12th round, thread B: when a parent dir Create's WalkDir already
+// found image X.png inside a (then-also-created) child dir, a subsequent
+// child-dir Create event must consult acc.discoveredImagePaths and skip
+// the duplicate count.
+func TestClassify_DirCreateSharesDiscoveredDedup(t *testing.T) {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	defer w.Close()
+
+	// Build: root/parent/child/photo.png on disk
+	root := t.TempDir()
+	parent := filepath.Join(root, "parent")
+	child := filepath.Join(parent, "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("mkdir tree: %v", err)
+	}
+	writeImage(t, filepath.Join(child, "photo.png"))
+
+	// 1st event: dir Create for parent. addSubtreeCollect walks the
+	// whole tree under parent, finds child/photo.png, returns it.
+	// addedFiles bumps to 1 and parks the path.
+	acc := &changedAccumulator{}
+	parentEv := fsnotify.Event{Name: parent, Op: fsnotify.Create}
+	if !classifyAndAccumulate(acc, parentEv, w) {
+		t.Fatalf("parent Create should trigger")
+	}
+	if acc.addedFiles != 1 {
+		t.Errorf("after parent walk: addedFiles got %d, want 1", acc.addedFiles)
+	}
+
+	// 2nd event: dir Create for child (the race scenario — fsnotify
+	// fires both parent and child events). addSubtreeCollect walks
+	// child, finds the same photo.png. Without dedup we'd bump
+	// addedFiles to 2; with the new shared dedup it stays at 1.
+	childEv := fsnotify.Event{Name: child, Op: fsnotify.Create}
+	if !classifyAndAccumulate(acc, childEv, w) {
+		t.Fatalf("child Create should still trigger debounce reset")
+	}
+	if acc.addedFiles != 1 {
+		t.Errorf("dir-Create shared dedup failed: addedFiles got %d, want 1 (double-count regression)", acc.addedFiles)
+	}
+}
+
 // classifyAndAccumulate-level unit test for the Write-extends-debounce
 // behavior (PR #75 4th-round review). Write on an existing image must:
 //   - return true so the loop resets the debounce timer (= keep the quiet

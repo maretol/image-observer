@@ -476,18 +476,30 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnoti
 				// just lose the new subdir's nested activity). anyChange
 				// stays true so the frontend re-Loads.
 				_, discovered := addSubtreeCollect(w, ev.Name)
-				acc.addedFiles += len(discovered)
 				if len(discovered) > 0 {
 					if acc.discoveredImagePaths == nil {
 						acc.discoveredImagePaths = make(map[string]struct{}, len(discovered))
 					}
-					// Park the just-counted paths so a concurrent inotify
-					// Create (possible if a writer is dropping files into
-					// the new dir while WalkDir is still running) doesn't
-					// double-count.
+					// Dedup discovered images against acc.discoveredImagePaths
+					// (the per-window shared set). If a previous dir-Create
+					// in the same debounce window already walked a parent
+					// that contained this path — possible when fsnotify
+					// fires both the parent and the (concurrently created)
+					// child dir's Create events and the parent walk reached
+					// the child first — we must not count it again. Only
+					// add the count for paths that weren't already parked
+					// (PR #75 12th, thread B; the prior dedup only covered
+					// the image-Create branch and missed dir-Create vs
+					// dir-Create races).
+					newImages := 0
 					for _, p := range discovered {
+						if _, dup := acc.discoveredImagePaths[p]; dup {
+							continue
+						}
 						acc.discoveredImagePaths[p] = struct{}{}
+						newImages++
 					}
+					acc.addedFiles += newImages
 				}
 				acc.anyChange = true
 				return true

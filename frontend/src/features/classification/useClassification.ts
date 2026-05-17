@@ -185,18 +185,22 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   const watchModeRef = useRef<string | undefined>(opts.watchMode);
   watchModeRef.current = opts.watchMode;
 
+  // editingRef / conflictRef / mergePromptOpenRef are ALSO synced during
+  // render (same reason as folderRef / watchModeRef above): a watcher
+  // event arriving between `setEditing({ open: true, ... })` and the
+  // post-render effect would see the ref still showing "closed" and
+  // commit the change immediately — bypassing the defer logic. The
+  // really bad sub-case is editing-open: the handler would silently
+  // patch loadResult.mtime to the fresh value, and the user's next
+  // saveEdit would pass the mtime conflict check despite reading a
+  // pre-external-edit draft (PR #75 12th, thread A). Ref mutation in
+  // render is allowed (refs aren't part of React state model).
   const editingRef = useRef<EditingState>(editing);
-  useEffect(() => {
-    editingRef.current = editing;
-  }, [editing]);
+  editingRef.current = editing;
   const conflictRef = useRef<ConflictPrompt | null>(conflict);
-  useEffect(() => {
-    conflictRef.current = conflict;
-  }, [conflict]);
+  conflictRef.current = conflict;
   const mergePromptOpenRef = useRef(mergePrompt.open);
-  useEffect(() => {
-    mergePromptOpenRef.current = mergePrompt.open;
-  }, [mergePrompt.open]);
+  mergePromptOpenRef.current = mergePrompt.open;
 
   // pendingResultRef parks a LoadClassification result that arrived during a
   // defer state (conflict, mergePrompt, or editing-open with target intact).
@@ -236,12 +240,24 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // (PR #75 review).
   const loadingTokenRef = useRef(0);
 
+  // initialLoadInFlightRef is true while any loadInternal call is awaiting
+  // LoadClassification. silentRecheckAfterStart reads this to defer its
+  // own read until the initial load's commit has landed — otherwise the
+  // two same-generation Loads can both commit and the later-arriving one
+  // wins regardless of which read was actually newer. This was the race
+  // that Round 11 thread A (silent recheck bumping the gen) and Round 12
+  // thread C (silent recheck snapshotting only) traded off; gating on a
+  // separate "is initial load still going?" flag breaks the tie cleanly
+  // (PR #75 12th, thread C).
+  const initialLoadInFlightRef = useRef(false);
+
   const loadInternal = useCallback(
     async (
       path: string,
     ): Promise<classification.LoadResult | null> => {
       const myGen = ++requestGenRef.current;
       const myLoadToken = ++loadingTokenRef.current;
+      initialLoadInFlightRef.current = true;
       setLoading(true);
       setError(null);
       try {
@@ -261,11 +277,11 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         toast(`読み込みに失敗しました: ${msg}`, "error");
         return null;
       } finally {
-        // Only the latest loadInternal invocation releases the spinner.
-        // Watcher / replay Loads don't touch loadingTokenRef, so they can
-        // never strand it; manual Loads supersede each other and only the
-        // newest one clears.
+        // Clear the in-flight flag before the spinner release so any
+        // silent recheck scheduled while we were awaiting can proceed
+        // on the next microtask without seeing a stale flag.
         if (myLoadToken === loadingTokenRef.current) {
+          initialLoadInFlightRef.current = false;
           setLoading(false);
         }
       }
@@ -664,6 +680,20 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // editing-open et al. are still honored (PR #75 9th, thread I).
   const silentRecheckAfterStart = useCallback(
     (folder: string) => {
+      // Defer while any loadInternal is awaiting. Without this we can
+      // race the initial load (same generation since silent recheck only
+      // snapshots, not bumps) — silent recheck commits its fresher
+      // snapshot first, then the older initial-load result lands and
+      // overwrites it (PR #75 12th, thread C). Waiting for the initial
+      // load to complete guarantees our subsequent read is strictly
+      // newer than its read (it happened-after), so even if we both
+      // commit at the same gen, last-write-wins is correctness-preserving.
+      // setTimeout yields to the event loop so the initial load's finally
+      // (which clears the flag + commits its result) fires first.
+      if (initialLoadInFlightRef.current) {
+        setTimeout(() => silentRecheckAfterStart(folder), 50);
+        return;
+      }
       // Snapshot the current generation WITHOUT bumping (PR #75 11th,
       // thread A). Two requirements to satisfy at once:
       //   1) silent recheck must NOT supersede in-flight initial-load
