@@ -516,18 +516,23 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // Lifecycle is split into two effects to avoid a Start/Stop IPC race when
   // the user switches folders rapidly:
   //
-  //   1. Folder-watch effect (Start-only): Go-side Manager.Start is itself
-  //      re-entrant and tears down any previous watch atomically. By NOT
-  //      calling StopFolderWatch from this effect's cleanup we keep the IPC
-  //      sequence as Start("A") → Start("B"), which Go serializes via mu.
-  //      A mixed Stop+Start sequence could re-order across Go goroutines
-  //      and leave the wrong watch running.
+  //   1. Folder-watch effect (Start-only on the live path): Go-side
+  //      Manager.Start is itself re-entrant and tears down any previous
+  //      watch atomically. By NOT calling StopFolderWatch from this
+  //      effect's cleanup we keep the IPC sequence as Start("A") →
+  //      Start("B"), which Go serializes via mu. A mixed Stop+Start
+  //      sequence could re-order across Go goroutines and leave the wrong
+  //      watch running. The only explicit Stop here is when watchMode
+  //      flips to "off" or folderPath clears — both legitimate user-driven
+  //      transitions, not effect-cleanup-driven.
   //   2. Event-subscription effect: stays mounted for the hook's lifetime,
   //      reads the freshest handler through a ref so it never has to
-  //      re-subscribe on state changes. Unmount cleanup also issues a final
-  //      StopFolderWatch — the only place we explicitly stop while the hook
-  //      is alive is when watchMode flips to "off" or folderPath clears
-  //      (handled in effect 1's early-return branch).
+  //      re-subscribe on state changes. The cleanup only `unsub()`s the
+  //      listener — it deliberately does NOT call StopFolderWatch because
+  //      React.StrictMode's dev double-mount runs cleanup → re-setup, and
+  //      a Stop fired here could land in Go after the next mount's Start.
+  //      The final teardown on real app shutdown is handled by main.go's
+  //      OnShutdown → app.shutdown → Manager.Stop instead.
   useEffect(() => {
     if (watchMode == null) {
       // Settings haven't arrived yet; do nothing. Starting now would briefly
@@ -595,6 +600,12 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   //      still fires if it arose while deferring
   //   4) re-parking when one defer source closed but another is still
   //      open (e.g. conflict resolved → editing still open with target)
+  //
+  // The replay reload (case 2) bumps requestGenRef so that any in-flight
+  // watcher-handler Load whose result returns *after* this reload's
+  // commit is discarded as stale (out-of-order ordering between the
+  // event-driven path and the replay-driven path). The reload also
+  // honours its own generation in its catch / success guards.
   const performReplay = useCallback(async () => {
     const pending = pendingResultRef.current;
     if (!pending) return;
@@ -611,16 +622,31 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       // mtime advanced past the park snapshot, which means we (or another
       // path) wrote the sidecar while deferred. The parked fresh is now
       // pre-save state — committing it would visually undo the user's
-      // edit. Re-Load to pick up the latest entries + mtime.
+      // edit. Re-Load to pick up the latest entries + mtime, claiming a
+      // new generation so an out-of-order watcher Load can't overwrite us.
       pendingResultRef.current = null;
+      const myGen = ++requestGenRef.current;
       try {
         fresh = await LoadClassification(folderRef.current);
       } catch (e) {
-        logger.warn("classification", "replay reload failed", {
-          err: errorMessage(e),
-        });
+        // Drop if a newer request superseded us mid-await (the watcher
+        // handler's success path will commit instead).
+        if (myGen !== requestGenRef.current) return;
+        if (folderRef.current !== pending.folder) return;
+        // Otherwise surface to the user — the suppressed comment in the
+        // 4th-round review pointed out that log-only made auto-merge
+        // failures invisible. Mirror the manual-reload error path.
+        const msg = errorMessage(e);
+        setError(msg);
+        setLoadResult(null);
+        toast(`読み込みに失敗しました: ${msg}`, "error");
+        logger.warn("classification", "replay reload failed", { err: msg });
         return;
       }
+      // Success path also generation-checked: a newer watcher Load may
+      // have committed while we awaited; discard so we don't roll it
+      // back (PR #75 review).
+      if (myGen !== requestGenRef.current) return;
       if (folderRef.current !== pending.folder) return;
     }
     const fnames = new Set(fresh.entries.map((e) => e.filename));
