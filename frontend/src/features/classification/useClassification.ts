@@ -7,8 +7,11 @@ import {
   OpenFolderDialog,
   PreviewChildSidecars,
   SaveClassification,
+  StartFolderWatch,
+  StopFolderWatch,
   UpdateClassificationEntry,
 } from "../../../wailsjs/go/main/App";
+import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { classification } from "../../../wailsjs/go/models";
 import { state as wstate } from "../../../wailsjs/go/models";
 import { useToastFn } from "../../shared/components/Toast";
@@ -17,6 +20,19 @@ import { logger } from "../../shared/utils/logger";
 import type { ConfirmFn } from "../viewer-grid/useViewerSet";
 import { applyFilter, type Confidence, type ListTabFilter } from "./filters";
 import { useDirectoryGroups } from "./useDirectoryGroups";
+import {
+  decideAutoMerge,
+  formatChangeSummary,
+  type ChangedPayload,
+} from "./watcherPolicy";
+
+// classificationChangedEvent must match the Go-side constant in app.go.
+// Single source: this string IS the event name and the Go constant just
+// happens to spell it the same. If you rename one, rename both — there is
+// no shared definition because the watcher namespace isn't auto-generated
+// by wails generate module (the payload type never appears in a binding
+// signature).
+const CLASSIFICATION_CHANGED_EVENT = "classification:changed";
 
 const CONFLICT_PREFIX = "CONFLICT:";
 
@@ -97,6 +113,10 @@ export type UseClassificationReturn = {
 type Opts = {
   initialList?: wstate.ListTabState | null;
   confirm: ConfirmFn;
+  // settings.watchMode: "auto" | "off". Undefined while settings are still
+  // loading; we treat that as "auto" so the first folder open still gets a
+  // watch (it will be torn down + restarted if the user explicitly set "off").
+  watchMode?: string;
 };
 
 export function useClassification(opts: Opts): UseClassificationReturn {
@@ -132,13 +152,35 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   const groups = useDirectoryGroups(opts.initialList?.collapsedGroups ?? []);
 
   const toast = useToastFn();
-  const { confirm } = opts;
+  const { confirm, watchMode } = opts;
 
   // Avoid stale closures in async ops by mirroring folderPath.
   const folderRef = useRef(folderPath);
   useEffect(() => {
     folderRef.current = folderPath;
   }, [folderPath]);
+
+  // Refs that the watcher event handler reads. Mirrored from state so the
+  // single EventsOn callback (registered once per folder/watchMode change)
+  // always sees the latest decision-relevant values without needing a fresh
+  // closure on every state change.
+  const editingRef = useRef<EditingState>(editing);
+  useEffect(() => {
+    editingRef.current = editing;
+  }, [editing]);
+  const conflictRef = useRef<ConflictPrompt | null>(conflict);
+  useEffect(() => {
+    conflictRef.current = conflict;
+  }, [conflict]);
+  const mergePromptOpenRef = useRef(mergePrompt.open);
+  useEffect(() => {
+    mergePromptOpenRef.current = mergePrompt.open;
+  }, [mergePrompt.open]);
+
+  // pendingResultRef parks a LoadClassification result that arrived during a
+  // defer state (conflict or mergePrompt). The deferral-close effect below
+  // commits it when the user finishes resolving.
+  const pendingResultRef = useRef<classification.LoadResult | null>(null);
 
   const loadInternal = useCallback(
     async (path: string) => {
@@ -327,6 +369,139 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     () => Array.from(selected).sort(),
     [selected],
   );
+
+  // ─── fsnotify auto-merge (#19) ─────────────────────────────────────
+  //
+  // handleWatcherPayload runs on every flushed "classification:changed"
+  // event from the Go watcher (see internal/watcher + docs/spec-folder-watch.md).
+  // It reads decision-relevant state via refs so the listener can stay
+  // bound for the full (folderPath, watchMode) lifetime; otherwise we'd
+  // tear down + re-subscribe on every keystroke or selection change.
+  const handleWatcherPayload = useCallback(
+    async (payload: ChangedPayload) => {
+      if (payload.folder !== folderRef.current) {
+        // Stale residual from a watcher that hadn't been torn down yet, or
+        // the user switched folders mid-flush. Drop quietly.
+        return;
+      }
+      const summary = formatChangeSummary(payload);
+      if (summary) toast(summary, "info");
+
+      let fresh: classification.LoadResult | null = null;
+      try {
+        fresh = await LoadClassification(folderRef.current);
+      } catch (e) {
+        logger.warn("classification", "auto-merge load failed", {
+          err: errorMessage(e),
+        });
+        return;
+      }
+      if (folderRef.current !== payload.folder) {
+        // Folder switched while LoadClassification was in flight; discard
+        // to avoid clobbering the new folder's state with the old one.
+        return;
+      }
+      const fnames = new Set(fresh.entries.map((e) => e.filename));
+      const action = decideAutoMerge({
+        editingOpen: editingRef.current.open,
+        editingFilename: editingRef.current.filename,
+        conflictOpen: conflictRef.current !== null,
+        mergePromptOpen: mergePromptOpenRef.current,
+        freshFilenames: fnames,
+      });
+      switch (action.kind) {
+        case "defer":
+          // Park the fresh result; deferral-close effect commits it.
+          pendingResultRef.current = fresh;
+          return;
+        case "commit-editing-removed":
+          toast(`${action.filename} は外部で削除されました`, "warn");
+          setEditing({ open: false, filename: null });
+          setLoadResult(fresh);
+          return;
+        case "commit":
+          setLoadResult(fresh);
+          return;
+      }
+    },
+    [toast],
+  );
+
+  // Lifecycle: start/stop the Go-side watcher and bind the EventsOn listener.
+  // Effect re-runs on folderPath (the watch target) or watchMode (the user
+  // setting). watchMode === "off" suppresses Start without freezing the rest
+  // of the hook — manual reload still works.
+  useEffect(() => {
+    if (!folderPath) return;
+    if (watchMode === "off") return;
+
+    let unsub: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        await StartFolderWatch(folderPath);
+      } catch (e) {
+        const msg = errorMessage(e);
+        toast(
+          "自動監視を開始できませんでした (再読み込みボタンで手動更新してください)",
+          "warn",
+        );
+        logger.warn("watcher", "start failed", {
+          folder: folderPath,
+          err: msg,
+        });
+        return;
+      }
+      if (cancelled) {
+        // Effect was torn down (folder switched / watchMode flipped) while
+        // we were awaiting Start. Reverse the side effect.
+        void StopFolderWatch();
+        return;
+      }
+      unsub = EventsOn(
+        CLASSIFICATION_CHANGED_EVENT,
+        (payload: ChangedPayload) => {
+          void handleWatcherPayload(payload);
+        },
+      );
+    })();
+    return () => {
+      cancelled = true;
+      if (unsub) {
+        unsub();
+        unsub = null;
+      }
+      void StopFolderWatch();
+    };
+  }, [folderPath, watchMode, handleWatcherPayload, toast]);
+
+  // Deferral-close: when both conflict and mergePrompt are closed AND a
+  // pending result has been parked, commit it (re-running the decision so
+  // an editing-target-removed exception that arose while deferred still
+  // fires the warn + close path).
+  const wasInDeferRef = useRef(false);
+  useEffect(() => {
+    const inDefer = mergePrompt.open || conflict !== null;
+    const wasInDefer = wasInDeferRef.current;
+    wasInDeferRef.current = inDefer;
+    if (!(wasInDefer && !inDefer)) return;
+    const fresh = pendingResultRef.current;
+    if (!fresh) return;
+    pendingResultRef.current = null;
+    const fnames = new Set(fresh.entries.map((e) => e.filename));
+    const action = decideAutoMerge({
+      editingOpen: editingRef.current.open,
+      editingFilename: editingRef.current.filename,
+      conflictOpen: false,
+      mergePromptOpen: false,
+      freshFilenames: fnames,
+    });
+    if (action.kind === "commit-editing-removed") {
+      toast(`${action.filename} は外部で削除されました`, "warn");
+      setEditing({ open: false, filename: null });
+    }
+    setLoadResult(fresh);
+  }, [mergePrompt.open, conflict, toast]);
 
   const openEdit = useCallback((filename: string) => {
     setEditing({ open: true, filename });
