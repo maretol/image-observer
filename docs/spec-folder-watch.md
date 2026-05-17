@@ -206,6 +206,24 @@
   `TestStart_FailedNewRootStopsExisting` で「Start(a) success → Start(file)
   失敗 → `Current()==''`」を pin (thread H)。本 spec の変更は説明追加のみ、
   挙動側は §10 の degraded mode 遷移と整合している。
+- 2026-05-17 PR #75 24th レビュー対応: (1) **実装側**: `removeSubtreeFromWatch`
+  に `tombstone map[string]struct{}` 引数を追加し、unwatch した descendant
+  path をその場で `acc.removedPaths` に登録するように変更。subtree Remove
+  の直後に descendant 単独の `IN_DELETE_SELF` が同 debounce window 内に届いた
+  とき、`watchedDirs` から既に消えた image-extension dir (`photos.jpg/`) が
+  image branch に fall-through して `removedFiles++` に誤計上される race を
+  `acc.removedPaths` の per-window dedup で吸収する。`TestClassify_SubtreeRemoveTombstonesDescendants`
+  で classify-level に pin (thread A)。§7.1 の `removeSubtreeFromWatch`
+  説明にも tombstone の役割を追記。(2) `docs/todo.md` J-2 のローカル件数
+  参照コマンドに「CI と同じく `mkdir -p frontend/dist && touch frontend/dist/.ci-placeholder`
+  を先に実行」前提を追記 (`//go:embed all:frontend/dist` を満たすため、
+  thread B)。(3) `AGENTS.md` H-8 race マトリクスを実装と揃える: Start IPC
+  success/fail の `mode (post-await)` を `✓` に修正 (現行
+  `dispatchWatchIntentRef` は `.then` / `.catch` の両方で `watchModeRef.current`
+  を再確認している、thread C)。ローカル mutation success 2 行 (`saveEdit /
+  deleteOne` と `resolveConflictForce / resolveMergeMerge / resolveMergeSkip`)
+  の `folder check` を `✓` に修正 (全経路で disk IPC 後の state commit / reload
+  前に `folderRef.current === cur/target` を check している、thread D)。
 - 2026-05-18 PR #75 25th レビュー対応: (1) **実装側**: `useClassification.ts`
   の watcher handler / `silentRecheckAfterStart` 両経路で `stripInFlight` を
   fresh.entries にも適用していたのを、**cur 側だけに strip する asymmetric**
@@ -237,24 +255,9 @@
   prefix が一致せず tombstone されないテストになっていた (thread A)。(3) §5.2
   本文の typo「通知ががさ付くことは少ない」を「通知がかさむことは少ない」に
   修正 (thread B)。
-- 2026-05-17 PR #75 24th レビュー対応: (1) **実装側**: `removeSubtreeFromWatch`
-  に `tombstone map[string]struct{}` 引数を追加し、unwatch した descendant
-  path をその場で `acc.removedPaths` に登録するように変更。subtree Remove
-  の直後に descendant 単独の `IN_DELETE_SELF` が同 debounce window 内に届いた
-  とき、`watchedDirs` から既に消えた image-extension dir (`photos.jpg/`) が
-  image branch に fall-through して `removedFiles++` に誤計上される race を
-  `acc.removedPaths` の per-window dedup で吸収する。`TestClassify_SubtreeRemoveTombstonesDescendants`
-  で classify-level に pin (thread A)。§7.1 の `removeSubtreeFromWatch`
-  説明にも tombstone の役割を追記。(2) `docs/todo.md` J-2 のローカル件数
-  参照コマンドに「CI と同じく `mkdir -p frontend/dist && touch frontend/dist/.ci-placeholder`
-  を先に実行」前提を追記 (`//go:embed all:frontend/dist` を満たすため、
-  thread B)。(3) `AGENTS.md` H-8 race マトリクスを実装と揃える: Start IPC
-  success/fail の `mode (post-await)` を `✓` に修正 (現行
-  `dispatchWatchIntentRef` は `.then` / `.catch` の両方で `watchModeRef.current`
-  を再確認している、thread C)。ローカル mutation success 2 行 (`saveEdit /
-  deleteOne` と `resolveConflictForce / resolveMergeMerge / resolveMergeSkip`)
-  の `folder check` を `✓` に修正 (全経路で disk IPC 後の state commit / reload
-  前に `folderRef.current === cur/target` を check している、thread D)。
+- 2026-05-18 PR #75 27th レビュー対応 (Copilot): docs only。改訂履歴 §0 の
+  並び順を時系列に揃え、24th エントリを 25th より前に移動 (前 commit で 25th と
+  並べて 26th を追加した際、24th が 26th の後ろに取り残されていた、thread A)。
 
 ---
 
