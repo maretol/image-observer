@@ -416,7 +416,10 @@ Copilot は diff 中心に見るので「同じ問題が別ファイルにもあ
 - **コンテキスト同一性** (`folderRef.current === payloadFolder`、`tabId` etc.): await
   中に対象が切り替わったら結果を破棄するか
 - **モード / フラグ** (`watchMode === "auto"` / `enabled === true`): await 中にユーザーが
-  機能を off にしたら結果を捨てるか
+  機能を off にしたら結果を捨てるか。チェックは **entry (await の前) と post-await
+  (await から戻った直後) の両方** で必要 — 前者だけだと「await 中に off に切り替えた
+  payload」がそのまま処理され、後者だけだと「最初から off だったのにレジスタを
+  漁ってしまう」 (PR #75 8th で post-await チェック忘れを指摘された)
 - **state ref の同期タイミング**: `setFoo()` の直後に async path が走ると `fooRef.current`
   はまだ古い (useEffect 反映前)。`fooRef.current = picked; setFoo(picked);` の順で
   同期書きするか、render-time に `fooRef.current = foo;` を assignment するか
@@ -426,27 +429,38 @@ Copilot は diff 中心に見るので「同じ問題が別ファイルにもあ
 - **エラーフラグのクリア**: 成功経路で `setError(null)` を入れているか (前回失敗の
   エラーが成功後も残らない)
 
-マトリクスを表で書く:
+マトリクスを表で書く。**mode check は entry / post-await を分けて 2 列で書く** —
+1 列にまとめると「entry はあるが post-await を忘れた」典型ミスが見えなくなる:
 
-| 経路 | gen check | folder check | mode check | error clear | spinner token |
-|------|:--:|:--:|:--:|:--:|:--:|
-| manual reload | ✓ | ✓ | – | ✓ | ✓ |
-| watcher handler 成功 | ✓ | ✓ | ✓ | ✓ | – |
-| watcher handler 失敗 | ✓ | ✓ | ✓ | – | – |
-| replay reload | ✓ | ✓ | ✓ | ✓ | – |
-| auto-load on mount | ✓ | ✓ | – | ✓ | ✓ |
-| Start IPC success/fail | – | ✓ | ✓ | – | – |
-| Stop IPC | – | – | – | – | – |
+| 経路 | gen check | folder check | mode (entry) | mode (post-await) | error clear | spinner token |
+|------|:--:|:--:|:--:|:--:|:--:|:--:|
+| manual reload | ✓ | ✓ | – | – | ✓ | ✓ |
+| watcher handler 成功 | ✓ | ✓ | ✓ | ✓ | ✓ | – |
+| watcher handler 失敗 | ✓ | ✓ | ✓ | ✓ | – | – |
+| replay reload 成功 | ✓ | ✓ | ✓ | ✓ | ✓ | – |
+| replay reload 失敗 | ✓ | ✓ | ✓ | ✓ | – | – |
+| replay (no-reload 経路) | – | ✓ | ✓ | – | – | – |
+| auto-load on mount | ✓ | ✓ | – | – | ✓ | ✓ |
+| Start IPC success/fail | – | ✓ | ✓ | – | – | – |
+| Stop IPC | – | – | – | – | – | – |
 
 「該当なし」は明示する (検討した記録)。横並びで穴が見えるので 1 ラウンドで全部潰せる。
 
-過去事例 (PR #75): `useClassification.ts` の非同期 Load 経路 (handler success / handler
-catch / performReplay の再 Load / loadInternal の手動 reload / StartFolderWatch success
-catch) が **5 round 連続**で「もう一つの経路が世代/folder/watchMode の検証から漏れて
-いた」と指摘された。Round 3 で handler catch、Round 4 で replay reload、Round 5 で
-loadInternal、Round 6 で stale 成功 return、Round 7 で StartFolderWatch success と、
-毎回 1 つずつ別 variant が出てきた。初手でマトリクスを書いていれば横並びで全部
-列挙できていた。
+過去事例 (PR #75): `useClassification.ts` の非同期 Load 経路 (handler success /
+handler catch / performReplay の再 Load / loadInternal の手動 reload /
+StartFolderWatch success catch) が **6 round 連続**で「もう一つの経路が
+世代/folder/watchMode の検証から漏れていた」と指摘された:
+
+- Round 3: handler catch に gen/folder check 抜け
+- Round 4: performReplay の再 Load が gen check 不参加
+- Round 5: loadInternal (手動 reload) が gen 非共有
+- Round 6: loadInternal の stale 時 return null 化、handler 冒頭の mode check 追加
+- Round 7: StartFolderWatch success に stale check 追加
+- Round 8: handler / performReplay の **await 後** mode check 追加 (entry だけ
+  あっても in-flight payload は素通り)
+
+毎回 1 つずつ別 variant が出てきた。初手でマトリクス (mode entry/post-await 分離
+付き) を書いていれば横並びで全部列挙できていた。
 
 ## まとめ
 
