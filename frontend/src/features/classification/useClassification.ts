@@ -427,53 +427,61 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     [toast],
   );
 
-  // Lifecycle: start/stop the Go-side watcher and bind the EventsOn listener.
-  // Effect re-runs on folderPath (the watch target) or watchMode (the user
-  // setting). watchMode === "off" suppresses Start without freezing the rest
-  // of the hook — manual reload still works.
+  // Lifecycle is split into two effects to avoid a Start/Stop IPC race when
+  // the user switches folders rapidly:
+  //
+  //   1. Folder-watch effect (Start-only): Go-side Manager.Start is itself
+  //      re-entrant and tears down any previous watch atomically. By NOT
+  //      calling StopFolderWatch from this effect's cleanup we keep the IPC
+  //      sequence as Start("A") → Start("B"), which Go serializes via mu.
+  //      A mixed Stop+Start sequence could re-order across Go goroutines
+  //      and leave the wrong watch running.
+  //   2. Event-subscription effect: stays mounted for the hook's lifetime,
+  //      reads the freshest handler through a ref so it never has to
+  //      re-subscribe on state changes. Unmount cleanup also issues a final
+  //      StopFolderWatch — the only place we explicitly stop while the hook
+  //      is alive is when watchMode flips to "off" or folderPath clears
+  //      (handled in effect 1's early-return branch).
   useEffect(() => {
-    if (!folderPath) return;
-    if (watchMode === "off") return;
-
-    let unsub: (() => void) | null = null;
-    let cancelled = false;
-    (async () => {
-      try {
-        await StartFolderWatch(folderPath);
-      } catch (e) {
-        const msg = errorMessage(e);
-        toast(
-          "自動監視を開始できませんでした (再読み込みボタンで手動更新してください)",
-          "warn",
-        );
-        logger.warn("watcher", "start failed", {
-          folder: folderPath,
-          err: msg,
-        });
-        return;
-      }
-      if (cancelled) {
-        // Effect was torn down (folder switched / watchMode flipped) while
-        // we were awaiting Start. Reverse the side effect.
-        void StopFolderWatch();
-        return;
-      }
-      unsub = EventsOn(
-        CLASSIFICATION_CHANGED_EVENT,
-        (payload: ChangedPayload) => {
-          void handleWatcherPayload(payload);
-        },
+    if (!folderPath || watchMode === "off") {
+      // Either no folder to watch or the user disabled monitoring; Stop is
+      // a no-op when nothing is running.
+      void StopFolderWatch();
+      return;
+    }
+    void StartFolderWatch(folderPath).catch((e) => {
+      const msg = errorMessage(e);
+      toast(
+        "自動監視を開始できませんでした (再読み込みボタンで手動更新してください)",
+        "warn",
       );
-    })();
+      logger.warn("watcher", "start failed", {
+        folder: folderPath,
+        err: msg,
+      });
+    });
+  }, [folderPath, watchMode, toast]);
+
+  // Keep a ref to the latest handler so the EventsOn subscription below can
+  // bind once and never need to re-bind on state-derived identity changes.
+  const handlerRef = useRef(handleWatcherPayload);
+  useEffect(() => {
+    handlerRef.current = handleWatcherPayload;
+  }, [handleWatcherPayload]);
+
+  useEffect(() => {
+    const unsub = EventsOn(
+      CLASSIFICATION_CHANGED_EVENT,
+      (payload: ChangedPayload) => {
+        void handlerRef.current(payload);
+      },
+    );
     return () => {
-      cancelled = true;
-      if (unsub) {
-        unsub();
-        unsub = null;
-      }
+      unsub();
+      // Hook is going away — make sure no detached goroutine survives in Go.
       void StopFolderWatch();
     };
-  }, [folderPath, watchMode, handleWatcherPayload, toast]);
+  }, []);
 
   // Deferral-close: when both conflict and mergePrompt are closed AND a
   // pending result has been parked, commit it (re-running the decision so
