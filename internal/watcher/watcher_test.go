@@ -57,6 +57,14 @@ func (c *captured) waitForPayload(t *testing.T, n int, timeout time.Duration) []
 	return nil
 }
 
+// reset clears already-captured payloads so the caller can assert on a
+// subsequent action's emit count without the earlier burst confounding it.
+func (c *captured) reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.payloads = nil
+}
+
 // expectNoPayload waits the given window and asserts emit was never called.
 // Used to verify chmod / non-image / hidden events are filtered out.
 func (c *captured) expectNoPayload(t *testing.T, window time.Duration) {
@@ -462,6 +470,45 @@ func TestStart_RemovedSubdirFlagsAnyChange(t *testing.T) {
 	if got[0].AddedFiles != 0 || got[0].RemovedFiles != 0 {
 		t.Errorf("dir-only remove should not bump counters, got %+v", got[0])
 	}
+}
+
+func TestStart_SymlinkToExternalDirNotFollowed(t *testing.T) {
+	// PR #75 review 7th, thread A: a symlink created inside the watched
+	// folder pointing to an external directory must NOT pull that target
+	// into the watch tree. addSubtree on the symlink would follow it,
+	// surfacing events from paths the user never picked and breaking the
+	// "current folder only" precondition. We expect a generic anyChange
+	// (so the listing refreshes) but no nested watch on the target.
+	root := t.TempDir()
+	external := t.TempDir() // separate tempdir; intentionally outside `root`
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(root); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// Create the symlink. This Create event hits the dir-Create branch via
+	// Lstat → ModeSymlink detection.
+	linkPath := filepath.Join(root, "link-to-external")
+	if err := os.Symlink(external, linkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	got := cap.waitForPayload(t, 1, time.Second)
+	if got[0].AddedFiles != 0 {
+		t.Errorf("symlink Create should not count files in target, got %+v", got[0])
+	}
+
+	// Drain any further payloads from the symlink Create itself.
+	cap.reset()
+
+	// Now write an image into the external dir. If addSubtree had followed
+	// the link we'd see an addedFiles=1 payload here; with the Lstat skip
+	// we expect no further payload (the watch on the target was never
+	// installed).
+	writeImage(t, filepath.Join(external, "would-not-show.png"))
+	cap.expectNoPayload(t, shortDebounce*4)
 }
 
 func TestStart_ChmodOnly_NotEmitted(t *testing.T) {

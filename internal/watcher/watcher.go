@@ -297,6 +297,15 @@ func (m *Manager) loop(st *watchState) {
 				continue
 			}
 			logging.Warn("watcher", "channel error", "err", err.Error())
+			// We can't reliably distinguish a benign warning from a
+			// lost-event indicator (e.g. inotify IN_Q_OVERFLOW would
+			// arrive here in some fsnotify forks). Be safe and flag
+			// anyChange so the next flush prompts the frontend to
+			// re-Load — without this, a queue overflow silently leaves
+			// the listing stale even though we know our event stream
+			// is incomplete (PR #75 review 7th, thread B).
+			pending.anyChange = true
+			resetTimer()
 		case <-timerCh:
 			timerCh = nil
 			flush()
@@ -382,7 +391,12 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnoti
 		return false
 	}
 
-	// New directory: Stat to confirm (Create on a regular file lands here too).
+	// New directory: Lstat to confirm (Create on a regular file lands here too).
+	// Use Lstat rather than Stat so we can detect symlinks without following
+	// them — addSubtree on a symlink-to-external-dir would pull that whole
+	// tree into our watch, while the classification scanner does not follow
+	// symlinks, breaking the "current folder only" precondition and surfacing
+	// events from paths the user never picked (PR #75 review 7th, thread A).
 	// On a confirmed dir we walk it recursively so:
 	//   1) every nested subdirectory gets its own watch (Linux inotify has no
 	//      native recursive mode — without this, a `mv` of an existing tree
@@ -391,26 +405,43 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, w *fsnoti
 	//      counted as added so the debounced payload accurately summarizes
 	//      the change.
 	if ev.Op.Has(fsnotify.Create) {
-		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-			// Incremental add: root-failure is non-fatal (the parent dir's
-			// watch is what gave us this Create event, so we already have
-			// some visibility — we just lose the new subdir's nested
-			// activity). anyChange stays true so the frontend re-Loads.
-			_, discovered := addSubtree(w, ev.Name)
-			acc.addedFiles += len(discovered)
-			if len(discovered) > 0 {
-				if acc.discoveredImagePaths == nil {
-					acc.discoveredImagePaths = make(map[string]struct{}, len(discovered))
-				}
-				// Park the just-counted paths so a concurrent inotify Create
-				// (possible if a writer is dropping files into the new dir
-				// while WalkDir is still running) doesn't double-count.
-				for _, p := range discovered {
-					acc.discoveredImagePaths[p] = struct{}{}
-				}
+		// Lstat (not Stat) so we can detect symlinks. If Lstat errors the
+		// path likely already vanished (rapid create-then-remove); just
+		// fall through to the regular file branches below so the image
+		// classifier still has a chance to act on a synthetic event.
+		if info, err := os.Lstat(ev.Name); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				// Symlink to file or directory. We deliberately don't
+				// traverse the target — see comment above. Flag anyChange
+				// so the user sees the new entry surface on the next
+				// re-Load (the classification scanner will skip it
+				// consistently).
+				acc.anyChange = true
+				return true
 			}
-			acc.anyChange = true
-			return true
+			if info.IsDir() {
+				// Incremental add: root-failure is non-fatal (the parent
+				// dir's watch is what gave us this Create event, so we
+				// already have some visibility — we just lose the new
+				// subdir's nested activity). anyChange stays true so the
+				// frontend re-Loads.
+				_, discovered := addSubtree(w, ev.Name)
+				acc.addedFiles += len(discovered)
+				if len(discovered) > 0 {
+					if acc.discoveredImagePaths == nil {
+						acc.discoveredImagePaths = make(map[string]struct{}, len(discovered))
+					}
+					// Park the just-counted paths so a concurrent inotify
+					// Create (possible if a writer is dropping files into
+					// the new dir while WalkDir is still running) doesn't
+					// double-count.
+					for _, p := range discovered {
+						acc.discoveredImagePaths[p] = struct{}{}
+					}
+				}
+				acc.anyChange = true
+				return true
+			}
 		}
 	}
 
