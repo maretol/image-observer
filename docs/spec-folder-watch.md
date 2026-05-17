@@ -134,6 +134,11 @@
   新規 test `TestRepository_DeletedFileTreatedAsConflict` 追加。(4)
   `silentRecheckAfterStart` の成功 commit 前に `setError(null)` を追加
   (watcher handler / performReplay reload と同じく error clear)。
+- 2026-05-17 PR #75 17th レビュー対応 (`.claude/context.md` 整合): (1) §1 DoD
+  の検証コマンドを `go test ./internal/...` に変更 (CI と同範囲、main の
+  `//go:embed all:frontend/dist` を避ける)。context.md 側でも同じ修正を施した
+  (line 5 / 105 / 198 / 82 / 92 / 113 ほか 6 箇所)。本 spec の変更は説明追加
+  のみで、実装挙動は変えていない。
 
 ---
 
@@ -151,7 +156,7 @@
 - 既存の編集 / 競合検出 / merge prompt フローと衝突しない (= 編集中ポップオーバー
   が開いている / conflict / merge prompt 表示中は反映を遅延)。
 - 監視 ON / OFF を settings.json で切替可能 (default `auto`)。
-- `wails build` 通過、`go test ./...` 全通過、`tsc --noEmit` クリア、vitest 全通過。
+- `wails build` 通過、`go test ./internal/...` 全通過 (CI と同範囲、main の go:embed all:frontend/dist を避ける)、`tsc --noEmit` クリア、vitest 全通過。
 
 ---
 
