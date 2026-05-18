@@ -21,6 +21,7 @@ import type { ConfirmFn } from "../viewer-grid/useViewerSet";
 import { entriesEquivalent } from "./entriesEquivalent";
 import { type ListTabFilter } from "./filters";
 import { useClassificationFilter } from "./useClassificationFilter";
+import { useClassificationSelection } from "./useClassificationSelection";
 import { useDirectoryGroups } from "./useDirectoryGroups";
 import {
   decideAutoMerge,
@@ -155,10 +156,16 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     preview: null,
     folderPath: "",
   });
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  // Anchor for Shift+click range selection. Set on every toggle (single or
-  // ctrl); persists across shift-extends so the user can adjust the range.
-  const [selectAnchor, setSelectAnchor] = useState<string | null>(null);
+  const {
+    selected,
+    selectedFilenames,
+    isSelected,
+    toggleSelected,
+    extendSelectionTo,
+    clearSelected,
+    setSelected,
+    resetForFolderSwitch: resetSelectionForFolderSwitch,
+  } = useClassificationSelection();
   const groups = useDirectoryGroups(opts.initialList?.collapsedGroups ?? []);
 
   const toast = useToastFn();
@@ -243,9 +250,8 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     setConflict(null);
     setMergePrompt({ open: false, preview: null, folderPath: "" });
     pendingResultRef.current = null;
-    setSelected((cur) => (cur.size === 0 ? cur : new Set()));
-    setSelectAnchor(null);
-  }, []);
+    resetSelectionForFolderSwitch();
+  }, [resetSelectionForFolderSwitch]);
 
   // requestGenRef gates every `setLoadResult` / `setError` commit triggered
   // by an asynchronous Load so that out-of-order completions can't roll back
@@ -447,65 +453,6 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     // and builds a fresh watcher (PR #75 11th, thread B).
     dispatchWatchIntentRef.current();
   }, [loadInternal]);
-
-  // Mirror anchor into a ref so extendSelectionTo's identity stays stable.
-  // Declared above the callbacks that read it to avoid a TDZ-shaped pitfall.
-  const selectAnchorRef = useRef<string | null>(selectAnchor);
-  useEffect(() => {
-    selectAnchorRef.current = selectAnchor;
-  }, [selectAnchor]);
-
-  // Selection actions. The displayed selection list is sorted DFS-style by
-  // sticking close to the on-disk filename order (= POSIX relative path).
-  const isSelected = useCallback(
-    (filename: string) => selected.has(filename),
-    [selected],
-  );
-  const toggleSelected = useCallback((filename: string) => {
-    setSelected((cur) => {
-      const next = new Set(cur);
-      if (next.has(filename)) next.delete(filename);
-      else next.add(filename);
-      return next;
-    });
-    setSelectAnchor(filename);
-  }, []);
-  const extendSelectionTo = useCallback(
-    (filename: string, displayedOrder: string[]) => {
-      const anchor = selectAnchorRef.current;
-      // No anchor / either endpoint missing → degrade to a plain toggle.
-      const startIdx = anchor != null ? displayedOrder.indexOf(anchor) : -1;
-      const endIdx = displayedOrder.indexOf(filename);
-      if (startIdx < 0 || endIdx < 0) {
-        setSelected((cur) => {
-          const next = new Set(cur);
-          if (next.has(filename)) next.delete(filename);
-          else next.add(filename);
-          return next;
-        });
-        setSelectAnchor(filename);
-        return;
-      }
-      const [lo, hi] =
-        startIdx <= endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
-      const range = displayedOrder.slice(lo, hi + 1);
-      setSelected((cur) => {
-        const next = new Set(cur);
-        for (const f of range) next.add(f);
-        return next;
-      });
-      // Anchor stays put so the user can re-shift to a different end-point.
-    },
-    [],
-  );
-  const clearSelected = useCallback(() => {
-    setSelected((cur) => (cur.size === 0 ? cur : new Set()));
-    setSelectAnchor(null);
-  }, []);
-  const selectedFilenames = useMemo(
-    () => Array.from(selected).sort(),
-    [selected],
-  );
 
   // ─── fsnotify auto-merge (#19) ─────────────────────────────────────
   //
