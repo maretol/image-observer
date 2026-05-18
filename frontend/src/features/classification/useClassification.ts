@@ -166,7 +166,6 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     folderPath: "",
   });
   const {
-    selected,
     selectedFilenames,
     isSelected,
     toggleSelected,
@@ -178,7 +177,9 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   const groups = useDirectoryGroups(opts.initialList?.collapsedGroups ?? []);
 
   const toast = useToastFn();
-  const { confirm, watchMode } = opts;
+  // opts.watchMode is consumed directly (watchModeRef sync + useClassificationWatcher
+  // prop) — destructuring it into a local would just shadow opts without any reader.
+  const { confirm } = opts;
 
   // Refs that the watcher event handler reads. Mirrored from state so the
   // single EventsOn callback (registered once for the hook's lifetime — see
