@@ -209,7 +209,7 @@ frontend/src/
 
 `ThumbState = { hoveredPath, popupVisible, popupAnchor, cache: Map<path, CacheEntry> }`. `CacheEntry`: `{status:"loading"}` | `{status:"ok", src:string}` | `{status:"error", message}`.
 
-see `frontend/src/hooks/useThumbnail.ts`
+> Phase 4 で `features/folder-tree/` (ホバーポップアップ含む) は削除済。現行のサムネ取得は [frontend/src/features/classification/thumbnailCache.ts](../frontend/src/features/classification/thumbnailCache.ts) + [useGridThumbnail.ts](../frontend/src/features/classification/useGridThumbnail.ts) に再実装されている。
 
 挙動:
 - `onMouseEnter(path, rect)`: `hoveredPath = path`, `popupAnchor = rect`, 250ms タイマー開始
@@ -251,7 +251,7 @@ dir ノードはホバーポップアップ対象外。
 
 `GetThumbnail(path, 256, "letterbox")` の結果を `data:${mimeType};base64,${data}` 形式で `<img src>` に渡す。Wails `[]byte` → TS は `number[]` または base64 `string` で来るため `models.ts` の型を確認して変換する。
 
-see `frontend/src/hooks/useThumbnail.ts`
+> Phase 4 移植後の実装: [frontend/src/features/classification/thumbnailCache.ts](../frontend/src/features/classification/thumbnailCache.ts)。
 
 ### 4.6 設定の固定値
 

@@ -3,7 +3,7 @@
 一覧タブの Card から **右クリック → 削除** で画像ファイルを 1 件ずつディスク上で削除
 できるようにする。Phase 1 ではゴミ箱送り (Windows Recycle Bin) を既定動作とする。
 
-> **ステータス**: ドラフト。§12 の決定事項をユーザー合意後に着手。
+> **ステータス**: Phase 1 実装完了 (PR #74、`internal/imgfile/trash_*.go` + `app.go::DeleteImage`)。§12 の決定事項は確定済み。Phase 2 は §14 を参照。
 
 ---
 
@@ -266,22 +266,24 @@ vitest:
 - Trash 非対応の領域 (network 共有 / SD カード) で削除を試して失敗トーストが出る
 - 確認ダイアログを Esc / Cancel でキャンセル → ファイルは消えない
 
-## 12. 決定事項 (= 本書での recommend、レビューで合意を取る)
+## 12. 決定事項 (Phase 1 確定済み)
 
-| § | 論点 | 本書の決定 | 代替案 |
-|---|------|----------|--------|
-| 12.1 | 削除方式 | **Phase 1 は Trash 送り固定**。SHFileOperationW を直接叩く。Linux dev は `os.Remove` フォールバック | 設定で「Trash / Hard」切替 → Phase 2 |
-| 12.2 | エントリーポイント | **Card 右クリックのみ** | バルクツールバー / Delete キー → Phase 2 |
-| 12.3 | 確認ダイアログ | **常に表示**。`useConfirm()` 既存 API をそのまま使う (API 拡張なし) | danger variant 追加 → Phase 2 (複数削除と合わせて) |
-| 12.4 | 確認文言 | `"<filename> をゴミ箱に送りますか?"` | i18n は別 issue (#16) |
-| 12.5 | sidecar 整合 | **削除 IPC と SaveClassification を分離**。フロントで逐次実行 | 1 IPC で原子化 → 競合検出ロジック二重化のため Phase 1 では避ける |
-| 12.6 | 開いているタブ | **削除成功後に自動 close** (確認なし)。確認ダイアログ文面には「タブも閉じます」を **含めない** (簡潔さ優先) | 文面に追記 → 不採用 |
-| 12.7 | 削除エラー | **単一 error 返却**、固定文言トースト、entries / タブは不変 | per-file エラー分類 → 単一削除なので不要 |
-| 12.8 | Delete キー | **Phase 1 では実装しない** (Card 右クリックのみで足りる前提) | Phase 2 で複数削除と合わせて検討 |
-| 12.9 | サムネキャッシュ | **触らない**。mtime/size ベースで自動 orphan | キャッシュ GC は別 issue で扱う |
-| 12.10 | settings | **Phase 1 では設定追加なし** | `image.deleteMode` / `image.deleteConfirm` → Phase 2 |
-| 12.11 | ビューア側からの削除 | **Phase 1 では実装しない**。一覧タブのみ | ビューアで開いている画像を `Ctrl+Delete` で削除 → Phase 2 |
-| 12.12 | フォルダ削除 | **対象外** (画像ファイル削除のみ) | フォルダ単位削除はスコープ外、別 issue |
+| § | 論点 | 採用 |
+|---|------|------|
+| 12.1 | 削除方式 | Phase 1 は Trash 送り固定 (SHFileOperationW 直叩き、Linux dev は `os.Remove`) |
+| 12.2 | エントリーポイント | Card 右クリックのみ |
+| 12.3 | 確認ダイアログ | 常に表示。`useConfirm()` 既存 API をそのまま使う |
+| 12.4 | 確認文言 | `"<filename> をゴミ箱に送りますか?"` |
+| 12.5 | sidecar 整合 | 削除 IPC と SaveClassification を分離、フロントで逐次実行 |
+| 12.6 | 開いているタブ | 削除成功後に自動 close (確認なし、ダイアログ文面に追記しない) |
+| 12.7 | 削除エラー | 単一 error 返却、固定文言トースト、entries / タブは不変 |
+| 12.8 | Delete キー | Phase 1 では実装しない |
+| 12.9 | サムネキャッシュ | 触らない (mtime/size ベースで自動 orphan) |
+| 12.10 | settings | Phase 1 では追加なし |
+| 12.11 | ビューア側からの削除 | Phase 1 では実装しない (一覧タブのみ) |
+| 12.12 | フォルダ削除 | 対象外 (画像ファイル削除のみ) |
+
+代替案 (バルク削除 / `useConfirm` の danger variant / 設定 UI 等) は §14 / `git log` 参照。
 
 ## 13. Out of scope
 

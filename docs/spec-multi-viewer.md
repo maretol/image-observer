@@ -2,7 +2,7 @@
 
 ビューアタブを単一の固定タブから「**ユーザーが追加 / 削除 / リネームできる複数ビューア**」へ拡張する。各ビューアは独立した BSP レイアウト ([docs/spec-viewer-flexlayout.md](spec-viewer-flexlayout.md)) を持つ。VS Code の「ウィンドウ → 新しいウィンドウ」やブラウザの複数タブグループに近い UX を目指す。
 
-> **ステータス**: ドラフト。§13 の決定事項をユーザー合意後に着手。
+> **ステータス**: 実装完了 (state schema v6、`features/viewer-grid/viewers.ts` + `useViewerSet.ts`)。本書 §13 の決定事項は確定済み、§11 / §14 は履歴として残置。
 
 ---
 
@@ -470,25 +470,9 @@ see `internal/state/state.go:validateState`
 - フロント mutation の no-op (validation 失敗) はトーストで notify。
 - Go 側 `validateState` の致命エラーは DefaultData fallback ([state.go:159](../internal/state/state.go#L159))。
 
-## 11. 実装順序
+## 11. 実装順序 (実装完了)
 
-依存関係を考えると以下の順:
-
-1. **Go 側 state v6** + マイグレーション + テスト (PR 単位の最小ブロック)。Wails 自動生成の TS 型 (`state.StateData`) を再生成。
-2. **`features/viewer-grid/viewers.ts`** (純関数 + 型 + `moveTabAcrossViewers`) + vitest。
-3. **`useViewerSet` フック** ([useViewerGrid.ts](../frontend/src/features/viewer-grid/useViewerGrid.ts) を上に被せる形)。既存 `useViewerGrid` は内部実装に降格。判断: **置き換え** — `useViewerGrid` ファイル名を維持しつつ中身を `useViewerSet` 化、active viewer の各操作を delegate メソッドとして公開。`openInActiveOf(dstId, path)` / `openManyInActiveOf(dstId, paths)` / `openManyAsSplitOf(dstId, paths)` / `moveTabToViewer(srcLeafId, srcIdx, dstId)` の thin wrapper も同時に生やす。
-4. **`useSessionSave` v6 化** + buildStateData 更新。
-5. **App.tsx 改修**: viewers 配列レンダ、トップタブ + リネーム / × ボタン UI、グローバルキーバインド `Digit3..9` 追加、onOpenInViewer 系のターゲット解決を `*Of(dstId, ...)` 経由に。
-6. **SampleModal 改修** (§5.6.1): `viewers` / `activeViewerId` / `onOpenInViewer(dstId)` props 追加、フッターをビューア選択ボタン群に置換。
-7. **Card 動線変更** (§5.6.1): `Card.tsx` の `activate()` / `onClick` で `onClickThumb` → `onClickPreview` に置換、PreviewIcon ボタン削除、`onClickThumb` prop を削除。`ClassificationView` 側の prop 配線と DirectoryGroup の通り道も同時更新。
-8. **ClassificationView バルク領域改修** (§5.6.2): BulkActionsBar に `<select>` + 既存 2 ボタンの並び。`onOpenManyInTabs` / `onOpenManyAsSplit` を `(dstId, filenames)` シグネチャに変更。
-9. **TabContextMenu 拡張** (§5.7): `viewers` / `currentViewerId` / `onMoveToViewer(dstId)` props 追加、「ビューアへ移動 ▶」サブメニュー (`MoveToViewerSubmenu` を子コンポーネントに切出し)。マウス hover 150ms 遅延、キーボード `→/←/↑/↓/Home/End/Esc` 対応、画面端 flip 配置。`viewers.length === 1` で項目ごと非表示。
-10. **CSS** (`.top-tabs` overflow + `.top-tab` リネーム / × ボタン + SampleModal フッターの button group + BulkActionsBar の `<select>` + TabContextMenu サブメニューの `position: fixed` + `max-width / ellipsis`)。
-11. **設定ダイアログ KEYBINDINGS** 更新 (§5.5)。
-12. **マニュアル `wails dev` 受け入れテスト** (§8.3)。
-13. **ドキュメント**: `.claude/context.md` の Phase 名 + state schema 注記、`docs/todo.md` の E 系項目、`spec-viewer-flexlayout.md` 冒頭に redirect。
-
-各ステップで `go test ./...` / `npm run test` / `tsc --noEmit` / `wails build` が通ることを確認。
+実装は次の順で完了済み: Go state v6 → `viewers.ts` 純関数 → `useViewerSet` (旧 `useViewerGrid` の置換) → `useSessionSave` v6 化 → `App.tsx` 改修 → SampleModal / Card / ClassificationView / TabContextMenu 改修 → CSS / 設定ダイアログ / マニュアルテスト / ドキュメント整合。各ステップで `go test ./...` / `npm run test` / `tsc --noEmit` / `wails build` が通る単位で commit。
 
 ## 12. スコープ外 (v1 で作らない、要望出たら別 issue)
 
@@ -501,87 +485,27 @@ see `internal/state/state.go:validateState`
 - **9 個以上のビューア**。MAX_VIEWERS = 8 (`Ctrl+Shift+2..9` の数字キーに合わせて固定)。
 - **マイグレーション v4 以下** (DefaultData fallback のまま)。
 
-## 13. 確定すべき決定事項 (実装着手前)
+## 13. 決定事項 (確定済み)
 
-§1 で「こうする」と書いた内容は、次の判断のうえに成り立っている。**ユーザー合意で確定**してから実装に入る。
+| # | 項目 | 採用 |
+|---|------|------|
+| 1 | v5→v6 マイグレーション | ロスレス昇格 (1 ビューアに packing) |
+| 2 | `topTab` モデル | `"list" \| "viewer"` + `activeViewerID` 別フィールド |
+| 3 | ビューア追加 UI | top-tab 末尾の `+` ボタン |
+| 4 | リネーム UI | タブダブルクリックで inline edit |
+| 5 | ビューア削除 UI | タブ hover で `×` |
+| 6 | 削除確認 | タブが残っていれば確認、空は無確認 |
+| 7 | 既定名 | "ビューア N" 自動連番 (gap 採番) |
+| 8 | MAX_VIEWERS | 8 (Ctrl+Shift+2..9 と整合) |
+| 9 | MAX_PANELS | ビューア当たり 16 (現状据え置き) |
+| 10 | ビューア間タブ移動 | DnD なし。タブ右クリックメニューに「ビューアへ移動 ▶」サブメニュー (§5.7, §4.6) |
+| 11 | 一覧 → ビューア結線 | Card クリック → SampleModal → モーダル内ビューア選択ボタン群。バルクは BulkActionsBar にビューア `<select>` + アクションボタン (§5.6) |
+| 12 | `Ctrl+Shift+W` | 追加しない (誤爆回避) |
+| 13 | 非アクティブビューア mount | unmount (active のみマウント) |
+| 14 | 名前バリデーション | trim 後 1〜32 文字、重複許容 |
 
-| # | 項目 | 推奨 | 代替案 |
-|---|------|------|--------|
-| 1 | v5→v6 マイグレーション | **ロスレス昇格** (1 ビューアに packing) | DefaultData fallback (損失あり、コード薄い) |
-| 2 | `topTab` モデル | `"list" \| "viewer"` のまま + `activeViewerID` 別フィールド | `topTab: "list" \| "viewer:<id>"` のような string union |
-| 3 | ビューア追加 UI | top-tab 末尾の `+` ボタン | コンテキストメニュー / メニューバー |
-| 4 | リネーム UI | タブダブルクリックで inline edit | コンテキストメニュー → モーダル |
-| 5 | ビューア削除 UI | タブ hover で `×` | コンテキストメニュー / 設定ダイアログ |
-| 6 | 削除確認 | タブが残っていれば確認ダイアログ、空なら無確認 | 常に確認 / 常に即削除 |
-| 7 | 既定名 | "ビューア N" 自動連番 (gap 採番) | "Untitled" / 必ずユーザー命名 |
-| 8 | MAX_VIEWERS | **8** (Ctrl+Shift+2..9 に合わせて) | 4 / 16 / 無制限 |
-| 9 | MAX_PANELS の解釈 | ビューア当たり 16 (現状据え置き) | 全体合計 16 |
-| 10 | ビューア間タブ移動 | **DnD は v1 スコープ外**。代替に**タブ右クリックメニュー**「ビューア "X" へ移動」を追加 (§5.7, §4.6) | DnD 採用 / 移動 UI なし |
-| 11 | 一覧 → ビューア結線 | **Card クリック → SampleModal → モーダル内ビューア選択ボタン群** で選んで開く。バルクは BulkActionsBar に **ビューア選択ドロップダウン + アクションボタン** を併設 (§5.6) | アクティブビューアに固定 / 一覧側で固定ピン留め |
-| 12 | キーバインド `Ctrl+Shift+W` | **追加しない** | 追加 (アクティブビューア閉じる) |
-| 13 | 非アクティブビューアの mount 戦略 | **unmount** (active のみマウント) | 全 mount + display:none |
-| 14 | 名前バリデーション | trim 後 1 文字以上、32 文字以下、重複許容 | 重複禁止 / 改行禁止 |
+検討時の代替案 / 不採用案は `git log` 参照。
 
-> **§13 への追記 (確定)**:
-> - #10 ビューア間 DnD は不採用継続。ただしタブ右クリックメニューに「ビューア "X" へ移動」を追加する (上表 #10、§4.6、§5.7 に反映)。
-> - #11 一覧 → ビューア結線は刷新: 通常クリック → SampleModal → モーダル内のビューア選択メニュー、またはバルク選択 UI → 「開く」ボタン群にビューア選択ドロップダウン (上表 #11、§5.6 に反映)。
+## 14. 受け入れ基準 (実装完了)
 
-## 14. 受け入れ基準 (DoD checklist)
-
-実装完了時にこのリストを `[x]` にしていく。
-
-### 機能
-- [ ] トップタブが「一覧 + ビューア × N」で動的レンダされる
-- [ ] `+` ボタンでビューア追加できる、上限 8
-- [ ] タブ hover で `×` 表示、クリックで削除 (タブあれば確認)
-- [ ] タブダブルクリックでリネーム inline edit (Enter 確定 / Esc 破棄 / blur 確定)
-- [ ] 各ビューアが独立した Layout を持つ (1 つで分割しても他に波及しない)
-- [ ] アクティブビューアの active panel 機構が従来通り動作 (ズーム/パン/タブ操作)
-- [ ] ビューア最後の 1 個は削除不可 (× ボタン disabled)
-
-### 一覧 → ビューア結線 (§5.6)
-- [ ] Card サムネ通常クリックで SampleModal が開く (旧: 即ビューア開きは廃止)
-- [ ] Card の独立プレビューボタン (PreviewIcon) は削除されている
-- [ ] `viewers.length === 1` のとき SampleModal フッターは「ビューア "{name}" で開く」1 ボタン
-- [ ] `viewers.length >= 2` のとき SampleModal フッターはビューア横並びボタン群、active がハイライト + 既定フォーカス
-- [ ] BulkActionsBar に「ビューア ▾ + タブで開く + 分割で開く」が並ぶ、ドロップダウン既定は active viewer
-- [ ] 各経路で開いた後、`setTopTab("viewer")` + 選んだビューアが active になる
-
-### ビューア間タブ移動 (§4.6, §5.7)
-- [ ] タブ右クリックメニューに「ビューアへ移動 ▶」が `viewers.length >= 2` で表示される
-- [ ] サブメニューに自ビューア除外の全ビューアが列挙される
-- [ ] `viewers.length === 1` では「ビューアへ移動 ▶」項目と直前の区切りが非表示
-- [ ] サブメニューがマウス hover (150ms 遅延) で開く / 親項目から離れて閉じる
-- [ ] キーボード `→` / `Enter` でサブメニューを開いて先頭にフォーカス
-- [ ] キーボード `←` / `Esc` (サブ内) でサブメニューを閉じて親項目に戻る
-- [ ] サブメニュー内 `↑` / `↓` で項目移動 (ラップアラウンド)
-- [ ] 画面右端でサブメニューが左側に flip する
-- [ ] 移動でタブが src から消え、dst の active leaf に末尾追加 (重複 path はフォーカスのみ)
-- [ ] 移動後、active viewer は src のまま (focus 移動なし) + トースト表示
-- [ ] 移動で src leaf が空になったら collapseEmptyLeaf が走る (root leaf を除く)
-
-### キーバインド
-- [ ] `Ctrl+Shift+1` で一覧
-- [ ] `Ctrl+Shift+2..9` で N-1 番目 (1〜8) のビューア、存在しなければ no-op
-- [ ] `Ctrl+W` / `Ctrl+Tab` / `Ctrl+0` 系がアクティブビューアの active panel に効く
-- [ ] リネーム input にフォーカスがある間は全グローバルキーバインドが抑制される
-
-### 永続化
-- [ ] v5 state.json があるユーザーがアプリ起動 → ビューア 1 個に packing される (内容ロスなし)
-- [ ] v6 で Save → 再起動で完全復元 (viewers / activeViewerId / topTab / 各 layout / 各 tab の zoom/pan / window size/pos / list filter)
-- [ ] viewers 空配列 / activeViewerId 不一致 / 重複 ID の壊れ方を検証 (validateState がよしなに修復、致命的なら fallback)
-
-### テスト
-- [ ] `go test ./internal/state/...` 全通過 (新規 v5→v6 マイグレーション 9 ケース含む)
-- [ ] `npm run test` 全通過 (新規 viewers.test.ts 30 ケース見込み)
-- [ ] `tsc --noEmit` クリア
-- [ ] `wails build` 通過
-
-### マニュアル
-- [ ] `wails dev` で §8.3 の全シナリオが手で確認できる
-- [ ] 既存機能 (Phase 3a〜5 + Phase 4 + Phase H) に regression なし
-
-### ドキュメント
-- [ ] `.claude/context.md` に state schema v6 + Phase 名追記
-- [ ] `docs/spec-viewer-flexlayout.md` 冒頭に「複数ビューアは spec-multi-viewer.md 参照」追記
-- [ ] `docs/todo.md` の該当項目を `[x]` に
+DoD の全項目を満たして実装完了 (state schema v6 + `go test ./internal/state/...` + `npm run test` + `tsc --noEmit` + `wails build` 通過、v5 → v6 ロスレス昇格マイグレーションのテスト含む)。詳細チェックリストは `git log` を参照。
