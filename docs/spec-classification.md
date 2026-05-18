@@ -250,7 +250,12 @@ frontend/src/
 │       ├── colors.ts             # tagColor (汎用配色 + ハッシュフォールバック)
 │       ├── colors.test.ts        # 既知タグ / 未知タグ / 空文字 のテスト
 │       ├── defaultPalette.ts     # サンプル提供のキャラ名→色マップ (差し替え可能)
-│       └── useClassification.ts  # 状態管理 (loadResult / filter / lightbox / editing)
+│       └── useClassification.ts  # 状態管理 (loadResult / filter / editing 等)
+                                  # ※ Phase 4 後の #66 リファクタで責務別に
+                                  # 8 つの子フックに分割 (useClassification{Filter,
+                                  # Selection,Load,Watcher,Replay,Edit,Merge,
+                                  # Delete}.ts)。公開 API は変更なし。詳細は
+                                  # docs/spec-classification-hook-refactor.md
 └── shared/
     ├── components/
     │   └── ConflictDialog.tsx    # 新規: 3 択 (再読み込み/強制上書き/キャンセル)
