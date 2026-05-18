@@ -118,81 +118,18 @@ internal/
 
 ### 3.2 `internal/imgfile/imgfile.go` (新設)
 
-`internal/tree::IsImage` を `internal/imgfile::IsImage` に移設する。`thumb` / `imgread` / `classification/scanner` の 3 箇所から呼ばれる。
+`internal/tree::IsImage` を `internal/imgfile::IsImage` に移設する。`thumb` / `imgread` / `classification/scanner` の 3 箇所から呼ばれる。大小文字を無視して `.jpg/.jpeg/.png/.gif/.webp/.bmp/.tif/.tiff` を判定する。
 
-```go
-package imgfile
-
-import "strings"
-
-// IsImage returns true when the given filename has a supported image extension.
-// Extensions are matched case-insensitively. Used by thumbnail generation,
-// image reading, and folder scanning.
-func IsImage(name string) bool {
-    lower := strings.ToLower(name)
-    for _, ext := range []string{
-        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff",
-    } {
-        if strings.HasSuffix(lower, ext) {
-            return true
-        }
-    }
-    return false
-}
-```
-
-`internal/thumb` / `internal/imgread` の `tree.IsImage` 参照を `imgfile.IsImage` に書き換える。テストは `imgfile/imgfile_test.go` に移植。
+see `internal/imgfile/imgfile.go`
 
 ### 3.3 `internal/classification/types.go`
 
-```go
-package classification
+主要型: `Confidence` ("high"/"mid"/"low"/"")、`Entry` {Filename, Folder, Confidence, Note}、
+`Classification` {Version, UpdatedAt, Entries}、`LoadResult` {FolderPath, Entries, Orphans, HasSidecar, Source, Mtime}。
 
-import "time"
+see `internal/classification/types.go`
 
-type Confidence string
-
-const (
-    ConfHigh Confidence = "high"
-    ConfMid  Confidence = "mid"
-    ConfLow  Confidence = "low"
-    ConfNone Confidence = ""
-)
-
-const SchemaVersion = 1
-
-type Entry struct {
-    Filename   string     `json:"filename"`
-    Folder     string     `json:"folder"`
-    Confidence Confidence `json:"confidence"`
-    Note       string     `json:"note"`
-}
-
-type Classification struct {
-    Version   int       `json:"version"`
-    UpdatedAt time.Time `json:"updated_at"`
-    Entries   []Entry   `json:"entries"`
-}
-
-// LoadResult はフロントへ返す合成結果。
-// Entries は実ファイルとマージ済 (未分類は folder="" で含む)。
-// Orphans はサイドカーには記載があるが実ファイルが無いエントリ。
-// Mtime は読み込み時の _classification.json の mtime (UnixNano)。
-// 保存時に競合検出 (外部からの書き換えがあるか) のために使う。
-// サイドカー不在 (Source="none") のときは 0。
-type LoadResult struct {
-    FolderPath string  `json:"folderPath"`
-    Entries    []Entry `json:"entries"`
-    Orphans    []Entry `json:"orphans"`
-    HasSidecar bool    `json:"hasSidecar"`
-    Source     string  `json:"source"` // "json" | "csv" | "none"
-    Mtime      int64   `json:"mtime"`  // UnixNano of _classification.json at load time, 0 if none
-}
-```
-
-JSON フィールド名は元仕様§4.2 では snake_case (`updated_at` / `folder_path`) だが、本プロジェクトの既存コード (state.go の `rootPath` 等) は **camelCase で統一** している。本書では **camelCase に統一する** (`folderPath`, `hasSidecar`, `updatedAt`, `mtime`)。Wails 自動生成 TS バインディングがそのまま使えることを優先する。
-
-`Mtime` は **UnixNano (`int64`)** で扱う。JSON では Wails が JS の `number` に変換するが、`int64` の上限内 (2262 年まで) なので Number 精度の問題は無視できる範囲。
+JSON フィールド名はプロジェクト方針に従い camelCase (`folderPath`, `hasSidecar`, `updatedAt`, `mtime`)。`Mtime` は UnixNano (`int64`)。
 
 #### 3.3.1 タグの汎用化方針 (本書差分)
 
@@ -341,78 +278,15 @@ func (s *Service) CreateEmpty(folderPath string) (int64, error)
 
 ### 3.7 `app.go` 追加バインディング
 
-```go
-import "image-observer/internal/classification"
+IPC: `LoadClassification(folderPath)`, `SaveClassification(folderPath, entries, expectedMtime)`, `UpdateClassificationEntry(folderPath, entry, expectedMtime)`, `CreateEmptyClassification(folderPath)`。競合時は `"CONFLICT:"` プレフィックス付きエラーを返し、フロントは `e.message.startsWith("CONFLICT:")` で判定する。`ListDirectory` / `internal/tree` は左ペイン廃止に伴い削除。
 
-// SaveResult / UpdateResult はフロント向けに「新しい mtime」を返す薄いラッパ。
-type ClassificationSaveResult struct {
-    Mtime int64 `json:"mtime"`
-}
-
-// Load: サイドカー読込 + マージ。「再読み込み」ボタンも同 API を再呼出するだけ。
-func (a *App) LoadClassification(folderPath string) (*classification.LoadResult, error)
-
-// Save: 全データを書き出し。expectedMtime はフロントが LoadResult.Mtime を渡す。
-// 競合検出で ErrConflict が返れば JS 側で Promise reject となり、メッセージから判定する。
-func (a *App) SaveClassification(folderPath string, entries []classification.Entry, expectedMtime int64) (ClassificationSaveResult, error)
-
-// UpdateEntry: filename で一致するものを置換、なければ追加。expectedMtime で競合検出。
-func (a *App) UpdateClassificationEntry(folderPath string, entry classification.Entry, expectedMtime int64) (ClassificationSaveResult, error)
-
-// CreateEmpty: 新規サイドカー作成。expectedMtime は使わない (新規なので)。
-func (a *App) CreateEmptyClassification(folderPath string) (ClassificationSaveResult, error)
-```
-
-エラーは Promise reject される。フロント側は `error.message` の `"classification: external modification detected"` 部分を判定するか、もしくは Wails の `error` を判別するために **専用の判別文字列を error message に含める**。実装簡略化のため、本書では `errors.Is(err, classification.ErrConflict)` を Go 側で判定し、`fmt.Errorf("CONFLICT: %w", err)` のように **prefix `"CONFLICT:"`** を error message 先頭に付けて返す。フロントは `e.message.startsWith("CONFLICT:")` で判定する。
-
-App 構造体に `*classification.Service` を持たせる。`NewApp()` で `classification.NewService(jsonOrCsvRepo{}, fsScanner{})` を組み立てる。
-
-`ListDirectory` / `internal/tree::List` は **削除する** (左ペイン廃止に伴い呼び出し元なし)。`tree_unix.go` / `tree_windows.go` も削除。
+see `app.go`
 
 ### 3.8 `internal/state` の v2 化
 
-`state.go` に以下を追加:
+`StateSchemaVersion = 2`。`StateData` に `TopTab string` ("list"|"viewer") と `ListTabState{FolderPath, Filter{Tags, Confidence, Query}}` を追加。`RootPath` / `LeftPaneWidth` は後方互換のため残置。v1 state.json は Version 不一致でデフォルト fallback (マイグレーションなし)。
 
-```go
-const StateSchemaVersion = 2  // 1 -> 2 に更新
-
-type StateData struct {
-    Version       int               `json:"version"`
-    RootPath      string            `json:"rootPath"`        // 互換のため残す (v1 の遺物、v2 では未使用)
-    LeftPaneWidth int               `json:"leftPaneWidth"`   // 互換のため残す (v1 の遺物、v2 では未使用)
-    Window        WindowState       `json:"window"`
-    Grid          GridState         `json:"grid"`
-    TopTab        string            `json:"topTab"`          // 新規: "list" | "viewer"
-    List          ListTabState      `json:"list"`            // 新規
-}
-
-type ListTabState struct {
-    FolderPath string         `json:"folderPath"` // "" if not selected
-    Filter     ListFilterState `json:"filter"`
-}
-
-type ListFilterState struct {
-    Tags       []string `json:"tags"`       // OR; empty = no tag filter
-    Confidence string   `json:"confidence"` // "all" | "high" | "mid" | "low"
-    Query      string   `json:"query"`
-}
-```
-
-- `RootPath` / `LeftPaneWidth` は v2 ではフロント側で参照されない (左ペイン廃止のため)。後方互換 (古い state.json が読める) を考慮し型は残す。
-- v1 の state.json を読んだ場合は `Version` 不一致で `DefaultData()` にフォールバックする (Phase 3c の既存挙動)。マイグレーションは行わない (Phase 3c で確定した方針)。
-- `validateState` で `TopTab` が `"list"` / `"viewer"` 以外なら `"list"` に補正。`Confidence` も `"all"|"high"|"mid"|"low"` 以外は `"all"` に補正。
-
-`DefaultData()` の更新:
-
-```go
-return StateData{
-    Version: StateSchemaVersion,
-    Window:  WindowState{Width: 1024, Height: 768, X: -1, Y: -1},
-    Grid:    defaultGridState(),
-    TopTab:  "list",
-    List:    ListTabState{FolderPath: "", Filter: ListFilterState{Tags: []string{}, Confidence: "all", Query: ""}},
-}
-```
+see `internal/state/state.go`
 
 ---
 
@@ -455,50 +329,9 @@ frontend/src/
 
 ### 4.2 トップレベルタブ (`App.tsx`)
 
-```tsx
-function AppInner({ initialState }: AppInnerProps) {
-  const [topTab, setTopTab] = useState<"list" | "viewer">(
-    initialState?.topTab === "viewer" ? "viewer" : "list"
-  );
-  const viewer = useViewerGrid({ initialGrid: initGrid, confirm });
-  const classification = useClassification({ initialList: initialState?.list });
+`topTab: "list" | "viewer"` で条件レンダリング。`useClassification` / `useViewerGrid` を App スコープで持つ。`useSessionSave` に `topTab` と `list: classification.persistableState` を渡す。
 
-  useSessionSave({
-    window: windowState,
-    grid: viewer.grid,
-    topTab,
-    list: classification.persistableState,
-  });
-
-  return (
-    <ToastProvider>
-      <div className="app-toplevel">
-        <nav className="top-tabs">
-          <button
-            className={`top-tab ${topTab === "list" ? "active" : ""}`}
-            onClick={() => setTopTab("list")}
-          >
-            一覧
-          </button>
-          <button
-            className={`top-tab ${topTab === "viewer" ? "active" : ""}`}
-            onClick={() => setTopTab("viewer")}
-          >
-            ビューア
-          </button>
-        </nav>
-        <div className="top-tab-content">
-          {topTab === "list" ? (
-            <ClassificationView state={classification} />
-          ) : (
-            <ViewerGrid {...viewerProps} />
-          )}
-        </div>
-      </div>
-    </ToastProvider>
-  );
-}
-```
+see `frontend/src/App.tsx`
 
 レンダリング戦略は **`display: none` 切替ではなく、条件レンダリング (アンマウント)** とする。理由:
 
@@ -551,51 +384,9 @@ function AppInner({ initialState }: AppInnerProps) {
 
 ### 4.4 `useClassification` (状態管理)
 
-```ts
-import type { Confidence, Entry, LoadResult } from "../../types/classification";
-import * as Api from "../../wailsjs/go/main/App";
+状態: `folderPath`, `loadResult` (mtime 含む), `filter` {tags/confidence/query}, `loading`, `error`, `lightbox`, `editing`。公開 API: `openFolder / reload / setFilter / openLightbox+closeLightbox+nextLightbox+prevLightbox / openEdit+closeEdit+saveEdit / createEmptySidecar`。`saveEdit` は `UpdateClassificationEntry(folderPath, entry, loadResult.mtime)` を呼び、成功で mtime 更新・`CONFLICT:` プレフィックスで競合ダイアログを起動する。`reload` は同 `folderPath` で LoadClassification を再呼出しし、フィルタ状態は維持する。
 
-export type ListTabFilter = {
-  tags: string[];          // OR
-  confidence: Confidence | "all";
-  query: string;
-};
-
-type State = {
-  folderPath: string | null;
-  loadResult: LoadResult | null;       // mtime もここに含まれる
-  filter: ListTabFilter;
-  loading: boolean;
-  error: string | null;
-  lightbox: { open: boolean; filename: string | null };
-  editing: { open: boolean; filename: string | null };
-};
-
-export function useClassification(opts?: { initialList?: state.ListTabState }) {
-  // 初期 state を opts から組み立てる
-  // フォルダパスがあれば mount 時に LoadClassification を呼ぶ (useEffect)
-  // ...
-
-  return {
-    state,
-    persistableState,        // useSessionSave に渡すもの (folderPath + filter のみ)
-    openFolder,              // OpenFolderDialog → LoadClassification
-    reload,                  // 同 folderPath で再 LoadClassification (再読み込みボタン)
-    setFilter,               // partial update
-    openLightbox / closeLightbox / nextLightbox / prevLightbox,
-    openEdit / closeEdit / saveEdit,
-    createEmptySidecar,
-  };
-}
-```
-
-- `nextLightbox / prevLightbox` は **フィルタ後の Entries** をベースに `filename` ベースで前後インデックスを算出する。
-- `saveEdit` は `App.UpdateClassificationEntry(folderPath, entry, loadResult.mtime)` を呼ぶ。**競合検出**:
-  - 成功時: 戻りの新 mtime で `loadResult.mtime` を更新、`loadResult.entries` の該当エントリを patch、ポップオーバーを閉じる。
-  - `e.message.startsWith("CONFLICT:")` なら **競合ダイアログ** を出す (本書§4.11)。「再読み込み」「上書き」「キャンセル」の 3 択。
-  - その他のエラーはトースト「保存に失敗しました: <reason>」、ポップオーバーは開いたまま。
-- `openFolder` は OpenFolderDialog を呼び、選択結果を LoadClassification に渡す。`HasSidecar=false` の戻りなら確認ダイアログ → `CreateEmptyClassification` → 再 Load の流れ。
-- `reload` は **「再読み込み」ボタン** に対応。同 `folderPath` で `LoadClassification` を再呼出し、`loadResult` (mtime 含む) を差し替える。フィルタ状態 / lightbox / editing は維持する。
+see `frontend/src/features/classification/useClassification.ts`
 
 ### 4.5 サムネ取得方針 (元仕様§6.3.5 への回答)
 
@@ -635,73 +426,11 @@ useSessionSave({
 
 代わりに以下の純粋なロジックで色を決める:
 
-```ts
-// colors.ts
+- `tagColor(tag)`: 空文字 → `var(--unclassified)`、既知タグ → `KNOWN_TAG_COLORS` マップ、未知 → FNV-1a 32bit ハッシュで 16 色 `HASH_PALETTE` からインデックス
+- `readableTextColor(bgHex)`: WCAG 準拠の輝度計算で `"#fff"` か `"#222"` を返す
+- `DEFAULT_PALETTE`: サンプルキャラ名 → 色マップ。Phase H でユーザー設定に置換可能
 
-import { DEFAULT_PALETTE } from "./defaultPalette";
-
-// 既知タグ → CSS 色文字列のマップ。defaultPalette.ts に同梱されたサンプル値を初期値とし、
-// 将来的に Phase H でユーザー設定から差し替え可能にする (本フェーズでは差し替え UI なし)。
-export const KNOWN_TAG_COLORS: Readonly<Record<string, string>> = DEFAULT_PALETTE;
-
-// ハッシュフォールバック用の色プール (HSL ベース、彩度/明度を一定に保ち見やすい色のみ)。
-// 16 色で衝突確率は十分低い。
-const HASH_PALETTE = [
-  "#5b8def", "#e07b5b", "#7bb86d", "#d36ab6", "#c9a23a",
-  "#4caea4", "#9c6bd9", "#d65d5d", "#5db8c5", "#e08e3a",
-  "#7d9b3a", "#b15c8e", "#3f7fbc", "#a26b3a", "#6dac68",
-  "#7c7c7c",
-];
-
-// FNV-1a 32bit (決定的・高速・実装が短い)
-function hashString(s: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-}
-
-// tagColor は引数のタグ文字列に対し決定的に色を返す。
-// 1) 既知タグマップに登録があればそれを返す。
-// 2) 無ければ FNV-1a ハッシュ → HASH_PALETTE のインデックスから色を返す。
-// 3) 空文字 (未分類) は固定の `--unclassified` (グレー)。
-export function tagColor(tag: string): string {
-  if (tag === "") return "var(--unclassified)";
-  const known = KNOWN_TAG_COLORS[tag];
-  if (known) return known;
-  return HASH_PALETTE[hashString(tag) % HASH_PALETTE.length];
-}
-
-// バッジ要素の文字色は背景色から WCAG 準拠の白/黒判定で決める (黄色など明色のとき黒にする)。
-export function readableTextColor(bgHex: string): "#fff" | "#222" {
-  // bgHex = "#rrggbb" 前提。HSL の明度 L > 0.6 程度なら黒、それ以外白。
-  // 簡易実装: R+G+B 平均で閾値判定。
-  const r = parseInt(bgHex.slice(1, 3), 16);
-  const g = parseInt(bgHex.slice(3, 5), 16);
-  const b = parseInt(bgHex.slice(5, 7), 16);
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return lum > 0.6 ? "#222" : "#fff";
-}
-```
-
-```ts
-// defaultPalette.ts — サンプル "超かぐや姫" 系のキャラ名 → 色マップ。
-// このファイルは サンプル提供 として同梱するが、アプリ本体のロジックには
-// 一切ハードコードされない。Phase H でユーザーが置換可能にする。
-export const DEFAULT_PALETTE: Readonly<Record<string, string>> = {
-  iroha:   "#1976d2",
-  kaguya:  "#f9a825",
-  yachiyo: "#c2185b",
-  roka:    "#388e3c",
-  mami:    "#fb8c00",
-  mikado:  "#d32f2f",
-  shugo:   "#7b1fa2",
-  fumei:   "#757575",
-  // ... サンプル値のみ
-};
-```
+see `frontend/src/features/classification/colors.ts` / `defaultPalette.ts`
 
 #### 4.8.2 信頼度バッジの色
 

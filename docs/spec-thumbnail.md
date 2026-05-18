@@ -106,34 +106,9 @@ func cacheRoot() (string, error) {
 
 ### 3.3 GetThumbnail のフロー (`thumb.go`)
 
-```
-func GetThumbnail(path, size, mode):
-    // 1. 入力検証
-    abs := filepath.Abs(path)
-    if !isImage(abs): return error
-    if mode != "letterbox" && mode != "crop": mode = "letterbox"
-    if size <= 0: size = 256
-    cfg := ThumbConfig{DisplaySize: size, GenerateSize: size*2, Mode: mode}
+(1) 入力検証・`ThumbConfig` 組み立て → (2) キャッシュヒット確認 → (3) ミス時: worker pool でデコード+リサイズ+エンコード → (4) キャッシュ書き込み。重複リクエストは pool 内で単一ジョブにまとめる。
 
-    // 2. キャッシュ参照
-    info := os.Stat(abs)
-    key := cacheKey(abs, info.ModTime().Unix(), info.Size())
-    ext := strings.ToLower(filepath.Ext(abs))
-    root := cacheRoot()
-    cachePath := cachePath(root, cfg, key, ext)
-    if data := readFileIfExists(cachePath):
-        return ThumbResult{Data: data, MimeType: mimeFor(ext)}, nil
-
-    // 3. ミス: worker pool で生成 (重複リクエストを単一ジョブにまとめる)
-    data := pool.Generate(abs, cfg, ext)   // 生成完了まで待機
-    if err: return error
-
-    // 4. キャッシュ書き込み
-    os.MkdirAll(filepath.Dir(cachePath), 0755)
-    os.WriteFile(cachePath, data, 0644)
-
-    return ThumbResult{Data: data, MimeType: mimeFor(ext)}, nil
-```
+see `internal/thumb/thumb.go`
 
 ### 3.4 デコード (`thumb_decode.go`)
 
@@ -150,44 +125,12 @@ func GetThumbnail(path, size, mode):
 
 ### 3.5 リサイズ (`thumb_resize.go`)
 
-```go
-func resize(src image.Image, cfg ThumbConfig) image.Image {
-    bounds := src.Bounds()
-    sw, sh := bounds.Dx(), bounds.Dy()
-    target := cfg.GenerateSize
+`golang.org/x/image/draw.BiLinear` を使用。出力は常に `GenerateSize × GenerateSize` の正方形。
 
-    var dst *image.RGBA
-    var srcRect image.Rectangle
+- **letterbox**: 長辺基準でスケール、余白は透過 (PNG/WebP) または黒 (JPEG)
+- **crop**: 短辺基準でスケール、中央クロップ
 
-    switch cfg.Mode {
-    case "crop":
-        // 短辺基準でスケール、中央クロップ
-        scale := float64(target) / float64(min(sw, sh))
-        scaledW, scaledH := int(float64(sw)*scale), int(float64(sh)*scale)
-        // クロップ後 = target x target
-        offsetX := (scaledW - target) / 2
-        offsetY := (scaledH - target) / 2
-        dst = image.NewRGBA(image.Rect(0, 0, target, target))
-        // src を先にスケールしてからクロップ、ではなく
-        // draw で srcRect を計算して直接書く
-        ...
-    case "letterbox":
-        // 長辺基準でスケール、余白で埋める
-        scale := float64(target) / float64(max(sw, sh))
-        dstW, dstH := int(float64(sw)*scale), int(float64(sh)*scale)
-        offsetX := (target - dstW) / 2
-        offsetY := (target - dstH) / 2
-        dst = image.NewRGBA(image.Rect(0, 0, target, target))
-        // 余白色: 背景透明 (RGBA zero値 = 透過)
-        // PNG/WebP/GIF なら透過保持、JPEG は黒余白になる (JPEG は透過非対応)
-        draw.BiLinear.Scale(dst, image.Rect(offsetX, offsetY, offsetX+dstW, offsetY+dstH), src, bounds, draw.Over, nil)
-    }
-    return dst
-}
-```
-
-要点:
-- `golang.org/x/image/draw.BiLinear` を使用。
+see `internal/thumb/thumb_resize.go`
 - 出力は常に `target × target` (= `GenerateSize`) の正方形。
 - レターボックス時の余白は **透過** にする (元画像が透過対応形式なら維持される)。JPEG エンコード時は背景が黒くなる点を許容 (JPEG は元から透過なし)。
 

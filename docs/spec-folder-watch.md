@@ -10,254 +10,32 @@
 
 ## 0. 改訂履歴
 
-- 2026-05-17 初版ドラフト。Phase 1 = 一覧タブの現在フォルダのみ監視、画像
-  Create/Remove/Rename → silent auto-merge、サイドカー Write → 自動 reload、
-  200ms debounce、`gofsnotify/fsnotify` 採用 (issue #19 コメント指定)。
-- 2026-05-17 PR #75 レビュー対応: Phase 1 実装完了に伴うステータス更新と
-  実装乖離の修正。(1) §4.2 / §6.2 の TS 型生成説明を「`watcherPolicy.ts` で
-  手書き mirror」に修正 (Wails の generate module は EventsEmit payload を
-  namespace 化しないため自動生成されない)。(2) §7.3 の debounce flush 仕様を
-  「明示的 Stop では pending を discard」に改定 (Stop 直後の echo 抑止)。
-  (3) §7.2 のディレクトリ Remove/Rename 扱いを「anyChange に倒す」と明示。
-  (4) 新規 dir Create 時は子孫を再帰 walk して watch 追加 + image 件数を
-  集約することを §7.1 / §7.2 に追記。(5) §5.4 / §5.5 に「自己 echo
-  (アプリ自身の Save/Delete が起こした watcher 通知) は loadResult との
-  entries 等価判定で抑制」を追記。(6) §5.5 の degraded mode に
-  「`watchMode` が settings 読込完了前 (undefined) の間は Start も Stop も
-  呼ばない」を追記。
-- 2026-05-17 PR #75 6th レビュー対応: §11.1 のテスト方針記述を現行 API
-  (`NewManagerWithDebounce(emit EmitFunc, d)` で `EmitFunc func(ChangedPayload)`
-  を DI) に同期。旧記述では実体に存在しない `Manager.emitFn func(string,
-  ...interface{})` を前提にしていた。
-- 2026-05-17 PR #75 7th レビュー対応: (1) §7.2 ディレクトリ Create 行に
-  「symlink は target を follow しない」を追記 (内部で `os.Stat` → `os.Lstat` 化、
-  外部 dir への symlink が watch tree を広げてしまう問題)。(2) §7.3 debounce
-  擬似コード / §10.2b に「`Errors` チャンネル err 受領時に `anyChange = true` を
-  立てて debounce 再起動 (queue overflow recovery)」を追記。(3) §5.5 関連の
-  `StartFolderWatch` 成功時 stale check を §6.2 接続規約に追記。
-- 2026-05-17 PR #75 8th レビュー対応: (1) §7.2 symlink 行を 2 行に分割し、
-  画像拡張子の symlink は image-Create branch に fall through (`addedFiles++`) する
-  ことを明示 (classification scanner が同様に extension で含めるため、payload と
-  re-Load 結果を整合させる)。(2) §7.1 / §12 に `addSubtree` を初期 Start 用 (collect
-  なし) と Create 用 (`addSubtreeCollect`, 戻り値で画像 path slice を返す) の 2 経路に
-  分割。初期 Start で大きなフォルダの画像 path 文字列を確保→GC するスパイクを回避。
-  (3) §5.4 / §10 に「watcher handler / performReplay の await 後にも watchMode を
-  再確認 (in-flight payload が off 切替後に処理されないように)」を追記。
-- 2026-05-17 PR #75 9th レビュー対応: (1) §7.1 擬似コードの `w.Add(p)` を採用
-  fork のシグネチャ `w.Add(p, fsnotify.All)` に修正 (採用 fork は op マスクが必須)。
-  (2) §5.2 トースト「同種上書き」要件を削除 (現 ToastProvider が message/severity
-  完全一致のときだけ延長する実挙動と矛盾していた)。(3) §10.4 ログ仕様から
-  `watchCount` を削除 (Go 側実装は `folder` のみログしているため)。(4) §7.2 監視
-  root が Remove / Rename で消えた場合、loop が flush + return して
-  `goroutineExited` 判定で次回 Start が rebuild する経路を §10 / §6.1 接続規約に
-  記述 (本 commit より別ファイルの実装で対応、本 spec は説明追加)。(5) §6.1 /
-  §5.5 に「Start 成功時に silent re-Load を 1 回走らせて初期 LoadClassification
-  と watch 確立の間に追加されたファイルを吸収する」経路を追記。(6) §5.4 に
-  「自分の DeleteImage 発火後の self-echo は `inFlightDeletesRef: Set<string>`
-  でハンドラ側からフィルタする」を追記 (entriesEquivalent 単独では sidecar save
-  の完了タイミングに依存して self-echo を取り逃すため)。
-- 2026-05-17 PR #75 10th レビュー対応: (1) §13.6 トースト行を §5.2 と同じ表現
-  (ToastProvider の実挙動「完全一致のみ延長、差分カウンタ違いは別」) に揃え、
-  仕様内の矛盾を解消。(2) §12 被依存記述を「`main.go` は OnShutdown の Stop のみ、
-  `Start` はフロント `useClassification` の folder-watch effect から発火」と修正。
-  (3) §7.2 root vanish ハンドラの実装側で `st.watcher.Close()` を追加するよう記載
-  (fsnotify の fd / reader goroutine リーク防止)。(4) §6.1 / §6.3 に
-  「ローカル mutation (saveEdit / deleteOne) 成功時にも `requestGenRef` を bump
-  して in-flight Load を stale 化」と「Start/Stop IPC は完了後にも現 intent を
-  再評価して必要なら再 dispatch (fixed-point 収束パターン)」を追記。
-- 2026-05-17 PR #75 11th レビュー対応: (1) §5.5 / §6.1 に「silent recheck は
-  `requestGenRef` を **snapshot only** (bump せず) で参加する」を明記 —
-  10th で gen bump も含めたため initial-load (openFolder の loadInternal) を
-  stale 化して postLoadFlow がスキップされる逆方向リグレッションが起きていた。
-  (2) §5.3 / §6.1 に「pending を park する時に `capturedGen` を保存し、replay 時
-  に gen drift があれば pending を破棄」を追記 (mtime だけでは entries-only
-  変化で巻き戻し可能だった)。(3) §6.3 に「フロント `reload()` で
-  `dispatchWatchIntent` も呼び、root vanish 後 zombie 化した watcher を手動
-  reload で復旧する経路」を追記。(4) §5.4 に「deleteOne の競合リトライで
-  `loadInternal` が null を返した場合は早期 return で local patch + gen bump
-  をスキップ (supersede と error の区別がつかないため、新しい Load や watcher
-  event に reconciliation を任せる)」を追記。
-- 2026-05-17 PR #75 12th レビュー対応 + preemptive 修正: (1) §5.3 に
-  `editingRef` / `conflictRef` / `mergePromptOpenRef` を **render-time sync**
-  にすると明記 (open 直後 effect 発火前に watcher event が届くと「閉じている」
-  判定で即 commit + mtime 取り込みで後の保存が競合検出をすり抜ける問題)。
-  (2) §6.1 に「`silentRecheckAfterStart` は `initialLoadInFlightRef` を check
-  し、true なら setTimeout で defer (初回ロードが older snapshot で後着 commit
-  すると silent recheck が上書きされる race を回避)」を追記。(3) §7.2 dir
-  Create 行に「`acc.discoveredImagePaths` を共有 dedup set として使い、parent
-  walk と child Create event の double-count を防ぐ」を追記 (画像 Create 経由の
-  dedup だけでは dir vs dir race を取り逃していた)。(4) §6.1 に「`postLoadFlow`
-  は各 await 後 `folderRef.current === path` を check して folder switch 中の
-  旧フォルダ prompt 漏れを防ぐ」を追記。(5) §6.1 に「`resolveConflictForce` /
-  `resolveMergeMerge` / `resolveMergeSkip` も mutation IPC 成功直後に gen bump」
-  を追記 (Round 10 ルールの全 mutation 経路展開)。
-- 2026-05-17 PR #75 13th レビュー対応: §5.4 / §6.1 に「Load 失敗で `loadResult`
-  を null にする 3 catch 経路 (loadInternal / handleWatcherPayload /
-  performReplay reload) では `resetEntriesDependentState` ヘルパで editing /
-  conflict / mergePrompt / pendingResultRef / selected / selectAnchor も同時に
-  clear する」を追記。entries に依存する state を残すと、EditPopover は entry=null
-  で非表示でも内部 state が "open" のまま残り、後続の watcher event が defer 判定
-  に流れたり、同名ファイル復活時に popover が再表示されたりする問題があった。
-- 2026-05-17 PR #75 14th レビュー対応: (1) §6.1 に「`openFolder` で folder 切替時
-  に `resetEntriesDependentState` を呼び entries 依存 state を一括 clear」を
-  追記 (selected / selectAnchor だけクリアでは editing / conflict / mergePrompt
-  / pendingResultRef が旧フォルダ context のまま残る問題)。(2) §5.3 に
-  `loadResultRef` も render-time sync (handler の self-echo 判定で古い entries
-  を見る race を回避) を追記。(3) §6.1 に「全 mutation 経路 (saveEdit /
-  deleteOne / resolveConflictForce / resolveMergeMerge / resolveMergeSkip /
-  postLoadFlow の最終 loadInternal) で disk IPC 完了後の state commit 前に
-  `folderRef.current === cur` を check」を追記 (folder switch 中に旧フォルダの
-  mutation 結果で新フォルダ state を上書きする問題)。(4) §7.2 image branch
-  Remove/Rename 行に「`watchState.watchedDirs` 共有 set で dir-vs-file 検出、
-  image-extension dir (e.g. `photos.jpg/`) の削除は removedFiles に計上しない」を
-  追記 (`w.Remove` 戻り値はタイミング依存で IN_IGNORED 処理順で誤判定される)。
-  あわせて Remove/Rename の inotify 多発 (IN_DELETE + IN_DELETE_SELF + IN_IGNORED)
-  を `acc.removedPaths` で per-window dedup。
-- 2026-05-17 PR #75 15th レビュー対応: (1) §7.2 hidden filter の説明に「root は
-  filter から除外」を明記 (root が `.foo` のとき root vanish event 自体が hidden
-  filter で捨てられて loop が dead fd で hang する問題)。(2) §7.2 Remove/Rename
-  処理に「`removeSubtreeFromWatch` で prefix 配下の watchedDirs + w を一括解除」
-  を追加 (subdir rename out で inode-tracked watch が残り subtree 違反する問題、
-  thread B/C)。(3) §7.1 の Start 擬似コードを実装と整合 (root 明示 Add で fatal /
-  子孫は warn して継続、WalkDir 内 w.Add error を return しない)。(4) §10.2
-  watcher channel 不期 close 後の復旧経路を「フォルダ切替 / 手動 reload 両方」と
-  明示 (Round 11 で reload も dispatchWatchIntent を呼ぶ実装になっていたが
-  spec が「次回フォルダ切替で復旧」と限定したままだった)。
-- 2026-05-17 PR #75 16th レビュー対応: (1) §7.1 末尾の Remove 説明を実装の
-  `removeSubtreeFromWatch` 一括解除に揃える (15th で実装は変えたが §7.1 末尾の
-  文章は旧記述のままだった)。(2) §13 決定事項 13.11 の「再 Start は次回フォルダ
-  切替時」を「フォルダ切替 / 手動 reload 時」に修正 (§10.2 修正と表現を揃える)。
-  (3) `repository.SaveJSON` に「expectedMtime > 0 かつ sidecar 不在は ErrConflict」
-  を実装 (旧コードはコメントだけ「conflict 扱い」と書きつつ fall-through で
-  silently 再作成していた)。これで watcherPolicy 側 thread E (編集中に外部から
-  sidecar 削除 → 次の saveEdit が conflict 検出をすり抜ける問題) も解消。
-  新規 test `TestRepository_DeletedFileTreatedAsConflict` 追加。(4)
-  `silentRecheckAfterStart` の成功 commit 前に `setError(null)` を追加
-  (watcher handler / performReplay reload と同じく error clear)。
-- 2026-05-17 PR #75 17th レビュー対応 (`.claude/context.md` 整合): (1) §1 DoD
-  の検証コマンドを `go test ./internal/...` に変更 (CI と同範囲、main の
-  `//go:embed all:frontend/dist` を避ける)。context.md 側でも同じ修正を施した
-  (line 5 / 105 / 198 / 82 / 92 / 113 ほか 6 箇所)。本 spec の変更は説明追加
-  のみで、実装挙動は変えていない。
-- 2026-05-17 PR #75 18th レビュー対応: (1) ci.yml に `mkdir -p frontend/dist
-  && touch frontend/dist/.ci-placeholder` ステップを追加し、Go テストの範囲を
-  `./...` に戻して root `app_test.go` (`App.DeleteImage` パスバリデーション)
-  も CI で実行するように修正 (17th では `./internal/...` に限定したが、root
-  package の app_test.go を取りこぼしていた)。embed placeholder 経路は
-  テストが embedded FS を読まないため空ファイルで成立する。(2) §1 DoD の
-  検証コマンドを `go test ./...` に戻し、CI placeholder 経路を一行で説明。
-  context.md / docs/todo.md の同種記述 (release.yml の action 版数、Go テスト
-  スコープ、件数スナップショット) も A-1 違反として揃えて修正。
-- 2026-05-17 PR #75 19th レビュー対応: (1) §3 アーキ図 (L207-220) と §6.2 と
-  §15 Phase 1 の表現を修正し、`internal/watcher` が `runtime.EventsEmit` を
-  直接呼ぶように見えていた箇所を「EmitFunc DI で emit、app.go が結線」に統一。
-  §7.3 / §12 の DI 設計と整合させ、将来 Wails 依存を internal/watcher に
-  逆流させる誤実装を予防 (thread A)。(2) `app_test.go` に
-  `TestStartFolderWatch_PathValidation` を新規追加 — 空文字 / 空白のみ /
-  相対パス拒否 + 絶対 tempdir の happy path + Stop の二重呼び出し
-  idempotency を網羅。app 層ラッパーの validation 契約 / `a.watch` 配線
-  / Stop の idempotency を回帰検知できるようにする (thread B)。
-- 2026-05-17 PR #75 20th レビュー対応: (1) **実装側**: `Manager.Start` に
-  `os.Stat` ベースの directory check を追加 — `fsnotify.Watcher.Add` は file
-  path も受け付けるため、root が file だと Start が成功して event が一切
-  来ない silently-broken 状態になっていた。`watcher: root must be a
-  directory, got %q (mode %s)` を返す経路 + 新規 `TestStart_FailsOnFileRoot`
-  (thread F)。(2) spec §4.2 `renamedFiles` 説明を「source 側 +1 の
-  informational counter、dest は addedFiles 別計上」に修正 (thread E)。
-  (3) §5.2 トースト表に counter-less anyChange payload (`addedFiles ==
-  removedFiles == renamedFiles == 0 && !sidecarChanged`) 行を追加し、
-  `formatChangeSummary` の generic fallback と整合 (thread A)。(4) §5.4 自己
-  echo 源リストに `UpdateClassificationEntry` / `CreateEmptyClassification`
-  を追記 (thread G)。(5) §7.2 hidden filter 行に「root は filter から除外」を
-  明記 (15th 修正の意図を §7.2 表にも反映、thread B)。(6) §10.2 degraded
-  mode 復旧を「フォルダ切替 / 手動 reload で復活」に揃え、§6.3 と §10.2 冒頭
-  と完全一致 (thread C)。(7) §10.4 flush ログ例に `renamed` を追加し、実装
-  (folder/added/removed/renamed/sidecar) と一致 (thread D)。(8) §11.1 テスト
-  方針表を区分ベースに再構成 — root vanish / file root / image Remove /
-  symlink / subtree rename-out / image-ext dir / IN_IGNORED dedup など現行
-  回帰範囲を反映 (件数は grep 参照、thread H)。
-- 2026-05-17 PR #75 21st レビュー対応: (1) **実装側**: `inFlightDeletesRef` を
-  `Map<folder, Set<filename>>` に変更し、`payload.folder` (handler) / 引数
-  `folder` (silentRecheckAfterStart) でスコープして引く。フォルダ切替時に旧
-  folder の削除中 filename が新 folder の watcher self-echo 判定に混入して
-  entriesEquivalent が差分を消し一覧が古いまま残る race を解消 (§5.4 本文も
-  同期、thread A)。(2) **実装側**: `Manager.Start` の root 検証を `os.Stat`
-  から `os.Lstat` に変更し、symlink-to-dir root を明示拒否 (`filepath.WalkDir`
-  が root を Lstat する都合で symlink を辿らず子孫 watch が張れない状態の
-  予防。`TestStart_FailsOnSymlinkRoot` で pin、thread F)。20th 改訂履歴の
-  `os.Stat` 記述はこの commit で `os.Lstat` に置換済。(3) **実装側**: basename
-  が `_classification.json` でもパスが dir なら sidecar 早期 return せず
-  dir-Create / non-image Remove 分岐へ流す (Create は `os.Lstat`、Remove/Rename
-  は `st.watchedDirs` で dir 判別。`TestStart_SidecarNamedDirectoryHandledAsDir`
-  で pin、thread G)。(4) §7.1 起動シーケンス擬似コードの先頭に `os.Lstat`
-  による dir / symlink 拒否を追加し現行実装と整合 (thread B)。(5) §6.2
-  EventsEmit の API 例を `watcher.ClassificationChangedEvent` 経由に修正 +
-  D-1 ドリフト検知意図を明記 (thread C)。(6) §6.3 ライフサイクル責務を
-  「`openFolder` / auto-load effect → `folderPath` 更新のみ。Start/Stop は
-  folder-watch effect が `dispatchWatchIntentRef` 経由で発行する単一導管」
-  に書き直し、intent reconcile の設計点を明記 (thread D)。(7) AGENTS.md H-8
-  race matrix の `silentRecheckAfterStart` 行を実装 (entry=– / post-await=✓
-  / error clear=✓) に同期 (thread E)。
-- 2026-05-17 PR #75 22nd レビュー対応: (1) **実装側**: `Manager.Start` で
-  「異なる root への切替時」は新 root の `Lstat` / symlink / dir 検証より前に
-  `stopLocked()` で旧 watch をテアダウン。検証失敗で early return しても Go は
-  no-active-watch 状態になり、JS の degraded 意図と整合する。`same-root + live`
-  判定は検証より前に維持 (一時的 Lstat 失敗で動いている watch を壊さない)。
-  `TestStart_FailedNewRootStopsExisting` で「Start(a) success → Start(file)
-  失敗 → `Current()==''`」を pin (thread H)。本 spec の変更は説明追加のみ、
-  挙動側は §10 の degraded mode 遷移と整合している。
-- 2026-05-17 PR #75 24th レビュー対応: (1) **実装側**: `removeSubtreeFromWatch`
-  に `tombstone map[string]struct{}` 引数を追加し、unwatch した descendant
-  path をその場で `acc.removedPaths` に登録するように変更。subtree Remove
-  の直後に descendant 単独の `IN_DELETE_SELF` が同 debounce window 内に届いた
-  とき、`watchedDirs` から既に消えた image-extension dir (`photos.jpg/`) が
-  image branch に fall-through して `removedFiles++` に誤計上される race を
-  `acc.removedPaths` の per-window dedup で吸収する。`TestClassify_SubtreeRemoveTombstonesDescendants`
-  で classify-level に pin (thread A)。§7.1 の `removeSubtreeFromWatch`
-  説明にも tombstone の役割を追記。(2) `docs/todo.md` J-2 のローカル件数
-  参照コマンドに「CI と同じく `mkdir -p frontend/dist && touch frontend/dist/.ci-placeholder`
-  を先に実行」前提を追記 (`//go:embed all:frontend/dist` を満たすため、
-  thread B)。(3) `AGENTS.md` H-8 race マトリクスを実装と揃える: Start IPC
-  success/fail の `mode (post-await)` を `✓` に修正 (現行
-  `dispatchWatchIntentRef` は `.then` / `.catch` の両方で `watchModeRef.current`
-  を再確認している、thread C)。ローカル mutation success 2 行 (`saveEdit /
-  deleteOne` と `resolveConflictForce / resolveMergeMerge / resolveMergeSkip`)
-  の `folder check` を `✓` に修正 (全経路で disk IPC 後の state commit / reload
-  前に `folderRef.current === cur/target` を check している、thread D)。
-- 2026-05-18 PR #75 25th レビュー対応: (1) **実装側**: `useClassification.ts`
-  の watcher handler / `silentRecheckAfterStart` 両経路で `stripInFlight` を
-  fresh.entries にも適用していたのを、**cur 側だけに strip する asymmetric**
-  に修正。削除 IPC のラウンドトリップ中に外部で同名ファイルが再作成された
-  ケースで、両側 strip だと length が揃って equivalent=true となり再作成を
-  silently 隠していた問題を解消。純粋な self-echo (cur に削除前 / fresh は
-  削除後で不在) では cur stripped と fresh の length が揃って依然 no toast
-  に倒れる (thread D)。(2) **実装側**: `internal/classification/repository.go`
-  の `SaveJSON` conflict check に **`info.IsDir()` 分岐** を追加。`expectedMtime`
-  と現 mtime が偶然一致しつつ sidecar path がディレクトリに置換された場合に、
-  後続の `copyFile` / `WriteFile` / `Rename` が opaque な IO エラーで死ぬのを
-  予防し、`ErrConflict` で frontend の標準ダイアログに導く。`TestRepository_DirReplacedTreatedAsConflict`
-  で pin (thread B)。(3) コメント整合: `useClassification.ts` の inFlightDeletes
-  docstring と `.claude/context.md` line 101 / `docs/spec-folder-watch.md` §5.4
-  を asymmetric strip 説明に書き換え (thread D / E / F)。(4) `.claude/context.md`
-  の `runtime.EventsEmit` 例に `a.ctx` を含める修正 (現行 `app.go` の実呼び出しと
-  シグネチャを一致、thread C)。(5) `useClassification.ts` の inFlightDeletes
-  docstring から `200ms` リテラルを除去し、debounce 数値を直書きしない A-1 /
-  D-1 整合表現に書き換え (thread A)。
-- 2026-05-18 PR #75 26th レビュー対応 (Copilot): (1) **実装側**: `loop` の
-  debounce timer 分岐で `st.stopRequested.Load()` を check し、立っていれば
-  pending を捨てて return するように変更。明示的 Stop と timer 発火が同時に
-  ready なときに select が timer 側を選ぶと「Stop は pending を discard」契約が
-  1 レースで破れていた問題を修正 (§7.3 の挙動規定どおり、Events !ok と st.stop
-  分岐と同じ stopRequested check を timer 分岐にも適用、thread C)。(2)
-  **テスト側**: `TestClassify_SubtreeRemoveTombstonesDescendants` の固定パスを
-  `filepath.Join` で組み立てるよう変更。`removeSubtreeFromWatch` の subtree
-  match が `filepath.Separator` 基準のため、POSIX 区切り直書きでは Windows で
-  prefix が一致せず tombstone されないテストになっていた (thread A)。(3) §5.2
-  本文の typo「通知ががさ付くことは少ない」を「通知がかさむことは少ない」に
-  修正 (thread B)。
-- 2026-05-18 PR #75 27th レビュー対応 (Copilot): docs only。改訂履歴 §0 の
-  並び順を時系列に揃え、24th エントリを 25th より前に移動 (前 commit で 25th と
-  並べて 26th を追加した際、24th が 26th の後ろに取り残されていた、thread A)。
+| 更新日 | PR / ラウンド | 主な変更 |
+|--------|-------------|---------|
+| 2026-05-17 | PR #75 初版 | Phase 1 仕様策定。fsnotify 採用、200ms debounce、silent auto-merge |
+| 2026-05-17 | PR #75 Round 1 | TS 型を手書き mirror 方針に確定、debounce flush 改定、dir Create 再帰 walk 追記 |
+| 2026-05-17 | PR #75 Round 6 | テスト方針を `NewManagerWithDebounce(EmitFunc)` DI API に同期 |
+| 2026-05-17 | PR #75 Round 7 | symlink follow 禁止 (os.Lstat)、Errors チャンネル recovery、Start 成功時 stale check |
+| 2026-05-17 | PR #75 Round 8 | addSubtree / addSubtreeCollect 2 経路分割、await 後 watchMode 再確認 |
+| 2026-05-17 | PR #75 Round 9 | gofsnotify fork の Add(p, All) シグネチャ修正、root vanish 検知、inFlightDeletesRef 追加 |
+| 2026-05-17 | PR #75 Round 10 | 全 mutation 成功後 gen bump、Start/Stop intent reconcile (fixed-point 収束) |
+| 2026-05-17 | PR #75 Round 11 | silentRecheck を snapshot-only に修正、pendingResultRef に capturedGen 追加 |
+| 2026-05-17 | PR #75 Round 12 | 各 await 後 folderRef check、render-time ref sync、silentRecheck を defer |
+| 2026-05-17 | PR #75 Round 13 | resetEntriesDependentState ヘルパ追加 (Load 失敗 3 catch 経路一括 clear) |
+| 2026-05-17 | PR #75 Round 14 | openFolder でも resetEntriesDependentState、全 mutation に folder check 追加 |
+| 2026-05-17 | PR #75 Round 15 | root を hidden filter から除外、removeSubtreeFromWatch で subtree 一括解除 |
+| 2026-05-17 | PR #75 Round 16 | SaveJSON に ErrConflict 実装 (sidecar 不在 + expectedMtime > 0)、setError(null) 追加 |
+| 2026-05-17 | PR #75 Round 17–18 | CI go test スコープ修正 (./... + ci-placeholder)、context.md / todo.md 整合 |
+| 2026-05-17 | PR #75 Round 19 | EmitFunc DI 設計を全記述に統一、TestStartFolderWatch_PathValidation 追加 |
+| 2026-05-17 | PR #75 Round 20 | Manager.Start に os.Stat dir check 追加、renamedFiles counter 説明修正 |
+| 2026-05-17 | PR #75 Round 21 | inFlightDeletesRef を Map<folder,Set<filename>> 化、os.Lstat 移行、dir 名 sidecar バグ修正 |
+| 2026-05-17 | PR #75 Round 22 | Start 切替時の旧 watch teardown を新 root 検証より前に実施 |
+| 2026-05-17 | PR #75 Round 24 | removeSubtreeFromWatch に tombstone 引数追加 (image-ext dir の誤計上防止) |
+| 2026-05-18 | PR #75 Round 25 | self-echo 検出を asymmetric strip に修正、SaveJSON IsDir() 分岐追加 |
+| 2026-05-18 | PR #75 Round 26 | debounce timer 分岐に stopRequested check 追加 (Stop との race 修正) |
+| 2026-05-18 | PR #75 Round 27 | docs only: 改訂履歴の時系列並び順修正 |
+
+> 詳細な非同期 IPC 経路の race 検証設計 (gen check / folder check / mode check / pending gen check 等) は **AGENTS.md §H-8** を参照。
 
 ---
 
