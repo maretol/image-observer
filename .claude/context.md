@@ -6,7 +6,7 @@
 
 ## 1. 一行説明
 
-Wails v2 (Go + React/TS) で実装する Windows 向け画像ビューア。VSCode 風 2 ペイン UI に「フォルダツリー上のサムネイル表示」を加えるのが差別化点 (1 人開発)。
+Wails v2 (Go + React/TS) で実装する Windows 向け画像ビューア。フォルダ単位の分類グリッド (タグ / 信頼度 / 検索) と複数ビューア (BSP 分割) を組み合わせ、大量画像の振り分け / 比較に特化 (1 人開発、VSCode に欠けている機能を補う動機)。
 
 ## 2. 現在地
 
@@ -39,7 +39,7 @@ Wails v2 (Go + React/TS) で実装する Windows 向け画像ビューア。VSCo
 
 ### A. データ / API 設計
 - **画像配信**: Go バインディング経由で `[]byte` を返す (Wails が自動 base64 化)。サムネ・原寸とも同方式。AssetServer は使わない
-- **型定義**: Wails 自動生成 (`wailsjs/go/...`) をそのまま使う。手書き TS 型は作らない
+- **型定義**: Go binding は Wails 自動生成 (`wailsjs/go/...`) を一次ソース。EventsEmit payload など自動生成されない型のみ TS 側で hand-mirror (`watcherPolicy.ChangedPayload` 等、docstring で Go 側 struct と紐付け)
 - **パス**: 全レイヤで絶対パス統一
 
 ### B〜D. フォルダツリー / サムネイル / キャッシュ
