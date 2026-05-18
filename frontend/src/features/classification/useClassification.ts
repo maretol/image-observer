@@ -19,7 +19,8 @@ import { errorMessage } from "../../shared/utils/error";
 import { logger } from "../../shared/utils/logger";
 import type { ConfirmFn } from "../viewer-grid/useViewerSet";
 import { entriesEquivalent } from "./entriesEquivalent";
-import { applyFilter, type Confidence, type ListTabFilter } from "./filters";
+import { type ListTabFilter } from "./filters";
+import { useClassificationFilter } from "./useClassificationFilter";
 import { useDirectoryGroups } from "./useDirectoryGroups";
 import {
   decideAutoMerge,
@@ -133,20 +134,17 @@ type Opts = {
 
 export function useClassification(opts: Opts): UseClassificationReturn {
   const initFolderPath = opts.initialList?.folderPath ?? "";
-  const initFilter: ListTabFilter = {
-    tags: opts.initialList?.filter?.tags ?? [],
-    confidence: normalizeConfidence(
-      opts.initialList?.filter?.confidence ?? "all",
-    ),
-    query: opts.initialList?.filter?.query ?? "",
-  };
 
   const [folderPath, setFolderPath] = useState<string>(initFolderPath);
   const [loadResult, setLoadResult] =
     useState<classification.LoadResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilterState] = useState<ListTabFilter>(initFilter);
+  const { filter, filteredEntries, setFilter, toggleTag, clearTags } =
+    useClassificationFilter({
+      initial: opts.initialList?.filter ?? null,
+      loadResult,
+    });
   const [editing, setEditing] = useState<EditingState>({
     open: false,
     filename: null,
@@ -449,29 +447,6 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     // and builds a fresh watcher (PR #75 11th, thread B).
     dispatchWatchIntentRef.current();
   }, [loadInternal]);
-
-  const setFilter = useCallback((patch: Partial<ListTabFilter>) => {
-    setFilterState((cur) => ({ ...cur, ...patch }));
-  }, []);
-
-  const toggleTag = useCallback((tag: string) => {
-    setFilterState((cur) => {
-      const has = cur.tags.includes(tag);
-      return {
-        ...cur,
-        tags: has ? cur.tags.filter((t) => t !== tag) : [...cur.tags, tag],
-      };
-    });
-  }, []);
-
-  const clearTags = useCallback(() => {
-    setFilterState((cur) => ({ ...cur, tags: [] }));
-  }, []);
-
-  const filteredEntries = useMemo(
-    () => (loadResult ? applyFilter(loadResult.entries, filter) : []),
-    [loadResult, filter],
-  );
 
   // Mirror anchor into a ref so extendSelectionTo's identity stays stable.
   // Declared above the callbacks that read it to avoid a TDZ-shaped pitfall.
@@ -1594,18 +1569,5 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       persistableState,
     ],
   );
-}
-
-function normalizeConfidence(c: string): Confidence | "all" {
-  switch (c) {
-    case "high":
-    case "mid":
-    case "low":
-    case "":
-      return c as Confidence;
-    case "all":
-    default:
-      return "all";
-  }
 }
 
