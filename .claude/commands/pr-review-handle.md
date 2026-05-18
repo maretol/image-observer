@@ -96,7 +96,7 @@ gh api "repos/$OWNER_REPO/issues/$PR_NUM/comments" \
 **対応しない (= 説明コメントを付けて resolve) の判断基準:**
 - 既に対応済み / 別 PR で対応予定 (issue がある場合は番号を引用)
 - スコープ外 (この PR の目的と無関係な refactor 提案)
-- 設計方針と意図的に異なる選択をしている (理由を [.claude/context.md](.claude/context.md) や [docs/todo.md](docs/todo.md) から引用)
+- 設計方針と意図的に異なる選択をしている (理由を [.claude/context.md](../context.md) や [docs/todo.md](../../docs/todo.md) から引用)
 - 「質問」であって変更要求ではないもの → 質問に答えるコメントを付けて resolve
 - false positive (bot レビューにありがち)
 

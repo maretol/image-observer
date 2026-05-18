@@ -18,7 +18,7 @@ Wails v2 (Go + React/TS) で実装する Windows 向け画像ビューア。VSCo
 - **永続化**: `state.json` (schema v6, 複数ビューア対応、v5→v6 ロスレス昇格) + `settings.json` (schema v1, additive 拡張 + per-field fallback)
 - **インフラ**: ファイルベースロガー (env / file / API で level 切替 + 2MB × 3 ローテ) + Wails IPC レイヤ + atomic write 全般
 - **画像削除**: Card 右クリック → ゴミ箱送り (Windows `SHFileOperationW`, 非 Windows は `os.Remove` フォールバック)
-- **CI**: ubuntu-latest 上で `go test` + vitest + tsc + `wails build` を pull_request トリガで実行。Windows ビルド + portable/NSIS 配布は `v*` tag 押下時の `release.yml`
+- **CI**: ubuntu-latest 上で `go test` + vitest + `tsc --noEmit` を pull_request トリガで実行 (`wails build` は CI で呼ばない)。Windows ビルド + portable/NSIS 配布は `v*` tag 押下時の `release.yml`
 
 残作業は **`gh issue list --state open` を一次ソースとする** (AGENTS.md A-1 拡張: 長寿命ドキュメントに残タスクを列挙すると陳腐化する)。
 
@@ -56,7 +56,7 @@ Wails v2 (Go + React/TS) で実装する Windows 向け画像ビューア。VSCo
 |--------|------|-----|
 | デスクトップ | Wails v2 | v2.12.0 |
 | Go | 1.26.2 | `goenv global` に従う。`.go-version` は置かない |
-| フロント | React 18 + TypeScript + Vite | テンプレ初期値 |
+| フロント | React + TypeScript + Vite | バージョンは `frontend/package.json` を一次ソースに (drift 回避のため固定値を書かない) |
 | FE 状態管理 | React 標準 hook のみ | 外部ライブラリ未導入 |
 | アイコン | インライン SVG | 外部依存なし |
 | 画像デコード | `golang.org/x/image/{webp,draw}` | Phase 2 で導入 |
@@ -80,7 +80,7 @@ mkdir -p frontend/dist && touch frontend/dist/.ci-placeholder
 go test ./... && go vet ./...
 
 npm --prefix frontend run test         # vitest
-npm --prefix frontend run typecheck    # tsc --noEmit
+(cd frontend && npx tsc --noEmit)      # type check (CI と同じ)
 ```
 
 ## 8. ファイル構成 (top-level)

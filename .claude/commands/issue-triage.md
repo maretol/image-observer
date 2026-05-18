@@ -123,7 +123,7 @@ gh issue edit <issue番号> --add-label "difficulty:easy,impact:medium,bug"
 
 - `bug` ラベル付き → 同スコア帯の中で優先
 - 既に着手中 (assignee あり / 関連 PR open) → リストから除外 or 末尾
-- 依存関係 ([init.md](init.md) や [docs/todo.md](docs/todo.md) / spec ファイルで「先に X が必要」と書かれているもの) → 後ろに回す
+- 依存関係 ([init.md](../../init.md) や [docs/todo.md](../../docs/todo.md) / spec ファイルで「先に X が必要」と書かれているもの) → 後ろに回す
 
 出力形式:
 
@@ -190,7 +190,7 @@ gh issue view <番号> --json number,title,body,labels,comments,url
    - 既存 spec 参考: [docs/spec-multi-viewer.md](docs/spec-multi-viewer.md), [docs/spec-folder-tree.md](docs/spec-folder-tree.md), [docs/spec-thumbnail.md](docs/spec-thumbnail.md)
 3. spec 冒頭に `> **ステータス**: ドラフト。§N の決定事項をユーザー合意後に着手。` を入れる
 4. [init.md](init.md) (元仕様) と矛盾しないか確認、矛盾があれば spec 内に「init.md の X 節を再解釈する」として明記
-5. **方針決定ログは [docs/todo.md](docs/todo.md) に1行追記** (実装着手前の意思決定を記録するため。CLAUDE.md の一次ソース定義に従う)
+5. **方針決定ログは [docs/todo.md](../../docs/todo.md) に1行追記** (実装着手前の意思決定を記録するため。CLAUDE.md の一次ソース定義に従う)
 
 書き終わったら **PR は作らずに** ユーザーに通知:
 
