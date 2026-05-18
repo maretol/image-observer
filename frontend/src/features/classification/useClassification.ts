@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  CreateEmptyClassification,
   DeleteImage,
   LoadClassification,
-  MergeChildSidecars,
   SaveClassification,
 } from "../../../wailsjs/go/main/App";
 import { classification } from "../../../wailsjs/go/models";
@@ -17,6 +15,7 @@ import { type ListTabFilter } from "./filters";
 import { useClassificationFilter } from "./useClassificationFilter";
 import { useClassificationEdit } from "./useClassificationEdit";
 import { useClassificationLoad } from "./useClassificationLoad";
+import { useClassificationMerge } from "./useClassificationMerge";
 import { useClassificationReplay } from "./useClassificationReplay";
 import { useClassificationSelection } from "./useClassificationSelection";
 import { useClassificationWatcher } from "./useClassificationWatcher";
@@ -438,54 +437,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     toast,
   });
 
-  const resolveMergeMerge = useCallback(async () => {
-    const target = mergePrompt.folderPath;
-    if (!target) return;
-    setMergePrompt({ open: false, preview: null, folderPath: "" });
-    try {
-      await MergeChildSidecars(target);
-      logger.info("classification", "merged child sidecars", { folder: target });
-    } catch (e) {
-      if (folderRef.current !== target) return;
-      const msg = errorMessage(e);
-      toast(`マージに失敗しました: ${msg}`, "error");
-      logger.error("classification", "merge failed", { folder: target, err: msg });
-      return;
-    }
-    // Folder check before bumping gen + dispatching the reload — without
-    // this the OLD folder's reload would bump generation (stale-ifying
-    // the NEW folder's in-flight Load) and then commit OLD folder data
-    // to NEW folder state (PR #75 14th, thread C).
-    if (folderRef.current !== target) return;
-    // Bump gen after the merge write so an in-flight watcher / silent
-    // recheck Load that started before the merge is stale-discarded —
-    // same flicker-prevention rule as saveEdit / deleteOne (PR #75 10th
-    // thread A pattern; preemptive sweep).
-    ++requestGenRef.current;
-    await loadInternal(target);
-  }, [mergePrompt, loadInternal, toast]);
-
-  const resolveMergeSkip = useCallback(async () => {
-    const target = mergePrompt.folderPath;
-    if (!target) return;
-    setMergePrompt({ open: false, preview: null, folderPath: "" });
-    try {
-      await CreateEmptyClassification(target);
-    } catch (e) {
-      if (folderRef.current !== target) return;
-      toast(`サイドカー作成に失敗しました: ${errorMessage(e)}`, "error");
-      return;
-    }
-    if (folderRef.current !== target) return;
-    // Same gen-bump rule as resolveMergeMerge above.
-    ++requestGenRef.current;
-    await loadInternal(target);
-  }, [mergePrompt, loadInternal, toast]);
-
-  const resolveMergeCancel = useCallback(() => {
-    setMergePrompt({ open: false, preview: null, folderPath: "" });
-    // Folder selection persists; the user can hit "再読み込み" or pick again.
-  }, []);
+  const { resolveMergeMerge, resolveMergeSkip, resolveMergeCancel } =
+    useClassificationMerge({
+      mergePrompt,
+      folderRef,
+      requestGenRef,
+      setMergePrompt,
+      loadInternal,
+      toast,
+    });
 
   // deleteOne: confirm → Trash → mirror into sidecar → patch in-memory entries.
   // Returns true iff the file was removed from disk (the caller, App.tsx,
