@@ -122,6 +122,26 @@ type Opts = {
   watchMode?: string;
 };
 
+// useClassification is the orchestrator for the list-tab feature. The hook
+// declares shared state + refs at the top and then composes the following
+// child hooks (each gets only the refs / setters it actually needs):
+//
+//   useClassificationFilter    — filter state + filteredEntries (independent)
+//   useClassificationSelection — multi-select set + range anchor (independent)
+//   useClassificationLoad      — load IPC wrapper + folder picker + reload
+//   useClassificationWatcher   — fsnotify event handler + Start/Stop dispatch
+//   useClassificationReplay    — defer-close → performReplay
+//   useClassificationEdit      — save + conflict resolution
+//   useClassificationMerge     — child-sidecar prompt resolution
+//   useClassificationDelete    — trash one image + sidecar mirror
+//
+// Race correctness rests on the shared refs declared below — see AGENTS.md
+// §H-8 and docs/spec-folder-watch.md §15 for the variable matrix. Every
+// child hook either reads these refs through props (so the type signature
+// surfaces the dependency) or — for setters / dispatch — calls through the
+// orchestrator-owned setter. Do not collapse refs into child hooks: the
+// generation token / folder check pattern relies on a single shared
+// instance across all async paths.
 export function useClassification(opts: Opts): UseClassificationReturn {
   const initFolderPath = opts.initialList?.folderPath ?? "";
 
@@ -225,11 +245,11 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   //     pointers that surface in misleading ways on next render.
   //   - pendingResultRef would replay against a now-empty loadResult.
   //   - filename-keyed selection becomes nonsensical without entries.
-  // (PR #75 13th, thread A). Called from all three catch sites that null
-  // loadResult: loadInternal, handleWatcherPayload, performReplay reload.
-  // Declared here (before loadInternal) so the useCallback dep list works
-  // — moving it after loadInternal would put it in TDZ at useCallback
-  // dispatch time.
+  // (PR #75 13th, thread A). Wired into the three catch sites that null
+  // loadResult: useClassificationLoad.loadInternal,
+  // useClassificationWatcher.handleWatcherPayload,
+  // useClassificationReplay.performReplay reload — all of which receive
+  // this function as a prop.
   const resetEntriesDependentState = useCallback(() => {
     setEditing({ open: false, filename: null });
     setConflict(null);
@@ -241,10 +261,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // requestGenRef gates every `setLoadResult` / `setError` commit triggered
   // by an asynchronous Load so that out-of-order completions can't roll back
   // a newer result. Bumped at the entry of:
-  //   - loadInternal (manual reload / openFolder / auto-load on mount /
-  //     conflict-resolve / merge-resolve / delete-conflict-retry)
-  //   - handleWatcherPayload (each watcher event)
-  //   - performReplay's reload branch
+  //   - useClassificationLoad.loadInternal (manual reload / openFolder /
+  //     auto-load on mount / conflict-resolve / merge-resolve /
+  //     delete-conflict-retry)
+  //   - useClassificationWatcher.handleWatcherPayload (each watcher event)
+  //   - useClassificationReplay.performReplay's reload branch
+  //   - useClassificationEdit.saveEdit / resolveConflictForce, and
+  //     useClassificationMerge / useClassificationDelete after their disk
+  //     writes (so an in-flight Load that started pre-write is stale-
+  //     discarded — preemptive sweep, PR #75 10th thread A).
   // Every commit path checks `myGen === current` before touching state.
   // Without a single shared generation across all of these, a stale Load
   // from any one of them could clobber the others (PR #75 review).
@@ -272,10 +297,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
 
   // dispatchWatchIntentRef is declared here (above useClassificationLoad)
   // so reload() can read it via ref to kick a watcher reconcile when the
-  // user manually re-reads. The actual implementation is assigned during
-  // render further down (in the watcher section) — refs are not part of
-  // React's render-immutable state model, so the function identity bound
-  // to .current can be replaced each render without invalidating any
+  // user manually re-reads. The actual implementation is assigned inside
+  // useClassificationWatcher every render — refs are not part of React's
+  // render-immutable state model, so the function identity bound to
+  // .current can be replaced each render without invalidating any
   // consumers (they all dereference through .current at call time).
   const dispatchWatchIntentRef = useRef<() => void>(() => {});
 
@@ -296,26 +321,18 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     toast,
   });
 
-
-  // ─── fsnotify auto-merge (#19) ─────────────────────────────────────
-  //
-  // handleWatcherPayload runs on every flushed "classification:changed"
-  // event from the Go watcher (see internal/watcher + docs/spec-folder-watch.md).
-  // It reads decision-relevant state via refs so its identity can change on
-  // each render without us needing to re-bind the EventsOn listener (see
-  // the mount-once subscription effect below + handlerRef indirection).
-  //
-  // loadResultRef mirrors loadResult so the handler can compare the incoming
-  // re-Load to what we already display without depending on loadResult
-  // directly (which would force a new handleWatcherPayload identity each
-  // render and grow the dep churn). Synced render-time (not via useEffect)
-  // because the handler reads it in its self-echo check — if a watcher
-  // event lands between `setLoadResult(patch)` and the post-render effect,
-  // the handler would compare against the PRE-patch entries and falsely
-  // classify the watcher echo of our just-completed save as an external
-  // change, surfacing "外部変更" toasts / unnecessary commits for normal
-  // saves (PR #75 14th, thread B). Same reasoning as folderRef /
-  // watchModeRef / editingRef / conflictRef / mergePromptOpenRef above.
+  // loadResultRef mirrors loadResult so the watcher handler can compare the
+  // incoming re-Load to what we already display without depending on
+  // loadResult directly (which would force a new handleWatcherPayload
+  // identity each render and grow the dep churn). Synced render-time (not
+  // via useEffect) because the handler reads it in its self-echo check —
+  // if a watcher event lands between `setLoadResult(patch)` and the
+  // post-render effect, the handler would compare against the PRE-patch
+  // entries and falsely classify the watcher echo of our just-completed
+  // save as an external change, surfacing "外部変更" toasts / unnecessary
+  // commits for normal saves (PR #75 14th, thread B). Same reasoning as
+  // folderRef / watchModeRef / editingRef / conflictRef /
+  // mergePromptOpenRef above.
   const loadResultRef = useRef<classification.LoadResult | null>(loadResult);
   loadResultRef.current = loadResult;
 
