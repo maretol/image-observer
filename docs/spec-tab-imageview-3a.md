@@ -102,29 +102,9 @@ frontend/src/
 
 `App.tsx` で `useTabs()` を呼び、`tabs` ステートとアクションを `FolderPanel` (open のみ) と `ViewerPanel` (フル) に prop で渡す。Context は v1 では使わない (props で十分シンプル)。
 
-```tsx
-function App() {
-  const tabs = useTabs();
-  // ...既存の splitter 処理...
-  return (
-    <div className="app" ref={containerRef}>
-      <aside className="pane left" style={{ width: leftWidth }}>
-        <FolderPanel onImageOpen={tabs.openTab} />
-      </aside>
-      <div className="splitter" onMouseDown={onMouseDown} />
-      <main className="pane right">
-        <ViewerPanel
-          tabs={tabs.tabs}
-          activeIndex={tabs.activeIndex}
-          onClose={tabs.closeTab}
-          onSelect={tabs.setActive}
-          onUpdateTabState={tabs.updateTabState}
-        />
-      </main>
-    </div>
-  );
-}
-```
+`App.tsx` で `useTabs()` を呼び `tabs` と各アクションを `FolderPanel` (openTab のみ) と `ViewerPanel` (フル) に prop で渡す。
+
+see `frontend/src/App.tsx`
 
 ### 4.3 `useTabs` (ホック)
 
@@ -147,179 +127,23 @@ TabBar + ImageView のコンテナ。タブ無し状態: 中央に「画像を�
 
 ### 4.6 `ImageView` + `useImageViewer`
 
-```ts
-type ViewerState = { zoom: number; panX: number; panY: number };
+主要ロジック: 初期 fit 計算 (`computeInitialFit`: `min(1.0, min(vpW/imgW, vpH/imgH))` で zoom + センタリング)、ホイールズーム (カーソル基点 1.2 倍ステップ + `clampPan`)、ドラッグパン (`dragRef` + `clampPan`)。
 
-export function useImageViewer(opts: {
-  imageWidth: number;
-  imageHeight: number;
-  initialZoom: number;
-  initialPanX: number;
-  initialPanY: number;
-  initialized: boolean;
-  containerRef: React.RefObject<HTMLDivElement>;
-  onChange: (state: ViewerState) => void;
-}) { ... }
-```
+`ImageView`: `ReadImage(tab.path)` で画像取得 → `onUpdateTabState` で `imageWidth/Height` を同期 → `useLayoutEffect` で初期 fit → `img style={{ transform: translate3d + scale }}`。
 
-主要ロジック:
-
-#### 初期 fit 計算
-```ts
-function computeInitialFit(imgW, imgH, vpW, vpH): ViewerState {
-  const fitZoom = Math.min(vpW / imgW, vpH / imgH);
-  const zoom = Math.min(1.0, fitZoom);
-  const renderedW = imgW * zoom;
-  const renderedH = imgH * zoom;
-  return {
-    zoom,
-    panX: (vpW - renderedW) / 2,
-    panY: (vpH - renderedH) / 2,
-  };
-}
-```
-
-ImageView マウント時に `tab.initialized === false && imageWidth > 0` なら計算して `onUpdateTabState({ zoom, panX, panY, initialized: true })`。
-
-#### ズーム (ホイール)
-```ts
-function onWheel(e: WheelEvent) {
-  e.preventDefault();
-  const rect = containerRef.current.getBoundingClientRect();
-  const cx = e.clientX - rect.left;
-  const cy = e.clientY - rect.top;
-  const direction = e.deltaY < 0 ? 1 : -1;
-  const factor = direction > 0 ? 1.2 : 1 / 1.2;
-  const newZoom = clamp(state.zoom * factor, 0.1, 8.0);
-  // カーソル下の画像ピクセルが移動しないように pan を補正
-  const px = (cx - state.panX) / state.zoom;
-  const py = (cy - state.panY) / state.zoom;
-  let newPanX = cx - px * newZoom;
-  let newPanY = cy - py * newZoom;
-  ({ panX: newPanX, panY: newPanY } = clampPan(
-    newPanX, newPanY, imgW * newZoom, imgH * newZoom, vpW, vpH
-  ));
-  setState({ zoom: newZoom, panX: newPanX, panY: newPanY });
-}
-```
-
-#### パン (ドラッグ)
-```ts
-function onMouseDown(e) {
-  dragRef.current = { startX: e.clientX, startY: e.clientY, startPanX: state.panX, startPanY: state.panY };
-}
-function onMouseMove(e) {
-  if (!dragRef.current) return;
-  let nx = dragRef.current.startPanX + (e.clientX - dragRef.current.startX);
-  let ny = dragRef.current.startPanY + (e.clientY - dragRef.current.startY);
-  ({ panX: nx, panY: ny } = clampPan(nx, ny, imgW * zoom, imgH * zoom, vpW, vpH));
-  setState({ ...state, panX: nx, panY: ny });
-}
-function onMouseUp() { dragRef.current = null; }
-```
-
-#### パン境界クランプ
-```ts
-function clampPan(panX, panY, renderedW, renderedH, vpW, vpH): ViewerState {
-  // 画像が小さい (両軸) → センタリング固定
-  let nx = renderedW < vpW ? (vpW - renderedW) / 2 : clamp(panX, vpW - renderedW, 0);
-  let ny = renderedH < vpH ? (vpH - renderedH) / 2 : clamp(panY, vpH - renderedH, 0);
-  return { zoom: 0, panX: nx, panY: ny };  // zoom 値は呼び出し側で持つ
-}
-```
-
-#### ImageView 描画
-```tsx
-function ImageView({ tab, tabIndex, onUpdateTabState }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [imageData, setImageData] = useState<ImageResult | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setImageData(null);
-    setLoadError(null);
-    ReadImage(tab.path)
-      .then((res) => {
-        setImageData(res);
-        // imageWidth/Height をタブに反映
-        onUpdateTabState(tabIndex, { imageWidth: res.width, imageHeight: res.height });
-      })
-      .catch((e) => setLoadError(errorMessage(e)));
-  }, [tab.path]);
-
-  // 初期 fit
-  useEffect(() => {
-    if (!tab.initialized && tab.imageWidth > 0 && containerRef.current) {
-      const { width: vpW, height: vpH } = containerRef.current.getBoundingClientRect();
-      const fit = computeInitialFit(tab.imageWidth, tab.imageHeight, vpW, vpH);
-      onUpdateTabState(tabIndex, { ...fit, initialized: true });
-    }
-  }, [tab.initialized, tab.imageWidth, tab.imageHeight]);
-
-  // ホイール / ドラッグハンドラ (useImageViewer 経由 or 直接)
-  // ...
-
-  return (
-    <div className="image-view" ref={containerRef}>
-      {imageData && tab.initialized && (
-        <img
-          className="image-view-img"
-          src={`data:${imageData.mimeType};base64,${toBase64(imageData.data)}`}
-          alt=""
-          draggable={false}
-          style={{
-            transform: `translate3d(${tab.panX}px, ${tab.panY}px, 0) scale(${tab.zoom})`,
-            transformOrigin: "0 0",
-          }}
-        />
-      )}
-      {loadError && <div className="image-view-error">読み込み失敗: {loadError}</div>}
-    </div>
-  );
-}
-```
+see `frontend/src/features/viewer-grid/ImageView.tsx` / `useImageViewer.ts`
 
 ### 4.7 背景 (チェッカ柄)
 
-`.image-view-img` に CSS で透過チェッカ柄を背景に敷く:
+`.image-view-img` に `linear-gradient` 4 つで 16px チェッカ柄を設定。`pointer-events:none; position:absolute; top/left:0`。コンテナ `.image-view` は単色背景 (#1e1e1e)。
 
-```css
-.image-view-img {
-  background-color: #2a2a2a;
-  background-image:
-    linear-gradient(45deg, #444 25%, transparent 25%),
-    linear-gradient(-45deg, #444 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #444 75%),
-    linear-gradient(-45deg, transparent 75%, #444 75%);
-  background-size: 16px 16px;
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
-  pointer-events: none;
-  user-select: none;
-  position: absolute;
-  top: 0;
-  left: 0;
-  /* width/height は intrinsic (= natural size of the source bytes; transform で scale される) */
-}
-```
-
-`.image-view` (コンテナ) は `.pane.right` の単色背景 (#1e1e1e) を継承。
+see `frontend/src/App.css`
 
 ### 4.8 base64 変換
 
-Phase 2 で書いた `bytesArrayToBase64` を `useThumbnail.ts` から共通 util に切り出す。`frontend/src/utils/base64.ts` に移動。
+`bytesArrayToBase64` を `useThumbnail.ts` から `frontend/src/utils/base64.ts` に切り出し、`toDataURL(data, mimeType)` として提供。`useThumbnail.ts` / `ImageView.tsx` から共有。
 
-```ts
-export function toDataURL(data: number[] | string | Uint8Array, mimeType: string): string {
-  let b64: string;
-  if (typeof data === "string") b64 = data;
-  else if (Array.isArray(data)) b64 = bytesArrayToBase64(data);
-  else if (data instanceof Uint8Array) b64 = bytesArrayToBase64(Array.from(data));
-  else b64 = String(data);
-  return `data:${mimeType};base64,${b64}`;
-}
-```
-
-`useThumbnail.ts` も同 util を使うようリファクタ。
+see `frontend/src/shared/utils/`
 
 ### 4.9 タブ切り替え時の挙動
 
