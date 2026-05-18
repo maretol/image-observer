@@ -5,7 +5,6 @@ import {
   LoadClassification,
   MergeChildSidecars,
   SaveClassification,
-  UpdateClassificationEntry,
 } from "../../../wailsjs/go/main/App";
 import { classification } from "../../../wailsjs/go/models";
 import { state as wstate } from "../../../wailsjs/go/models";
@@ -16,6 +15,7 @@ import type { ConfirmFn } from "../viewer-grid/useViewerSet";
 import { entriesEquivalent } from "./entriesEquivalent";
 import { type ListTabFilter } from "./filters";
 import { useClassificationFilter } from "./useClassificationFilter";
+import { useClassificationEdit } from "./useClassificationEdit";
 import { useClassificationLoad } from "./useClassificationLoad";
 import { useClassificationReplay } from "./useClassificationReplay";
 import { useClassificationSelection } from "./useClassificationSelection";
@@ -419,123 +419,24 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     toast,
   });
 
-  const openEdit = useCallback((filename: string) => {
-    setEditing({ open: true, filename });
-  }, []);
-  const closeEdit = useCallback(() => {
-    setEditing({ open: false, filename: null });
-  }, []);
-
-  const saveEdit = useCallback(
-    async (entry: classification.Entry) => {
-      const cur = folderRef.current;
-      if (!cur || !loadResult) return;
-      try {
-        const out = await UpdateClassificationEntry(
-          cur,
-          entry,
-          loadResult.mtime,
-        );
-        // Folder check before any state commit — the UpdateEntry disk
-        // write itself is fine to complete against `cur`, but patching
-        // the NEW folder's loadResult with OLD folder's mtime / entry
-        // would corrupt it. If the user switched folders mid-await we
-        // skip the local commit entirely; the OLD folder's save did
-        // succeed on disk, and any next openFolder of it will Load the
-        // updated entry via the normal path (PR #75 14th, thread C).
-        if (folderRef.current !== cur) return;
-        // Bump the shared generation BEFORE patching local state so any
-        // watcher / replay / silent-recheck / manual reload whose
-        // LoadClassification started before our save returned is now
-        // marked stale and its setLoadResult is skipped. Without this a
-        // pre-save Load returning out-of-order would visually undo the
-        // user's edit (PR #75 10th, thread A).
-        ++requestGenRef.current;
-        // Patch the loadResult locally so the grid updates without a full reload.
-        setLoadResult((prev) => {
-          if (!prev) return prev;
-          let replaced = false;
-          const newEntries = prev.entries.map((e) => {
-            if (e.filename === entry.filename) {
-              replaced = true;
-              return entry;
-            }
-            return e;
-          });
-          if (!replaced) newEntries.push(entry);
-          // Keep the LoadResult prototype so its methods remain available.
-          const updated = classification.LoadResult.createFrom({
-            ...prev,
-            entries: newEntries,
-            mtime: out.mtime,
-          });
-          return updated;
-        });
-        setEditing({ open: false, filename: null });
-      } catch (e) {
-        // Same folder check as the success path — surfacing a conflict
-        // dialog or error toast for the OLD folder while the user is
-        // on a NEW folder is confusing UX (PR #75 14th, thread C).
-        if (folderRef.current !== cur) return;
-        const msg = errorMessage(e);
-        if (msg.startsWith(CONFLICT_PREFIX)) {
-          setConflict({ filename: entry.filename, draft: entry });
-          logger.warn("classification", "save conflict", {
-            filename: entry.filename,
-          });
-        } else {
-          toast(`保存に失敗しました: ${msg}`, "error");
-          logger.error("classification", "save failed", {
-            filename: entry.filename,
-            err: msg,
-          });
-        }
-      }
-    },
-    [loadResult, toast],
-  );
-
-  const resolveConflictReload = useCallback(async () => {
-    setConflict(null);
-    setEditing({ open: false, filename: null });
-    await reload();
-  }, [reload]);
-
-  const resolveConflictForce = useCallback(async () => {
-    if (!conflict) return;
-    const cur = folderRef.current;
-    if (!cur) return;
-    try {
-      const out = await UpdateClassificationEntry(cur, conflict.draft, 0);
-      // Folder check before any state commit — patching the NEW folder's
-      // state with OLD folder's mutation result is the same UX bug as
-      // saveEdit (PR #75 14th, thread C).
-      if (folderRef.current !== cur) return;
-      // Bump gen immediately after the disk write so any in-flight
-      // watcher / replay / silent recheck Load whose LoadClassification
-      // started before our forced overwrite is now stale — without this
-      // there's a small flicker window between UpdateClassificationEntry
-      // returning and reload() bumping where a pre-write Load could
-      // briefly commit pre-overwrite state (same rule as saveEdit /
-      // deleteOne, PR #75 10th thread A pattern; preemptive sweep for
-      // the remaining mutation IPC sites).
-      ++requestGenRef.current;
-      setConflict(null);
-      setEditing({ open: false, filename: null });
-      // Refresh with the truth on disk so we pick up any other external changes.
-      await reload();
-      // out.mtime is captured by reload, so we don't need to do anything else here.
-      void out;
-    } catch (e) {
-      if (folderRef.current !== cur) return;
-      toast(`強制上書きに失敗しました: ${errorMessage(e)}`, "error");
-    }
-  }, [conflict, reload, toast]);
-
-  const resolveConflictCancel = useCallback(() => {
-    setConflict(null);
-    // Editing popover stays open so the user can copy their draft if needed.
-  }, []);
+  const {
+    openEdit,
+    closeEdit,
+    saveEdit,
+    resolveConflictReload,
+    resolveConflictForce,
+    resolveConflictCancel,
+  } = useClassificationEdit({
+    conflict,
+    loadResult,
+    folderRef,
+    requestGenRef,
+    setLoadResult,
+    setEditing,
+    setConflict,
+    reload,
+    toast,
+  });
 
   const resolveMergeMerge = useCallback(async () => {
     const target = mergePrompt.folderPath;
