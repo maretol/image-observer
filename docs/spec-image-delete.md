@@ -155,46 +155,9 @@ func (a *App) DeleteImage(folderPath string, filename string) error
 
 `internal/imgfile` パッケージ (新規 or 既存拡張) に `Trash(absPath string) error` を追加。
 
-Windows 実装 (Phase 1 の本番):
+Windows 実装 (`trash_windows.go`): `SHFileOperationW` を `FO_DELETE | FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT` で呼ぶ。非 Windows (`trash_other.go`): `os.Remove` + warn ログで開発機 fallback。go.mod 新規依存なし (`golang.org/x/sys/windows` は既存)。
 
-```go
-// internal/imgfile/trash_windows.go
-//go:build windows
-
-package imgfile
-
-// SHFileOperationW を直接呼ぶ。
-// FO_DELETE | FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT
-// を立てて、ユーザーには OS 標準確認ダイアログを出させない (フロントで先に出している)。
-func Trash(absPath string) error { ... }
-```
-
-非 Windows ビルド (Linux 開発機での `wails dev` / `wails build`) 用に
-`trash_other.go` で **`os.Remove` フォールバック** を提供する。CLAUDE.md
-「開発機は WSL2 / Ubuntu 22.04。`wails dev` / `wails build` は Linux ターゲットで OK」
-を踏まえ、開発時の動作確認が止まらないようにする。本番配布物は Windows のみのため、
-ユーザー環境でこのパスに到達することはない。
-
-```go
-// internal/imgfile/trash_other.go
-//go:build !windows
-
-package imgfile
-
-import (
-    "os"
-    "github.com/maretol/image-observer/internal/logging"
-)
-
-// Linux/Mac 開発機での fallback。本番配布物は Windows のみなので、ここに到達する
-// のは開発者の dev/test ビルドだけ。ログに warn を 1 行残す。
-func Trash(absPath string) error {
-    logging.Warnf("trash: fallback to os.Remove on non-windows (dev build): %s", absPath)
-    return os.Remove(absPath)
-}
-```
-
-go.mod に新規依存は追加しない (`golang.org/x/sys/windows` は既に依存ツリーに含まれている)。
+see `internal/imgfile/trash_windows.go` / `trash_other.go`
 
 ## 7. 永続化 (sidecar 同期)
 

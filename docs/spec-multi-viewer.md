@@ -48,54 +48,17 @@
 
 ### 3.1 主要型 (フロント)
 
-```ts
-// frontend/src/features/viewer-grid/viewers.ts (新規 — 純関数 + 型のみ)
+- `Viewer`: `{ id: string (UUID), name: string, layout: Layout }`
+- `ViewerSet`: `{ viewers: Viewer[] (1以上), activeViewerId: string }`
+- `ViewerStatePersist`: `{ id, name, layout: LayoutState }` (state 永続化用)
 
-import type { Layout, LayoutState } from "./layout";
-
-export type Viewer = {
-  id: string;     // 安定 ID (crypto.randomUUID)。React key、persistence、active 参照に使う
-  name: string;   // 表示名。ユーザー編集可。空文字 / トリム後 0 文字は不可
-  layout: Layout; // BSP レイアウト (spec-viewer-flexlayout.md の定義をそのまま流用)
-};
-
-export type ViewerSet = {
-  viewers: Viewer[];        // 1 個以上 (§3.4 不変条件)
-  activeViewerId: string;   // viewers[*].id のいずれかを指す
-};
-
-// Persistence shape (Wails-generated state.ViewerState とミラー)
-export type ViewerStatePersist = {
-  id: string;
-  name: string;
-  layout: LayoutState;
-};
-```
+see `frontend/src/features/viewer-grid/viewers.ts`
 
 ### 3.2 主要型 (Go / state schema v6)
 
-```go
-// internal/state/state.go
+`StateSchemaVersion = 6`。`StateData` は `Layout LayoutState` (単数) を削除し、`Viewers []ViewerState` + `ActiveViewerID string` に置換。`ViewerState = {ID, Name, Layout LayoutState}`。他の型 (`ListTabState`, `WindowState`, `LayoutState`, `TabState`) は変更なし。
 
-const StateSchemaVersion = 6
-
-type StateData struct {
-    Version        int            `json:"version"`
-    Window         WindowState    `json:"window"`
-    Viewers        []ViewerState  `json:"viewers"`         // 1 個以上
-    ActiveViewerID string         `json:"activeViewerId"`  // viewers[*].id のいずれか
-    TopTab         string         `json:"topTab"`          // "list" | "viewer"
-    List           ListTabState   `json:"list"`
-}
-
-type ViewerState struct {
-    ID     string      `json:"id"`
-    Name   string      `json:"name"`
-    Layout LayoutState `json:"layout"`
-}
-```
-
-旧 `StateData.Layout LayoutState` (単数) は **削除**。`ListTabState` / `WindowState` / `LayoutState` / `LayoutNodeState` / `TabState` は変更なし。
+see `internal/state/state.go`
 
 ### 3.3 ID の生成
 
@@ -115,21 +78,9 @@ ViewerSet の整合性を常に満たす。`useViewerSet` の各 mutation の最
 
 ### 3.5 定数
 
-```ts
-// frontend/src/features/viewer-grid/viewers.ts
-export const MAX_VIEWERS = 8;
-export const MAX_NAME_LEN = 32;
-export const DEFAULT_NAME_PREFIX = "ビューア "; // 末尾スペース込み
-```
+`MAX_VIEWERS = 8` / `MAX_NAME_LEN = 32` / `DEFAULT_NAME_PREFIX = "ビューア "` (TS 側) / `maxViewers = 8` / `maxNameLen = 32` / `defaultNamePat = "ビューア %d"` (Go 側)。
 
-```go
-// internal/state/state.go
-const (
-    maxViewers     = 8
-    maxNameLen     = 32
-    defaultNamePat = "ビューア %d" // Sprintf 用
-)
-```
+see `frontend/src/features/viewer-grid/viewers.ts` / `internal/state/state.go`
 
 ### 3.6 既定名のサジェスト
 
@@ -208,58 +159,15 @@ state.json の `version` を見て:
 | 5 | **ロスレス昇格**: 旧 `Layout` 単数を 1 個のビューアに包む |
 | それ以外 | DefaultData fallback (従来通り) |
 
-具体的な v5 → v6 ロジック:
+具体的な v5 → v6 ロジック: v5 の単数 `Layout` を `Viewers[0].Layout` に格上げして新規 ID / name "ビューア 1" を付与。`v5StateData` は `migration_v5.go` に private 構造体で隔離。失敗は DefaultData fallback。
 
-```go
-// internal/state/state.go (擬似コード)
-
-func migrateV5(raw []byte) (StateData, error) {
-    var v5 v5StateData
-    if err := json.Unmarshal(raw, &v5); err != nil {
-        return DefaultData(), err
-    }
-    viewer := ViewerState{
-        ID:     newViewerID(),         // crypto/rand から生成 (UUID-like)
-        Name:   "ビューア 1",
-        Layout: v5.Layout,
-    }
-    return StateData{
-        Version:        StateSchemaVersion,
-        Window:         v5.Window,
-        Viewers:        []ViewerState{viewer},
-        ActiveViewerID: viewer.ID,
-        TopTab:         normalizeTopTab(v5.TopTab),
-        List:           v5.List,
-    }, nil
-}
-```
-
-- `v5StateData` は `internal/state/migration_v5.go` に**当該マイグレーション専用の private 構造体**として定義する (本体型を旧形に戻すと将来コードに leak するため隔離)。
-- マイグレーション後は通常の v6 validate 経路を通す (空配列 → 1 個 default、name validation 等)。
-- マイグレーション失敗 (json parse error 等) は従来通り DefaultData fallback。
+see `internal/state/state.go` / `migration_v5.go`
 
 ### 4.8 v6 validateState
 
-```
-validateState(s):
-  validateWindow(s.Window)            # 既存と同じ
-  if len(s.Viewers) == 0:
-    s.Viewers = [defaultViewer()]     # 起動可能な状態を保証
-  if len(s.Viewers) > maxViewers:
-    s.Viewers = s.Viewers[:maxViewers]
-  for each v in s.Viewers:
-    if v.ID == "":  return error      # corrupt
-    v.Name = sanitizeName(v.Name)     # trim, fallback to "ビューア N"
-    validateLayoutTree(&v.Layout)     # 既存ロジック
-  if duplicate viewer IDs:  return error  # corrupt
-  if s.ActiveViewerID not in viewer IDs:
-    s.ActiveViewerID = s.Viewers[0].ID
-  if s.TopTab not in {"list", "viewer"}:
-    s.TopTab = "list"
-  validateList(&s.List)               # 既存と同じ
-```
+`Viewers` が空なら `defaultViewer()` 1 個に補充。各 viewer の ID 重複 / 空は corrupt → DefaultData fallback。`ActiveViewerID` が不在なら `Viewers[0].ID` に。既存の `validateWindow` / `validateLayoutTree` / `validateList` は引き続き適用。layout が不正なら全体 fallback (ビューア単位 fallback は v1 なし)。
 
-レイアウトツリー単体の不正 (`validateLayoutTree` が error を返す) は従来通り全体 fallback だが、**ビューア単位での fallback は v1 ではしない** (1 つでも壊れていたら全体を default に戻す。複雑度を上げないため)。
+see `internal/state/state.go:validateState`
 
 ## 5. UI
 

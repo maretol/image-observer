@@ -152,48 +152,15 @@ JSON フィールド名はプロジェクト方針に従い camelCase (`folderPa
 
 #### 3.4.2 インターフェース
 
-```go
-package classification
+`SidecarRepository` インターフェース:
+- `Load(folderPath string) (LoadOutput, error)`: JSON 優先、次 CSV、なければ `Source="none"` で no-error
+- `SaveJSON(folderPath, c, expectedMtime) (int64, error)`: `expectedMtime > 0` のとき mtime 比較 → 不一致で `ErrConflict`。成功で新 mtime 返却。書き込み手順は `.bak` コピー → `.tmp` 書き → `os.Rename`。
 
-const (
-    sidecarJSON = "_classification.json"
-    sidecarCSV  = "_classification.csv"
-    backupJSON  = "_classification.json.bak"
-    tempJSON    = "_classification.json.tmp"
-)
+定数: `sidecarJSON="_classification.json"` / `sidecarCSV="_classification.csv"` / `backupJSON=...bak` / `tempJSON=...tmp`
 
-type LoadOutput struct {
-    Data   *Classification
-    Source string // "json" | "csv" | "none"
-    Mtime  int64  // UnixNano of _classification.json (0 if not present)
-}
+エラー値: `ErrConflict` / `ErrAlreadyExists`
 
-type SidecarRepository interface {
-    // Load はフォルダ直下の _classification.json または .csv を読む。
-    // - JSON が存在すれば JSON を採用 (CSV は無視)。Source="json"、Mtime に JSON の mtime。
-    // - JSON が無く CSV があれば CSV を読む。Source="csv"、Mtime=0。
-    // - どちらも無ければ {Data: nil, Source: "none", Mtime: 0}, nil を返す (エラーではない)。
-    Load(folderPath string) (LoadOutput, error)
-
-    // SaveJSON は _classification.json に書き出す。
-    // expectedMtime > 0 のとき、書き込み直前にディスク上の JSON の mtime を再取得し、
-    // expectedMtime と一致しなければ ErrConflict を返す (外部編集との競合検出)。
-    // expectedMtime == 0 は新規作成扱い (既存ファイルがあっても上書き)。
-    //
-    // 成功時は新しい mtime (UnixNano) を返す。フロントは LoadResult.Mtime を更新する。
-    //
-    // 手順:
-    //   1) (expectedMtime > 0 のとき) 既存 JSON の mtime を再取得 → 比較。不一致なら ErrConflict。
-    //   2) 既存 JSON を .bak へコピー (新規作成時はスキップ)。
-    //   3) 新内容を .tmp に書く。
-    //   4) os.Rename(.tmp, .json) で原子的に置換。
-    //   5) 置換後の mtime を返す。
-    SaveJSON(folderPath string, c *Classification, expectedMtime int64) (int64, error)
-}
-
-var ErrConflict = errors.New("classification: external modification detected")
-var ErrAlreadyExists = errors.New("classification: sidecar already exists")
-```
+see `internal/classification/repository.go`
 
 #### 3.4.3 実装上の注意
 
@@ -206,49 +173,15 @@ var ErrAlreadyExists = errors.New("classification: sidecar already exists")
 
 ### 3.5 `internal/classification/scanner.go`
 
-```go
-type FileScanner interface {
-    // ListImageFiles はフォルダ直下の画像ファイル名 (パスなし、basename のみ) を返す。
-    // 大文字小文字を保持する (重複検出はそのまま大小区別あり)。
-    // サブフォルダは走査しない。
-    ListImageFiles(folderPath string) ([]string, error)
-}
-```
+`FileScanner.ListImageFiles(folderPath string) ([]string, error)`: フォルダ直下を `os.ReadDir + imgfile.IsImage` でフィルタし basename のみ返す。サブフォルダは走査しない。
 
-実装は `os.ReadDir` + `imgfile.IsImage` のフィルタのみ。
+see `internal/classification/scanner.go`
 
 ### 3.6 `internal/classification/service.go`
 
-```go
-type Service struct {
-    repo    SidecarRepository
-    scanner FileScanner
-}
+`Service` API: `Load(folderPath) (*LoadResult, error)` / `Save(folderPath, entries, expectedMtime) (int64, error)` / `UpdateEntry(folderPath, entry, expectedMtime) (int64, error)` / `CreateEmpty(folderPath) (int64, error)`。競合検出は全メソッドで `expectedMtime > 0` 時に実施。成功時は新しい mtime を返す。
 
-func NewService(repo SidecarRepository, scanner FileScanner) *Service
-
-// Load: サイドカー読込 + フォルダ走査でマージ。
-// サイドカーが無い場合: HasSidecar=false / Source="none" / Entries は実ファイルから空エントリ生成。
-// 同 Service 内で「再読み込み」も同一メソッドで処理する (フロントの「再読み込み」ボタン
-// から再度 Load を呼ぶだけ)。
-func (s *Service) Load(folderPath string) (*LoadResult, error)
-
-// Save: 全データを書き出し (UpdatedAt は now で上書き)。
-// expectedMtime > 0 のとき、外部編集との競合をチェックし、不一致なら ErrConflict を返す。
-// 成功時は新しい mtime を返す (フロントは LoadResult.Mtime を更新する)。
-func (s *Service) Save(folderPath string, entries []Entry, expectedMtime int64) (int64, error)
-
-// UpdateEntry: filename で一致するものを置換、なければ追加。順序保持。
-// 内部実装は: Load (mtime 取得) → Entries patch → Save(expectedMtime=直前 Load の mtime)。
-// expectedMtime はフロントが保持する LoadResult.Mtime を渡す。
-// 競合時は ErrConflict を返す。成功時は新しい mtime を返す。
-func (s *Service) UpdateEntry(folderPath string, entry Entry, expectedMtime int64) (int64, error)
-
-// CreateEmpty: フォルダ内の画像を folder=""/conf=""/note="" で列挙した
-// _classification.json を新規作成。既存があれば ErrAlreadyExists を返す。
-// 成功時は新しい mtime を返す。
-func (s *Service) CreateEmpty(folderPath string) (int64, error)
-```
+see `internal/classification/service.go`
 
 `Load` のマージ規則 (元仕様§6.2.5 の再掲):
 
@@ -403,20 +336,9 @@ see `frontend/src/features/classification/useClassification.ts`
 
 ### 4.7 セッション永続化への組み込み
 
-`useSessionSave` の input に `topTab` と `list` を追加:
+`useSessionSave` の input に `topTab` と `list: { folderPath, filter }` を追加。`buildStateData` が対応 `StateData` フィールドに詰める。`useSessionLoad` 側変更不要。
 
-```ts
-useSessionSave({
-  window: windowState,
-  grid: viewer.grid,
-  topTab,
-  list: { folderPath, filter },  // useClassification.persistableState
-});
-```
-
-`useSessionSave` 内で `buildStateData` が `topTab` / `list` を `StateData` の対応フィールドに詰める。Wails 自動生成の `state.StateData` 型は新フィールドを含むようになっているので、TS 型は再生成に追従する。
-
-`useSessionLoad` 側は変更不要 (`GetState` の戻りに新フィールドが乗ってくるだけ)。
+see `frontend/src/features/classification/useClassification.ts` / `useSessionSave.ts`
 
 ### 4.8 配色 (`colors.ts` + `defaultPalette.ts`) — 汎用化
 
@@ -579,28 +501,7 @@ UI:
 
 ### 7.2 v2 スキーマ全体 (Go)
 
-```go
-type StateData struct {
-    Version       int          `json:"version"`        // 2
-    RootPath      string       `json:"rootPath"`       // v1 互換、v2 では未使用
-    LeftPaneWidth int          `json:"leftPaneWidth"`  // v1 互換、v2 では未使用
-    Window        WindowState  `json:"window"`
-    Grid          GridState    `json:"grid"`
-    TopTab        string       `json:"topTab"`         // "list" | "viewer"
-    List          ListTabState `json:"list"`
-}
-
-type ListTabState struct {
-    FolderPath string          `json:"folderPath"`
-    Filter     ListFilterState `json:"filter"`
-}
-
-type ListFilterState struct {
-    Tags       []string `json:"tags"`
-    Confidence string   `json:"confidence"` // "all" | "high" | "mid" | "low"
-    Query      string   `json:"query"`
-}
-```
+`StateData` に `TopTab` / `ListTabState` を追加した v2 スキーマ。§3.8 を参照。Phase 5 以降は state v6 まで更新済み (現行スキーマは `internal/state/state.go`)。
 
 ### 7.3 マイグレーション
 
@@ -761,26 +662,6 @@ v1 → v2 のマイグレーションは **行わない**。`Version != 2` で `
 
 ---
 
-## 14. 実装手順 (推奨)
-
-1. **Go パッケージ整理**: `internal/imgfile` を新設して `tree.IsImage` を移設。`internal/thumb` / `internal/imgread` の参照を切り替え。`go test ./...` 通過確認
-2. **`internal/tree` の削除と `app.go::ListDirectory` の撤去**: 残コンパイルエラーが出ないことを確認 (左ペイン削除はフロント側でまとめて行うので一時的に未使用扱いになる)
-3. **`internal/classification` の実装** (`types` → `repository` → `scanner` → `service` の順)。テストファースト。**Mtime / ErrConflict / expectedMtime のサイクルもここで完成させる**。
-4. **`internal/state` の v2 化**: 型追加 + `validateState` 拡張 + `DefaultData` 更新 + テスト更新。
-5. **`app.go` の Wails バインディング追加**: `LoadClassification` / `SaveClassification` / `UpdateClassificationEntry` / `CreateEmptyClassification`。`CONFLICT:` プレフィックスのエラー整形もここで実装。
-6. **`wails build`**: TS バインディング再生成を確認。
-7. **フロント — folder-tree 削除**: [App.tsx](../frontend/src/App.tsx) を「ViewerGrid のみ全幅表示」に一旦縮小、folder-tree 関連 import / CSS / hooks を全削除。`tsc --noEmit` 通過。
-8. **フロント — TopTabs 導入**: `App.tsx` でトップレベルタブを導入し、ViewerGrid をビューアタブに、空コンポーネントを一覧タブに割り当て。
-9. **フロント — 配色汎用化基盤**: `colors.ts` (`tagColor` + ハッシュフォールバック) と `defaultPalette.ts` を実装し、`colors.test.ts` を通す。先に作るのは Card / EditPopover / Lightbox の各バッジが全部これに依存するため。
-10. **フロント — 一覧タブのスケルトン**: `features/classification/ClassificationView.tsx` + `ClassificationHeader.tsx` (フォルダ選択 + **再読み込みボタン**) + `useClassification.ts` を作り、フォルダ選択 → `LoadClassification` → カード並べ表示まで。
-11. **フィルタ実装**: `filters.ts` (純関数) + テスト → TagChips / ConfidenceSegment / SearchBox。
-12. **編集ポップオーバー** + 保存フロー (`App.UpdateClassificationEntry`)。**競合検出ダイアログ** (`ConflictDialog.tsx`) も併せて実装。
-13. ~~**ライトボックス** + `←/→` 操作 + folder バッジ視覚化 (主バッジ + 抽出タグ列)。~~ → v1.1 で廃止。代わりに **ビューアタブ連携** を `App.tsx` で結線 (`useViewerGrid.openInActive` + `setTopTab("viewer")`)。
-14. **セッション永続化への組み込み**: `useSessionSave` の input に topTab / list を追加。動作確認。
-15. **CSV → JSON 初回 import の動作確認**: CSV のみのフォルダで一度編集 → JSON 生成 → 再起動して JSON のみ参照されることを確認。
-16. **受け入れ基準 (§12) を一通り走らせる**。
-
----
 
 ## 15. リスクと留意点
 

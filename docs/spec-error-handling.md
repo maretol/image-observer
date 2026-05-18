@@ -47,16 +47,9 @@ export function useToast(): {
 
 ### 1.3 内部状態
 
-```ts
-type ToastItem = {
-  id: number;            // Date.now() + counter で uniq
-  message: string;
-  severity: ToastSeverity;
-  timeoutHandle: number; // window.setTimeout の戻り値
-};
-```
+`ToastItem = { id: number, message, severity, timeoutHandle }` の配列を `useState` で管理。`toast()` で追加、タイムアウトまたは close ボタンで削除。
 
-`useState<ToastItem[]>([])` で配列管理。`toast()` で `setItems(prev => [...prev, newItem])`、消滅で `setItems(prev => prev.filter(i => i.id !== id))`。
+see `frontend/src/shared/components/Toast.tsx`
 
 ### 1.4 配線
 
