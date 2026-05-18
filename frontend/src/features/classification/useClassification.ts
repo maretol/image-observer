@@ -1,19 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  DeleteImage,
-  LoadClassification,
-  SaveClassification,
-} from "../../../wailsjs/go/main/App";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { classification } from "../../../wailsjs/go/models";
 import { state as wstate } from "../../../wailsjs/go/models";
 import { useToastFn } from "../../shared/components/Toast";
-import { errorMessage } from "../../shared/utils/error";
-import { logger } from "../../shared/utils/logger";
 import type { ConfirmFn } from "../viewer-grid/useViewerSet";
-import { entriesEquivalent } from "./entriesEquivalent";
 import { type ListTabFilter } from "./filters";
-import { useClassificationFilter } from "./useClassificationFilter";
+import { useClassificationDelete } from "./useClassificationDelete";
 import { useClassificationEdit } from "./useClassificationEdit";
+import { useClassificationFilter } from "./useClassificationFilter";
 import { useClassificationLoad } from "./useClassificationLoad";
 import { useClassificationMerge } from "./useClassificationMerge";
 import { useClassificationReplay } from "./useClassificationReplay";
@@ -25,8 +18,6 @@ import { useDirectoryGroups } from "./useDirectoryGroups";
 // The canonical declaration lives in `./useClassificationWatcher` next to
 // the EventsOn subscription that consumes it.
 export { CLASSIFICATION_CHANGED_EVENT } from "./useClassificationWatcher";
-
-const CONFLICT_PREFIX = "CONFLICT:";
 
 export type EditingState = {
   open: boolean;
@@ -447,163 +438,17 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       toast,
     });
 
-  // deleteOne: confirm → Trash → mirror into sidecar → patch in-memory entries.
-  // Returns true iff the file was removed from disk (the caller, App.tsx,
-  // uses this signal to also close any matching viewer tabs). False when
-  // the user cancels confirm or the Trash IPC fails before any disk change.
-  //
-  // Sidecar save uses the standard mtime-conflict path: on CONFLICT we
-  // reload the JSON (picking up any external edits to other entries) and
-  // retry the delete once. If the retry also fails the file stays gone on
-  // disk and a warn toast is surfaced — the user's intent (remove this
-  // file) has been honored even if the sidecar bookkeeping drifted.
-  const deleteOne = useCallback(
-    async (filename: string): Promise<boolean> => {
-      const cur = folderRef.current;
-      if (!cur || !loadResult) return false;
-
-      const proceed = await confirm(
-        `${filename} をゴミ箱に送りますか?`,
-      );
-      if (!proceed) return false;
-
-      // Mark the file as "we're deleting this" BEFORE DeleteImage so the
-      // watcher Remove event (which can fire within a few ms of the IPC
-      // round-trip — well before our subsequent SaveClassification +
-      // setLoadResult patch lands) is recognised as a self-echo rather
-      // than as an unexplained external removal that triggers a toast +
-      // possible commit. Cleared in the finally below regardless of the
-      // sidecar outcome (PR #75 9th, thread J). Keyed by the folder we
-      // captured at entry (`cur`) so the cleanup deletes from the same
-      // bucket even if folderRef has changed by then (PR #75 21st, thread A).
-      let folderDeletes = inFlightDeletesRef.current.get(cur);
-      if (!folderDeletes) {
-        folderDeletes = new Set();
-        inFlightDeletesRef.current.set(cur, folderDeletes);
-      }
-      folderDeletes.add(filename);
-      try {
-        try {
-          await DeleteImage(cur, filename);
-        } catch (e) {
-          const msg = errorMessage(e);
-          logger.error("classification", "delete failed", {
-            filename,
-            err: msg,
-          });
-          // Surface the failure toast only if the user is still looking
-          // at this folder (PR #75 14th, thread C).
-          if (folderRef.current === cur) {
-            toast("削除に失敗しました (詳細はログ)", "error");
-          }
-          return false;
-        }
-
-        // File is gone on disk. From here we are best-effort on the sidecar.
-        const removeFiltered = (entries: classification.Entry[]) =>
-          entries.filter((e) => e.filename !== filename);
-
-        let entriesAfter = removeFiltered(loadResult.entries);
-        let nextMtime = loadResult.mtime;
-        let sidecarErr: string | null = null;
-
-        try {
-          const out = await SaveClassification(
-            cur,
-            entriesAfter,
-            loadResult.mtime,
-          );
-          nextMtime = out.mtime;
-        } catch (e) {
-          const msg = errorMessage(e);
-          if (msg.startsWith(CONFLICT_PREFIX)) {
-            // Pick up external edits then re-apply the delete with the
-            // fresh mtime.
-            const fresh = await loadInternal(cur);
-            if (fresh) {
-              entriesAfter = removeFiltered(fresh.entries);
-              try {
-                const out = await SaveClassification(
-                  cur,
-                  entriesAfter,
-                  fresh.mtime,
-                );
-                nextMtime = out.mtime;
-              } catch (e2) {
-                sidecarErr = errorMessage(e2);
-              }
-            } else {
-              // fresh === null can mean a real Load failure (in which
-              // case loadInternal already toasted) OR that a newer
-              // watcher payload / manual reload superseded us mid-await.
-              // In the supersede case the local state already reflects
-              // a fresher truth via the winner's commit, so patching
-              // with our pre-supersede `entriesAfter` would roll it
-              // back, and bumping the gen would stale-ify the newer
-              // result we just merged into. Skip the local patch +
-              // gen bump entirely — the file is already off disk, so
-              // the next watcher event (or the winning Load) reconciles
-              // the sidecar drift (PR #75 11th, suppressed-B).
-              return true;
-            }
-          } else {
-            sidecarErr = msg;
-          }
-        }
-
-        // Folder check before any state commit — patching NEW folder's
-        // loadResult with OLD folder's entriesAfter (which is missing the
-        // deleted filename for the OLD folder) would erroneously remove a
-        // same-named entry from the NEW folder's list (PR #75 14th,
-        // thread C). File is already off disk for OLD folder; the user
-        // sees no visible state change, which is correct for NEW folder
-        // context.
-        if (folderRef.current !== cur) return true;
-        // Bump generation before patching local state so any in-flight
-        // LoadClassification (watcher / replay / silent recheck / manual
-        // reload) that started before our delete + sidecar save returned
-        // is now stale and won't re-introduce the deleted entry via its
-        // setLoadResult (PR #75 10th, thread A).
-        ++requestGenRef.current;
-        setLoadResult((prev) => {
-          if (!prev) return prev;
-          return classification.LoadResult.createFrom({
-            ...prev,
-            entries: entriesAfter,
-            mtime: nextMtime,
-          });
-        });
-        setSelected((curSel) => {
-          if (!curSel.has(filename)) return curSel;
-          const next = new Set(curSel);
-          next.delete(filename);
-          return next;
-        });
-
-        if (sidecarErr) {
-          toast(
-            `${filename} を削除しましたが、サイドカー更新に失敗しました (詳細はログ)`,
-            "warn",
-          );
-          logger.warn("classification", "delete sidecar save failed", {
-            filename,
-            err: sidecarErr,
-          });
-        } else {
-          toast(`${filename} をゴミ箱に送りました`, "info");
-          logger.info("classification", "deleted", { filename });
-        }
-        return true;
-      } finally {
-        const set = inFlightDeletesRef.current.get(cur);
-        if (set) {
-          set.delete(filename);
-          if (set.size === 0) inFlightDeletesRef.current.delete(cur);
-        }
-      }
-    },
-    [confirm, loadInternal, loadResult, toast],
-  );
+  const { deleteOne } = useClassificationDelete({
+    loadResult,
+    folderRef,
+    requestGenRef,
+    inFlightDeletesRef,
+    setLoadResult,
+    setSelected,
+    loadInternal,
+    confirm,
+    toast,
+  });
 
   const persistableState = useMemo(
     () => ({
