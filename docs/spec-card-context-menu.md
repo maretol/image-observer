@@ -10,25 +10,13 @@
 
 ## 0. 改訂履歴
 
-- 2026-05-16 初版ドラフト。Phase 1 を「拡張メニュー + selection 連動 + 固定項目」に絞り、
-  設定 UI (項目順 / 表示制御) / バルク削除 / フォルダ移動を Phase 2 へ後ろ倒し。
-- 2026-05-16 ユーザー合意 (§11-D 案 A / §5.3 項目順 / §11-E bulk-toolbar 共有を全て採用)、
-  ステータスを「実装着手可」に更新。
-- 2026-05-16 Phase 1 実装完了 (PR #74)。Copilot レビュー指摘を反映: §8 のテスト計画は実装に
-  合わせて純関数テストのみに整理 / §9 受け入れ基準の viewers.length === 1 の記述を実装通り
-  (viewers 1 件 + 「選択モードに切り替え」+ 「削除」が出る) に修正 / §11-D 内の `§11-B`
-  参照を `§5.2 mode 決定ロジック` に修正 / §13 のテストファイル名を実ファイル
-  (`cardContextMenuLogic.test.ts`) に揃える。
-- 2026-05-16 Copilot 2nd round 対応: 冒頭ステータスを「Phase 1 実装完了」に更新 /
-  §5.3 末尾の「viewers.length === 1 のときは divider なし」を実装 (常に divider あり) に
-  合わせて修正。
-- 2026-05-16 Copilot 3rd round 対応: §11-G の outside-click wrapper 記述を「Tab 側
-  `.tab-context-menu-root` / Card 側 `.cls-card-context-menu-root` で class 名は別、
-  パターンのみ共通」に書き分け / §13 App.css の変更内容を実体 (`.ctx-item:hover` /
-  `:focus-visible` を `:not(:disabled)` で絞る + `.ctx-item:disabled` 追加 + danger 詳細度
-  引上げ) に揃える。実装側では `.ctx-item.cls-card-context-item-danger:hover:not(:disabled)`
-  の form に書き直して詳細度を (0,4,0) まで引き上げ、bulk-mode のラベル (intoSuffix 含む)
-  に `ctx-item-viewer` クラスと `title` を付けて長いビューア名でも overflow しない形に。
+| 日付 | ラウンド | 主な変更 |
+|------|---------|---------|
+| 2026-05-16 | 初版 | Phase 1 を「拡張メニュー + selection 連動 + 固定項目」に絞り、Phase 2 は後ろ倒し |
+| 2026-05-16 | ユーザー合意 | §11-D 案 A / §5.3 項目順 / bulk-toolbar 共有を採用、実装着手可に更新 |
+| 2026-05-16 | PR #74 完了 | §8 テスト計画を純関数テストのみに整理、§9 受け入れ基準・§13 テストファイル名を実装に合わせ修正 |
+| 2026-05-16 | Round 2 | §5.3 divider 常時あり に修正 |
+| 2026-05-16 | Round 3 | §11-G outside-click wrapper を Tab 側と Card 側で class 名を書き分け、§13 CSS 詳細度修正 |
 
 ---
 
