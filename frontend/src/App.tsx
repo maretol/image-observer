@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -27,6 +28,10 @@ import {
   type Viewer,
   type ViewerSet,
 } from "./features/viewer-grid/viewers";
+import {
+  DATA_VIEWER_TAB,
+  useViewerTabReorder,
+} from "./features/viewer-grid/useViewerTabReorder";
 import { useSessionLoad } from "./features/session/useSessionLoad";
 import { useSessionSave } from "./features/session/useSessionSave";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
@@ -409,6 +414,21 @@ function AppInner({ initialState }: AppInnerProps) {
     document.documentElement.style.setProperty("--ui-scale", String(scale));
   }, [settings.data?.uiScalePercent]);
 
+  // Top-tab viewer reorder DnD (#50, docs/spec-viewer-tab-reorder.md). The
+  // hook owns pointer state + body-style stack; we just feed it the count
+  // and a commit callback. `containerRef` is bound to .top-tabs-viewers so
+  // the hook can collect tab rects via DATA_VIEWER_TAB.
+  const tabReorder = useViewerTabReorder({
+    count: viewer.viewers.length,
+    onReorder: viewer.reorderViewer,
+  });
+  // Indicator and dragSource visibility key off the same state. Only show
+  // them once the drag has crossed the threshold (active) so a normal click
+  // doesn't briefly flash the indicator.
+  const dragActive = tabReorder.state?.active ?? false;
+  const dragSrcIdx = dragActive ? (tabReorder.state?.srcIdx ?? -1) : -1;
+  const dragInsertIdx = dragActive ? (tabReorder.state?.insertIdx ?? -1) : -1;
+
   return (
     <div className="app-toplevel">
       <nav className="top-tabs" role="tablist" aria-label="トップレベルタブ">
@@ -421,21 +441,37 @@ function AppInner({ initialState }: AppInnerProps) {
         >
           一覧
         </button>
-        <div className="top-tabs-viewers" role="group" aria-label="ビューア一覧">
-          {viewer.viewers.map((v) => (
-            <ViewerTab
-              key={v.id}
-              viewer={v}
-              isActive={topTab === "viewer" && v.id === viewer.activeViewerId}
-              isEditing={editingViewerId === v.id}
-              canClose={viewer.viewers.length > 1}
-              onActivate={() => onSelectViewer(v.id)}
-              onStartRename={() => startRename(v.id)}
-              onCommitRename={(name) => commitRename(v.id, name)}
-              onCancelRename={stopRename}
-              onClose={() => void closeViewerWithConfirm(v.id)}
-            />
+        <div
+          className="top-tabs-viewers"
+          role="group"
+          aria-label="ビューア一覧"
+          ref={tabReorder.containerRef}
+        >
+          {viewer.viewers.map((v, i) => (
+            <Fragment key={v.id}>
+              {dragInsertIdx === i && (
+                <span className="viewer-tab-insert-indicator" aria-hidden="true" />
+              )}
+              <ViewerTab
+                index={i}
+                viewer={v}
+                isActive={topTab === "viewer" && v.id === viewer.activeViewerId}
+                isEditing={editingViewerId === v.id}
+                isDragSource={dragSrcIdx === i}
+                canClose={viewer.viewers.length > 1}
+                onActivate={() => onSelectViewer(v.id)}
+                onStartRename={() => startRename(v.id)}
+                onCommitRename={(name) => commitRename(v.id, name)}
+                onCancelRename={stopRename}
+                onClose={() => void closeViewerWithConfirm(v.id)}
+                onStartDrag={tabReorder.startDrag}
+                shouldSuppressClick={tabReorder.shouldSuppressClick}
+              />
+            </Fragment>
           ))}
+          {dragInsertIdx === viewer.viewers.length && (
+            <span className="viewer-tab-insert-indicator" aria-hidden="true" />
+          )}
         </div>
         <button
           type="button"
@@ -519,27 +555,40 @@ export default App;
 // ─── ViewerTab (top-tab UI per viewer) ───────────────────────────────
 
 type ViewerTabProps = {
+  // index is the position of this tab in viewer.viewers — passed to the
+  // reorder hook so it can compute moveViewer's fromIdx (#50).
+  index: number;
   viewer: Viewer;
   isActive: boolean;
   isEditing: boolean;
+  // isDragSource = true while this tab is being dragged. Used to dim the
+  // source (.dragging className) so the user can tell where they grabbed
+  // from while the indicator shows the drop position.
+  isDragSource: boolean;
   canClose: boolean;
   onActivate: () => void;
   onStartRename: () => void;
   onCommitRename: (name: string) => void;
   onCancelRename: () => void;
   onClose: () => void;
+  onStartDrag: (idx: number, ev: { clientX: number; clientY: number }) => void;
+  shouldSuppressClick: () => boolean;
 };
 
 function ViewerTab({
+  index,
   viewer,
   isActive,
   isEditing,
+  isDragSource,
   canClose,
   onActivate,
   onStartRename,
   onCommitRename,
   onCancelRename,
   onClose,
+  onStartDrag,
+  shouldSuppressClick,
 }: ViewerTabProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   // #53: wrapper の padding 領域クリックでも focus を一覧タブ (タブ全体が
@@ -604,14 +653,33 @@ function ViewerTab({
   // close 内の CloseIcon は SVG 要素なので e.target は HTMLElement ではなく
   // SVGElement になり得る。closest() は Element の API なので instanceof Element
   // でガードしてから呼ぶ。
-  const isFromClose = (e: React.MouseEvent) =>
+  const isFromClose = (e: { target: EventTarget | null }) =>
     e.target instanceof Element && e.target.closest(".top-tab-viewer-close") != null;
 
   return (
     <span
-      className={`top-tab top-tab-viewer ${isActive ? "active" : ""}`}
+      className={`top-tab top-tab-viewer ${isActive ? "active" : ""} ${
+        isDragSource ? "dragging" : ""
+      }`}
+      {...{ [DATA_VIEWER_TAB]: String(index) }}
+      onPointerDown={(e) => {
+        // Drag-start guards (spec §5.2). Anything that should fall through to
+        // the existing click / dblclick / close paths is rejected here.
+        if (e.button !== 0) return; // primary button only
+        if (isEditing) return; // rename input keeps focus
+        if (isFromClose(e)) return; // close button has its own onClick
+        // Suppress text selection on the wrapper span. The wrapper isn't
+        // focusable, so this is purely about clearing the I-beam cursor +
+        // user-select side effects when the drag turns active.
+        e.preventDefault();
+        onStartDrag(index, { clientX: e.clientX, clientY: e.clientY });
+      }}
       onClick={(e) => {
         if (isFromClose(e)) return;
+        // Drag commit/cancel fires a synthetic click right after pointerup
+        // on most engines; suppress that one trailing click so the source
+        // tab doesn't re-activate after a successful reorder (#50).
+        if (shouldSuppressClick()) return;
         onActivate();
         // 一覧タブはタブ全体が <button> なので click で自動的にフォーカスが
         // 乗るが、ビューアタブの wrapper は <span> でフォーカス不可。padding
