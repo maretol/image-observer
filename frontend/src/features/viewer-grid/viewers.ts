@@ -171,6 +171,32 @@ export function setActiveViewer(set: ViewerSet, id: string): ViewerSet {
   return { ...set, activeViewerId: id };
 }
 
+// moveViewer reorders one viewer within the viewers array. `toIdx` is the
+// **insert position** before splice (0..len), so `toIdx === fromIdx` and
+// `toIdx === fromIdx + 1` are both no-ops (visual position unchanged).
+// activeViewerId is preserved verbatim — reordering does not change which
+// viewer is active.
+//
+// Out-of-range fromIdx is rejected (no-op). toIdx is clamped to [0, len].
+export function moveViewer(
+  set: ViewerSet,
+  fromIdx: number,
+  toIdx: number,
+): ViewerSet {
+  const len = set.viewers.length;
+  if (fromIdx < 0 || fromIdx >= len) return set;
+  const dst = Math.max(0, Math.min(toIdx, len));
+  if (dst === fromIdx || dst === fromIdx + 1) return set;
+  const next = set.viewers.slice();
+  const [picked] = next.splice(fromIdx, 1);
+  // After splice removal, indices > fromIdx shift left by 1. The visual-
+  // intent "insert before index dst" maps to `dst > fromIdx ? dst - 1 : dst`
+  // in the post-removal array.
+  const insertAt = dst > fromIdx ? dst - 1 : dst;
+  next.splice(insertAt, 0, picked);
+  return { ...set, viewers: next };
+}
+
 // updateViewerLayout swaps in a new Layout for a single viewer. This is the
 // generic bridge used by useViewerSet to apply existing `layout/` mutations
 // (split/move/reorder/etc.) to one viewer at a time.
