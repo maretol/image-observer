@@ -1,8 +1,9 @@
 // Pure-function tests for the reorder hook (#50). The hook itself is not
 // exercised here — that would require a DOM test rig the project hasn't
-// adopted (context.md §5). The splice-index math is the only piece that has
-// real branching, so we isolate it into computeInsertIdxFromRects and test
-// that against RectLike fixtures.
+// adopted (see .claude/context.md §5 "技術スタック (固定)": "DOM テストは
+// 未導入"). The splice-index math is the only piece that has real branching,
+// so we isolate it into computeInsertIdxFromRects and test against RectLike
+// fixtures.
 
 import { describe, expect, it } from "vitest";
 import {

@@ -19,7 +19,6 @@ const DRAG_THRESHOLD_PX = 5;
 
 export type ReorderState = {
   srcIdx: number;
-  ghostX: number;
   // insertIdx is the splice position 0..len. `srcIdx` and `srcIdx + 1` are
   // both visually-no-op slots — they round-trip to the current order.
   insertIdx: number;
@@ -102,7 +101,6 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
       });
       setState({
         srcIdx,
-        ghostX: ev.clientX,
         insertIdx: srcIdx,
         active: false,
       });
@@ -122,9 +120,10 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
           Math.hypot(e.clientX - start.x, e.clientY - start.y) >=
             DRAG_THRESHOLD_PX);
       if (!movedFar) {
-        // Armed but under threshold — only refresh ghostX. insertIdx is held
-        // at srcIdx so canceling now would no-op.
-        setState({ ...cur, ghostX: e.clientX });
+        // Armed but under threshold — no state update needed. Ghost position
+        // isn't tracked (no ghost rendering in Phase 1), and insertIdx is
+        // held at srcIdx (= no-op slot) until we cross the threshold, so
+        // re-rendering here would be pure waste.
         return;
       }
       const insertIdx = computeInsertIdxFromContainer(
@@ -132,9 +131,11 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
         e.clientX,
         cur.insertIdx,
       );
+      // Skip the state update when nothing visible changes — same insertIdx
+      // and already-active means the indicator / dragging class don't move.
+      if (cur.active && insertIdx === cur.insertIdx) return;
       setState({
         ...cur,
-        ghostX: e.clientX,
         insertIdx,
         active: true,
       });
