@@ -47,6 +47,7 @@ import {
   initialViewerSet,
   MAX_VIEWERS,
   moveTabAcrossViewers,
+  moveViewer,
   openPathInViewer,
   renameViewer,
   sanitizeName,
@@ -184,6 +185,22 @@ export function useViewerSet(opts?: {
       logger.debug("viewer-set", "setActive", {
         from: cur.activeViewerId,
         to: id,
+      });
+      return next;
+    });
+  }, []);
+
+  // reorderViewerCb wraps the moveViewer pure function. Caller passes the
+  // insert position (0..len), matching the DnD insertIdx semantics. activeViewerId
+  // is preserved (the moved viewer keeps its identity, so the keybinding mapping
+  // by index naturally follows the new order).
+  const reorderViewerCb = useCallback((fromIdx: number, toIdx: number) => {
+    setSet((cur) => {
+      const next = moveViewer(cur, fromIdx, toIdx);
+      if (next === cur) return cur;
+      logger.info("viewer-set", "reorder", {
+        from: fromIdx,
+        to: toIdx,
       });
       return next;
     });
@@ -633,6 +650,7 @@ export function useViewerSet(opts?: {
       closeViewer: closeViewerCb,
       renameViewer: renameViewerCb,
       setActiveViewer: setActiveViewerCb,
+      reorderViewer: reorderViewerCb,
       // panel-level (active viewer)
       setActivePanel: setActivePanelCb,
       setActiveTab,
@@ -662,6 +680,7 @@ export function useViewerSet(opts?: {
       closeViewerCb,
       renameViewerCb,
       setActiveViewerCb,
+      reorderViewerCb,
       setActivePanelCb,
       setActiveTab,
       closeTab,

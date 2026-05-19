@@ -12,6 +12,7 @@ import {
   initialViewerSet,
   MAX_VIEWERS,
   moveTabAcrossViewers,
+  moveViewer,
   newViewer,
   openPathInViewer,
   renameViewer,
@@ -176,6 +177,81 @@ describe("renameViewer", () => {
 });
 
 // ─── setActiveViewer ────────────────────────────────────────────────
+
+describe("moveViewer", () => {
+  // Helper: snapshot the order of viewer names so test expectations stay
+  // independent of generated ids.
+  const names = (s: ViewerSet) => s.viewers.map((v) => v.name);
+
+  // build a fresh 4-viewer set with predictable names A..D.
+  function setABCD(): ViewerSet {
+    let s = initialViewerSet();
+    s = renameViewer(s, s.viewers[0].id, "A");
+    for (const name of ["B", "C", "D"]) {
+      s = addViewer(s);
+      s = renameViewer(s, s.viewers[s.viewers.length - 1].id, name);
+    }
+    return s;
+  }
+
+  it("moves first viewer to the end (fromIdx=0, toIdx=4 for len=4)", () => {
+    const s = setABCD();
+    const next = moveViewer(s, 0, 4);
+    expect(names(next)).toEqual(["B", "C", "D", "A"]);
+  });
+  it("moves last viewer to the head (fromIdx=3, toIdx=0)", () => {
+    const s = setABCD();
+    const next = moveViewer(s, 3, 0);
+    expect(names(next)).toEqual(["D", "A", "B", "C"]);
+  });
+  it("no-ops when toIdx === fromIdx", () => {
+    const s = setABCD();
+    expect(moveViewer(s, 1, 1)).toBe(s);
+  });
+  it("no-ops when toIdx === fromIdx + 1 (visual position unchanged)", () => {
+    const s = setABCD();
+    expect(moveViewer(s, 1, 2)).toBe(s);
+  });
+  it("moves leftward by one (fromIdx=1, toIdx=0)", () => {
+    const s = setABCD();
+    const next = moveViewer(s, 1, 0);
+    expect(names(next)).toEqual(["B", "A", "C", "D"]);
+  });
+  it("rejects out-of-range fromIdx (negative)", () => {
+    const s = setABCD();
+    expect(moveViewer(s, -1, 0)).toBe(s);
+  });
+  it("rejects out-of-range fromIdx (past end)", () => {
+    const s = setABCD();
+    expect(moveViewer(s, 5, 0)).toBe(s);
+  });
+  it("clamps too-large toIdx to len (= append)", () => {
+    const s = setABCD();
+    const next = moveViewer(s, 0, 99);
+    expect(names(next)).toEqual(["B", "C", "D", "A"]);
+  });
+  it("clamps negative toIdx to 0 (= prepend)", () => {
+    const s = setABCD();
+    const next = moveViewer(s, 3, -5);
+    expect(names(next)).toEqual(["D", "A", "B", "C"]);
+  });
+  it("no-ops when viewers.length === 1", () => {
+    const s = initialViewerSet();
+    expect(moveViewer(s, 0, 0)).toBe(s);
+    expect(moveViewer(s, 0, 1)).toBe(s);
+  });
+  it("preserves activeViewerId across reorder", () => {
+    // addViewer activates the added viewer, so setABCD() leaves active = D.
+    // Pin active to A explicitly so the assertion below is unambiguous.
+    let s = setABCD();
+    s = setActiveViewer(s, s.viewers[0].id);
+    const activeId = s.activeViewerId;
+    const next = moveViewer(s, 0, 4);
+    expect(next.activeViewerId).toBe(activeId);
+    // A moved to the end; activeViewerId still points at A (now at index 3).
+    expect(next.viewers[3].id).toBe(activeId);
+  });
+});
 
 describe("setActiveViewer", () => {
   it("switches active when target exists", () => {

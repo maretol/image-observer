@@ -192,6 +192,29 @@ html, body, #root {
   background: #4a4a4a;
 }
 
+/* #50: ビューアタブ並び替え DnD のソースタブ表示。閾値を超えて active に
+   なった瞬間に半透明化、drop / cancel で元に戻る。挿入位置は
+   .viewer-tab-insert-indicator (下) で表す。 */
+.top-tab-viewer.dragging {
+  opacity: 0.5;
+}
+
+/* #50: ドラッグ中の挿入位置インジケータ。.top-tabs-viewers の flex 子として
+   .top-tab-viewer の間 / 端に挿入される。`.tab-insert-indicator` (パネル内
+   タブ DnD 用) とは class を分けて、トップタブ列の高さ / 色味に固有のチューニング
+   ができるようにする。 */
+.viewer-tab-insert-indicator {
+  display: inline-block;
+  width: 2px;
+  align-self: stretch;
+  background: #d97a3c;
+  flex-shrink: 0;
+  /* 縦方向にだけ詰めて、タブ chrome の高さ (≒34px) より低い「すっと細く立った
+     縦線」に見せるための調整。横方向の隙間は .top-tabs-viewers の gap: 2px が
+     吸収するので、左右は 0 のままで OK。 */
+  margin: 4px 0;
+}
+
 .top-tab-rename-input {
   background: #1e1e1e;
   color: #fff;
