@@ -209,8 +209,9 @@ html, body, #root {
   align-self: stretch;
   background: #d97a3c;
   flex-shrink: 0;
-  /* gap: 2px の隙間にちょうど収まらせるためのマージン微調整。視覚的に
-     タブの間に立っているように見せる。 */
+  /* 縦方向にだけ詰めて、タブ chrome の高さ (≒34px) より低い「すっと細く立った
+     縦線」に見せるための調整。横方向の隙間は .top-tabs-viewers の gap: 2px が
+     吸収するので、左右は 0 のままで OK。 */
   margin: 4px 0;
 }
 

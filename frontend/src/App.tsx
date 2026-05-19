@@ -581,7 +581,10 @@ type ViewerTabProps = {
   onCommitRename: (name: string) => void;
   onCancelRename: () => void;
   onClose: () => void;
-  onStartDrag: (idx: number, ev: { clientX: number; clientY: number }) => void;
+  onStartDrag: (
+    idx: number,
+    ev: { clientX: number; clientY: number; pointerId: number },
+  ) => void;
   shouldSuppressClick: () => boolean;
 };
 
@@ -691,7 +694,11 @@ function ViewerTab({
         // focusable, so this is purely about clearing the I-beam cursor +
         // user-select side effects when the drag turns active.
         e.preventDefault();
-        onStartDrag(index, { clientX: e.clientX, clientY: e.clientY });
+        onStartDrag(index, {
+          clientX: e.clientX,
+          clientY: e.clientY,
+          pointerId: e.pointerId,
+        });
       }}
       onClick={(e) => {
         if (isFromClose(e)) return;

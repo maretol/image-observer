@@ -60,12 +60,18 @@ export type UseViewerTabReorder = {
   containerRef: React.RefObject<HTMLDivElement | null>;
   // startDrag is wired to the per-tab onPointerDown. The caller is responsible
   // for the upstream guards (close-button hit, rename mode, button !== 0) —
-  // see spec §5.2 — because the hook can't see those.
-  startDrag: (srcIdx: number, ev: { clientX: number; clientY: number }) => void;
-  // shouldSuppressClick returns true for one tick after a drag commit/cancel
-  // so the wrapper click that fires right after pointerup can be ignored.
-  // (Tabs use `onClick` for activate, which would otherwise race with the
-  // drop the user just made — spec §5.5.)
+  // see spec §5.2 — because the hook can't see those. `pointerId` is required
+  // so we can ignore stray move/up events from other concurrent pointers
+  // (multi-touch).
+  startDrag: (
+    srcIdx: number,
+    ev: { clientX: number; clientY: number; pointerId: number },
+  ) => void;
+  // shouldSuppressClick returns true for one tick after a drag that reached
+  // the active state ends (commit, pointercancel, or Escape) so the synthetic
+  // click that pointerup dispatches doesn't re-activate the source tab.
+  // Tabs use `onClick` for activate; armed-only releases are normal clicks
+  // and stay unaffected (spec §5.3).
   shouldSuppressClick: () => boolean;
 };
 
@@ -77,22 +83,42 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
   const startRef = useRef<{ x: number; y: number } | null>(null);
   const releaseStyleRef = useRef<(() => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  // Tracks pointerup→click suppression. true for one render cycle after the
-  // pointerup that ended an active drag; cleared on the next animation frame.
+  // pointerIdRef pins the drag to the originating pointer. document-level
+  // listeners are global, so without this a second finger / mouse moving on
+  // the page could drive insertIdx updates or fire pointerup against the
+  // active drag (AGENTS.md H-2 multi-touch defense).
+  const pointerIdRef = useRef<number | null>(null);
+  // Tracks pointerup→click suppression. true for one render cycle after a
+  // drag in the active state ends (commit/cancel); cleared on the next
+  // animation frame.
   const justFinishedDragRef = useRef(false);
   // onReorder is captured via ref so the document listeners (re-attached only
   // when drag start/stops) don't have to redo work for callback identity churn.
   const onReorderRef = useRef(onReorder);
   onReorderRef.current = onReorder;
 
+  // armSuppressClick: latch + auto-clear for the single trailing click after
+  // an active drag ends. Centralised so commit / pointercancel / Escape paths
+  // share one implementation.
+  const armSuppressClick = useCallback(() => {
+    justFinishedDragRef.current = true;
+    requestAnimationFrame(() => {
+      justFinishedDragRef.current = false;
+    });
+  }, []);
+
   const startDrag = useCallback(
-    (srcIdx: number, ev: { clientX: number; clientY: number }) => {
+    (
+      srcIdx: number,
+      ev: { clientX: number; clientY: number; pointerId: number },
+    ) => {
       // Reject if reorder is meaningless (single viewer).
       if (count < 2) return;
       // H-2: guard against a stray second pointerdown while a drag is in
       // progress. The first drag's release() would otherwise be replaced
       // here and orphan body styles.
       if (stateRef.current) return;
+      pointerIdRef.current = ev.pointerId;
       startRef.current = { x: ev.clientX, y: ev.clientY };
       releaseStyleRef.current?.();
       releaseStyleRef.current = pushBodyStyle({
@@ -110,7 +136,14 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
 
   useEffect(() => {
     if (!state) return;
+    // isOurPointer rejects events from any pointer other than the one that
+    // started this drag. document listeners are global, so without this a
+    // second concurrent pointer would drive insertIdx / fire pointerup
+    // against the active drag (AGENTS.md H-2 multi-touch defense).
+    const isOurPointer = (e: PointerEvent) =>
+      pointerIdRef.current === null || e.pointerId === pointerIdRef.current;
     const onMove = (e: PointerEvent) => {
+      if (!isOurPointer(e)) return;
       const cur = stateRef.current;
       if (!cur) return;
       const start = startRef.current;
@@ -140,7 +173,8 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
         active: true,
       });
     };
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
+      if (!isOurPointer(e)) return;
       const cur = stateRef.current;
       endDrag();
       if (!cur) return;
@@ -148,12 +182,10 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
         // armed-only pointerup is a normal click — leave it to the wrapper.
         return;
       }
-      justFinishedDragRef.current = true;
-      // Clear suppression on the next frame. requestAnimationFrame is enough
-      // because the synthetic click fires within the same task as pointerup.
-      requestAnimationFrame(() => {
-        justFinishedDragRef.current = false;
-      });
+      // Active end always suppresses the trailing click, whether it commits
+      // a reorder or no-ops on the same slot — both feel like "drop" to the
+      // user and should not re-activate the source tab.
+      armSuppressClick();
       const from = cur.srcIdx;
       const to = cur.insertIdx;
       if (to === from || to === from + 1) {
@@ -163,10 +195,15 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
       logger.info("viewer-tab-dnd", "commit", { from, to });
       onReorderRef.current(from, to);
     };
-    const onCancel = () => {
+    const onCancel = (e: PointerEvent) => {
+      if (!isOurPointer(e)) return;
       const cur = stateRef.current;
       if (cur?.active) {
         logger.info("viewer-tab-dnd", "cancel", { reason: "pointercancel" });
+        // Same trailing-click suppression as commit. pointercancel rarely
+        // produces a synthetic click, but if it does we want the source tab
+        // not to re-activate (UX symmetry with the Escape path).
+        armSuppressClick();
       }
       endDrag();
     };
@@ -176,6 +213,7 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
         const cur = stateRef.current;
         if (cur?.active) {
           logger.info("viewer-tab-dnd", "cancel", { reason: "escape" });
+          armSuppressClick();
         }
         endDrag();
       }
@@ -193,12 +231,13 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
       releaseStyleRef.current?.();
       releaseStyleRef.current = null;
     };
-    // Re-attach only when drag start/stops, not on ghostX churn.
+    // Re-attach only when drag start/stops.
   }, [Boolean(state)]);
 
   function endDrag() {
     setState(null);
     startRef.current = null;
+    pointerIdRef.current = null;
     releaseStyleRef.current?.();
     releaseStyleRef.current = null;
   }
