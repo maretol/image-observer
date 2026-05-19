@@ -457,6 +457,12 @@ function AppInner({ initialState }: AppInnerProps) {
                 viewer={v}
                 isActive={topTab === "viewer" && v.id === viewer.activeViewerId}
                 isEditing={editingViewerId === v.id}
+                // anyRenaming gates drag-start on *any* tab while a rename
+                // session is open. Without it a pointerdown on a sibling tab
+                // would start a drag (its own isEditing is false) while the
+                // rename input keeps focus thanks to our preventDefault(),
+                // letting the user reorder behind a still-open editor.
+                anyRenaming={editingViewerId !== null}
                 isDragSource={dragSrcIdx === i}
                 canClose={viewer.viewers.length > 1}
                 onActivate={() => onSelectViewer(v.id)}
@@ -561,6 +567,10 @@ type ViewerTabProps = {
   viewer: Viewer;
   isActive: boolean;
   isEditing: boolean;
+  // anyRenaming = true while *any* viewer tab has an open rename input.
+  // We block drag-start on every tab in that state so a sibling drag can't
+  // proceed while the rename editor is still focused (#50).
+  anyRenaming: boolean;
   // isDragSource = true while this tab is being dragged. Used to dim the
   // source (.dragging className) so the user can tell where they grabbed
   // from while the indicator shows the drop position.
@@ -580,6 +590,7 @@ function ViewerTab({
   viewer,
   isActive,
   isEditing,
+  anyRenaming,
   isDragSource,
   canClose,
   onActivate,
@@ -666,7 +677,15 @@ function ViewerTab({
         // Drag-start guards (spec §5.2). Anything that should fall through to
         // the existing click / dblclick / close paths is rejected here.
         if (e.button !== 0) return; // primary button only
-        if (isEditing) return; // rename input keeps focus
+        // isEditing here is technically subsumed by anyRenaming (own rename
+        // implies any-rename) but kept for symmetry with the early-return
+        // pair below: own-rename uses the alternate render path, sibling-
+        // rename keeps this render path.
+        if (isEditing) return;
+        // Block drag while *any* tab is in rename mode. preventDefault on
+        // this pointerdown would otherwise keep the rename input focused
+        // and let the user reorder a sibling tab behind the open editor.
+        if (anyRenaming) return;
         if (isFromClose(e)) return; // close button has its own onClick
         // Suppress text selection on the wrapper span. The wrapper isn't
         // focusable, so this is purely about clearing the I-beam cursor +
