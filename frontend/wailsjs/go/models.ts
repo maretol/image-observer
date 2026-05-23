@@ -390,17 +390,19 @@ export namespace state {
 	    height: number;
 	    x: number;
 	    y: number;
-	
+	    maximized?: boolean;
+
 	    static createFrom(source: any = {}) {
 	        return new WindowState(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.width = source["width"];
 	        this.height = source["height"];
 	        this.x = source["x"];
 	        this.y = source["y"];
+	        this.maximized = source["maximized"];
 	    }
 	}
 	export class StateData {

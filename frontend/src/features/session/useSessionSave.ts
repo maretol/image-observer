@@ -18,7 +18,15 @@ export type ListPersist = {
 };
 
 export type SessionInput = {
-  window: { width: number; height: number; x: number; y: number };
+  // `maximized` rides alongside the restore geometry (see WindowState doc on
+  // the Go side / App.tsx polling effect for the freeze-while-maximized rule).
+  window: {
+    width: number;
+    height: number;
+    x: number;
+    y: number;
+    maximized: boolean;
+  };
   // Viewer set (#11). Each viewer holds an independent BSP layout; persistence
   // serializes the layouts together so re-launch restores both content and
   // active selection.

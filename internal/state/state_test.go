@@ -656,6 +656,75 @@ func TestDefaultData_V6Fields(t *testing.T) {
 	}
 }
 
+func TestSaveLoadState_MaximizedRoundTrip(t *testing.T) {
+	setStateFile(t)
+	in := DefaultData()
+	in.Window = WindowState{Width: 1280, Height: 720, X: 50, Y: 80, Maximized: true}
+	if err := Save(in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out := Load()
+	if !out.Window.Maximized {
+		t.Errorf("Maximized flag did not survive round-trip: %+v", out.Window)
+	}
+	if out.Window.Width != 1280 || out.Window.Height != 720 || out.Window.X != 50 || out.Window.Y != 80 {
+		t.Errorf("restore geometry not preserved alongside Maximized: %+v", out.Window)
+	}
+}
+
+func TestLoadState_LegacyV6_NoMaximizedField_DefaultsToFalse(t *testing.T) {
+	// v6 payloads written before issue #86 do not have the `maximized` field.
+	// JSON unmarshal must leave it at the zero value (false) so existing
+	// non-maximized sessions stay non-maximized.
+	p := setStateFile(t)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	payload := []byte(`{
+		"version": 6,
+		"window": {"width":1024,"height":768,"x":-1,"y":-1},
+		"viewers": [
+			{"id":"v1","name":"V","layout":{"root":{"kind":"leaf","id":"L1","tabs":[],"activeIndex":-1},"activeId":"L1"}}
+		],
+		"activeViewerId": "v1",
+		"topTab": "list",
+		"list": {"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}
+	}`)
+	if err := os.WriteFile(p, payload, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.Window.Maximized {
+		t.Errorf("legacy v6 payload without `maximized` field should load as Maximized=false, got %+v", s.Window)
+	}
+}
+
+func TestLoadState_V5MigrationLeavesMaximizedFalse(t *testing.T) {
+	// v5 had no maximized concept; migrated payloads must come through with
+	// Maximized=false (the previous geometry is preserved verbatim).
+	p := setStateFile(t)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	v5 := []byte(`{
+		"version": 5,
+		"window": {"width":1600,"height":900,"x":42,"y":42},
+		"layout": {"root":{"kind":"leaf","id":"L","tabs":[],"activeIndex":-1},"activeId":"L"},
+		"topTab": "list",
+		"list": {"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}
+	}`)
+	if err := os.WriteFile(p, v5, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.Window.Maximized {
+		t.Errorf("v5 migration should yield Maximized=false, got %+v", s.Window)
+	}
+	if s.Window.Width != 1600 {
+		t.Errorf("v5 window geometry not preserved: %+v", s.Window)
+	}
+}
+
 func TestSaveLoadState_CollapsedGroupsRoundTrip(t *testing.T) {
 	setStateFile(t)
 	in := DefaultData()
