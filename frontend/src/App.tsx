@@ -175,6 +175,20 @@ function AppInner({ initialState }: AppInnerProps) {
         const sz = await WindowGetSize();
         const pos = await WindowGetPosition();
         if (cancelled) return;
+        // Re-check maximized: between the first WindowIsMaximised() and now
+        // the user could have maximized the window, in which case sz/pos
+        // reflect the *maximized* geometry. Committing it under maximized:
+        // false would clobber the restore geometry we are deliberately
+        // freezing (issue #86). Drop the snapshot and let the next poll
+        // pick up the maximized flag through the early-return branch above.
+        const maximizedAfter = await WindowIsMaximised();
+        if (cancelled) return;
+        if (maximizedAfter) {
+          setWindowState((cur) =>
+            cur.maximized ? cur : { ...cur, maximized: true },
+          );
+          return;
+        }
         setWindowState((cur) => {
           if (
             !cur.maximized &&
