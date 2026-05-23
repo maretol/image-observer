@@ -128,5 +128,6 @@ export function useGlobalKeybindings({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setTopTab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 }
