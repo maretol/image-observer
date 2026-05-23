@@ -95,6 +95,14 @@ func main() {
 			if persisted.Window.X >= 0 && persisted.Window.Y >= 0 {
 				runtime.WindowSetPosition(ctx, persisted.Window.X, persisted.Window.Y)
 			}
+			// Restore maximized state last so the unmaximize button falls back
+			// to the persisted Width/Height/X/Y geometry (issue #86). The
+			// frontend's polling freezes those four fields while
+			// WindowIsMaximised is true, so they stay representative of the
+			// most recent non-maximized session.
+			if persisted.Window.Maximized {
+				runtime.WindowMaximise(ctx)
+			}
 		},
 		OnShutdown: func(ctx context.Context) {
 			app.shutdown(ctx)

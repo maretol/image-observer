@@ -69,11 +69,20 @@ type ListFilterState struct {
 	Query      string   `json:"query"`
 }
 
+// WindowState holds the persisted window geometry.
+//
+// Width / Height / X / Y are the *non-maximized* (restore) geometry. Maximized
+// is a separate bool so the user can close the app while maximized and have it
+// reopen maximized while still retaining the size to fall back to when they
+// hit the restore button. The polling in App.tsx intentionally freezes
+// width/height/x/y when WindowIsMaximised is true so we don't accidentally
+// overwrite the restore geometry with the maximized size.
 type WindowState struct {
-	Width  int `json:"width"`
-	Height int `json:"height"`
-	X      int `json:"x"`
-	Y      int `json:"y"`
+	Width     int  `json:"width"`
+	Height    int  `json:"height"`
+	X         int  `json:"x"`
+	Y         int  `json:"y"`
+	Maximized bool `json:"maximized,omitempty"`
 }
 
 // LayoutState is the persisted form of one viewer's BSP layout tree. ActiveID
