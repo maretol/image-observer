@@ -61,11 +61,14 @@ export function ViewerTab({
   // <button>) と同じく「選択中のタブにフォーカスが乗る」状態に揃えるため、
   // wrapper onClick から内側 name button を focus する用の ref。
   const nameButtonRef = useRef<HTMLButtonElement>(null);
-  // Esc cancellation suppresses the blur-commit that would otherwise fire
-  // when isEditing flips false → the input unmounts while focused → React
-  // dispatches blur synchronously on the unmounting node, calling
-  // onCommitRename with the (unwanted) draft value. The flag is set in the
-  // Esc keydown handler before we trigger the unmount path.
+  // Esc cancellation and Enter commit both suppress the blur-commit that
+  // would otherwise fire when isEditing flips false → the input unmounts
+  // while focused → React dispatches blur synchronously on the unmounting
+  // node, calling onCommitRename with the (now-redundant) draft value. The
+  // flag is set in the respective keydown branch before we trigger the
+  // unmount path. (Enter without the suppress works today because the
+  // duplicate call hits useViewerSet.renameViewerCb's silent no-op, but the
+  // symmetry with Esc keeps it robust to downstream changes.)
   const suppressBlurRef = useRef(false);
 
   // On entering edit mode, focus + select the input. Run on transitions only
@@ -89,7 +92,8 @@ export function ViewerTab({
           maxLength={32}
           onBlur={(e) => {
             if (suppressBlurRef.current) {
-              // Esc-triggered teardown — keep the original name.
+              // Esc cancel or Enter commit already handled this edit
+              // session — swallow the unmount-blur so we don't double up.
               suppressBlurRef.current = false;
               return;
             }
@@ -98,6 +102,7 @@ export function ViewerTab({
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
+              suppressBlurRef.current = true;
               onCommitRename((e.target as HTMLInputElement).value);
             } else if (e.key === "Escape") {
               e.preventDefault();
