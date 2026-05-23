@@ -7,11 +7,6 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  WindowGetSize,
-  WindowGetPosition,
-  WindowIsMaximised,
-} from "../wailsjs/runtime/runtime";
 import { ClassificationView } from "./features/classification/ClassificationView";
 import { setKnownTagColors } from "./features/classification/colors";
 import { useClassification } from "./features/classification/useClassification";
@@ -36,6 +31,7 @@ import {
 } from "./features/viewer-grid/useViewerTabReorder";
 import { useSessionLoad } from "./features/session/useSessionLoad";
 import { useSessionSave } from "./features/session/useSessionSave";
+import { useWindowGeometryPolling } from "./features/session/useWindowGeometryPolling";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { useSettings } from "./features/settings/useSettings";
 import { useConfirm } from "./shared/components/ConfirmDialog";
@@ -130,103 +126,7 @@ function AppInner({ initialState }: AppInnerProps) {
   // Intentionally not persisted to settings/state.json.
   const listScrollTopRef = useRef(0);
 
-  // Window dimensions/position/maximized polling. Wails exposes no
-  // window-move or window-maximize event, so a 2s interval + resize listener
-  // is the best we have. The width/height/x/y fields track the *non-maximized*
-  // (restore) geometry — while WindowIsMaximised is true we deliberately do
-  // not overwrite them, so closing while maximized still leaves a sensible
-  // restore size for the next launch (issue #86).
-  const [windowState, setWindowState] = useState({
-    width: initialState?.window?.width ?? 1024,
-    height: initialState?.window?.height ?? 768,
-    x: initialState?.window?.x ?? -1,
-    y: initialState?.window?.y ?? -1,
-    maximized: initialState?.window?.maximized ?? false,
-  });
-  useEffect(() => {
-    let cancelled = false;
-    const POLL_INTERVAL_MS = 2000;
-    // Freeze geometry; only the maximized flag is allowed to flip. Shared by
-    // both the initial WindowIsMaximised() branch and the post-await re-check
-    // branch so future tweaks land in one place.
-    const markMaximized = () =>
-      setWindowState((cur) =>
-        cur.maximized ? cur : { ...cur, maximized: true },
-      );
-    const update = async () => {
-      try {
-        const maximized = await WindowIsMaximised();
-        if (cancelled) return;
-        if (maximized) {
-          markMaximized();
-          return;
-        }
-        const [sz, pos] = await Promise.all([
-          WindowGetSize(),
-          WindowGetPosition(),
-        ]);
-        if (cancelled) return;
-        // Re-check maximized: between the first WindowIsMaximised() and now
-        // the user could have maximized the window, in which case sz/pos
-        // reflect the *maximized* geometry. Committing it under maximized:
-        // false would clobber the restore geometry we are deliberately
-        // freezing (issue #86). Drop the snapshot and let the next poll
-        // pick up the maximized flag through the early-return branch above.
-        // The recheck must come *after* the Promise.all — folding it into
-        // the same Promise.all would let WindowIsMaximised resolve before
-        // WindowGetSize observed the maximized state, missing the race.
-        const maximizedAfter = await WindowIsMaximised();
-        if (cancelled) return;
-        if (maximizedAfter) {
-          markMaximized();
-          return;
-        }
-        setWindowState((cur) => {
-          if (
-            !cur.maximized &&
-            cur.width === sz.w &&
-            cur.height === sz.h &&
-            cur.x === pos.x &&
-            cur.y === pos.y
-          ) {
-            return cur;
-          }
-          const next = {
-            width: sz.w,
-            height: sz.h,
-            x: pos.x,
-            y: pos.y,
-            maximized: false,
-          };
-          const geometryChanged =
-            cur.width !== sz.w ||
-            cur.height !== sz.h ||
-            cur.x !== pos.x ||
-            cur.y !== pos.y;
-          logger.debug(
-            "session",
-            geometryChanged ? "window pos/size changed" : "window maximized cleared",
-            next,
-          );
-          return next;
-        });
-      } catch {
-        // ignore — Wails runtime may not be ready briefly during startup
-      }
-    };
-    const onResize = () => update();
-    window.addEventListener("resize", onResize);
-    const interval = window.setInterval(update, POLL_INTERVAL_MS);
-    logger.debug("session", "window pos/size polling started", {
-      intervalMs: POLL_INTERVAL_MS,
-    });
-    update();
-    return () => {
-      cancelled = true;
-      window.removeEventListener("resize", onResize);
-      window.clearInterval(interval);
-    };
-  }, []);
+  const windowState = useWindowGeometryPolling({ initial: initialState?.window });
 
   useSessionSave({
     window: windowState,
