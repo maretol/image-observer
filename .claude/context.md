@@ -106,10 +106,13 @@ image-observer/
 │   ├── wailsjs/                             # Wails 自動生成型
 │   └── src/
 │       ├── App.tsx / App.css / main.tsx     # オーケストレーション層
+│       ├── TopTabsBar.tsx                   # 上部タブ列 (一覧 + viewer × N + 追加 + 設定)
+│       ├── useGlobalKeybindings.ts          # Ctrl+W / Ctrl+Tab / Ctrl+0/1/± / Ctrl+Shift+1..9
+│       ├── topTab.ts                        # TopTab 型 ("list" | "viewer") 共有
 │       ├── features/
 │       │   ├── classification/              # 一覧タブ (UI + filters / colors / groups / cardCtxMenu / watcher 純関数)
-│       │   ├── viewer-grid/                 # ビューア (BSP + DnD + layout/ 純関数群 + viewers ViewerSet)
-│       │   ├── session/                     # state save/load グルー
+│       │   ├── viewer-grid/                 # ビューア (BSP + DnD + layout/ 純関数群 + viewers ViewerSet + ViewerTab + useViewerRename + useListToViewerHandlers)
+│       │   ├── session/                     # state save/load グルー + useWindowGeometryPolling
 │       │   └── settings/                    # 設定 UI + useSettings + watchMode 定数
 │       └── shared/
 │           ├── components/                  # ModalShell / ConfirmDialog / ConflictDialog / MergePromptDialog / Toast
@@ -164,9 +167,9 @@ image-observer/
 ## 12. フロント feature 境界
 
 - **`features/classification/`** ↔ `internal/classification`: 一覧 (分類) タブの UI 一式 + フィルタ / 配色 / グルーピング / コンテキストメニュー / watcher の純関数。`useGridThumbnail` で IntersectionObserver + module-scoped Map キャッシュ。`filters.ts` / `colors.ts` / `groups.ts` / `cardContextMenuLogic.ts` / `watcherPolicy.ts` / `thumbnailCache.ts` は vitest 対象
-- **`features/viewer-grid/`** ↔ `internal/imgread`: ビューア (BSP ツリー / DnD / 画像表示)。`layout/` (`types` / `tree` / `validation` / `serialization` / `active` / `operations` の機能別モジュール群、表面 import は `./layout` バレル経由) は vitest 対象。`useDnD.ts` は pointer events 自前 + `elementFromPoint`。`viewers.ts` は複数ビューア対応の純関数群、`useViewerSet.ts` が hook 統合
-- **`features/session/`** ↔ `internal/state`: 保存 / 復元グルー (`useSessionLoad` / `useSessionSave`)。`useSessionSave` のみ `viewer-grid/layout` の型を import するクロス feature 依存を持つ (永続化は各 feature 状態を集約するため許容)
+- **`features/viewer-grid/`** ↔ `internal/imgread`: ビューア (BSP ツリー / DnD / 画像表示)。`layout/` (`types` / `tree` / `validation` / `serialization` / `active` / `operations` の機能別モジュール群、表面 import は `./layout` バレル経由) は vitest 対象。`useDnD.ts` は pointer events 自前 + `elementFromPoint`。`viewers.ts` は複数ビューア対応の純関数群 (`hydrateInitialViewerSet` / `countLeafTabs` 含む)、`useViewerSet.ts` が hook 統合。`ViewerTab.tsx` (top-tab UI per viewer) / `useViewerRename.ts` (inline rename state) / `useListToViewerHandlers.ts` (list→viewer wiring)
+- **`features/session/`** ↔ `internal/state`: 保存 / 復元グルー (`useSessionLoad` / `useSessionSave`) + `useWindowGeometryPolling` (window geometry / maximized polling, #86)。`useSessionSave` のみ `viewer-grid/layout` の型を import するクロス feature 依存を持つ (永続化は各 feature 状態を集約するため許容)
 - **`features/settings/`** ↔ `internal/settings`: `useSettings` フック + `SettingsDialog` + セクション群 + `watchMode.ts` 定数 (Go 側との D-1 同値テストで pin)
 - **`shared/components/` / `icons/` / `utils/`**: 機能横断 UI 部品 / アイコン / ユーティリティ。どの feature からも import 可。逆に shared から features を import しない
-- **`App.tsx`**: 唯一の複数 feature オーケストレーション層 (TopTabs + ToastProvider + useConfirm + useSessionLoad/Save + zoomCommandBus 接続 + UI scale 適用 + グローバルキーバインド)
+- **`App.tsx`**: 唯一の複数 feature オーケストレーション層。永続状態の hydration + 子フック (`useWindowGeometryPolling` / `useGlobalKeybindings` / `useViewerRename` / `useListToViewerHandlers` / `useViewerTabReorder` / `useSessionSave`) 組み立て + 子コンポーネント (`TopTabsBar` / `ClassificationView` / `ViewerGrid` / `SettingsDialog`) への配線 + ToastProvider / useConfirm 境界。`TopTabsBar.tsx` (上部タブ列) と `useGlobalKeybindings.ts` (Ctrl+Shift+1 が list、Ctrl+Shift+2..9 が viewer のため feature を跨ぐ) は App-level として `src/` 直下に同居。`TopTab` 型 (`"list" | "viewer"`) は `src/topTab.ts` に独立
 - **フロントテスト**: `frontend/` で `npm run test` (vitest)。純関数ユニットテスト中心

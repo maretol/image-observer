@@ -1,17 +1,4 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import {
-  WindowGetSize,
-  WindowGetPosition,
-  WindowIsMaximised,
-} from "../wailsjs/runtime/runtime";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ClassificationView } from "./features/classification/ClassificationView";
 import { setKnownTagColors } from "./features/classification/colors";
 import { useClassification } from "./features/classification/useClassification";
@@ -22,41 +9,43 @@ import {
   MAX_VIEWERS,
   useViewerSet,
 } from "./features/viewer-grid/useViewerSet";
-import { findLeaf, layoutFromPersisted } from "./features/viewer-grid/layout";
 import {
-  initialViewerSet,
-  sanitizeName,
-  type Viewer,
+  countLeafTabs,
+  hydrateInitialViewerSet,
   type ViewerSet,
 } from "./features/viewer-grid/viewers";
-import {
-  DATA_VIEWER_TAB,
-  useViewerTabReorder,
-} from "./features/viewer-grid/useViewerTabReorder";
+import { useViewerRename } from "./features/viewer-grid/useViewerRename";
+import { useListToViewerHandlers } from "./features/viewer-grid/useListToViewerHandlers";
+import { useViewerTabReorder } from "./features/viewer-grid/useViewerTabReorder";
 import { useSessionLoad } from "./features/session/useSessionLoad";
 import { useSessionSave } from "./features/session/useSessionSave";
+import { useWindowGeometryPolling } from "./features/session/useWindowGeometryPolling";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { useSettings } from "./features/settings/useSettings";
 import { useConfirm } from "./shared/components/ConfirmDialog";
 import { ToastProvider } from "./shared/components/Toast";
-import { CloseIcon } from "./shared/icons/CloseIcon";
-import { PlusIcon } from "./shared/icons/PlusIcon";
-import { SettingsIcon } from "./shared/icons/SettingsIcon";
 import { installGlobalErrorHandlers, logger } from "./shared/utils/logger";
-import {
-  isEditableTarget,
-  isPrimaryModifier,
-  zoomCommandBus,
-} from "./shared/utils/keybindings";
+import { TopTabsBar } from "./TopTabsBar";
+import { useGlobalKeybindings } from "./useGlobalKeybindings";
+import type { TopTab } from "./topTab";
 import { GetLogPath } from "../wailsjs/go/main/App";
-import { state } from "../wailsjs/go/models";
+import type { state } from "../wailsjs/go/models";
 import "./App.css";
+
+// App.tsx — top-level orchestrator. Hydrates persisted state, owns the cross-
+// feature state hubs (topTab / viewer / classification / settings / confirm /
+// window geometry), wires them into the child hooks (useGlobalKeybindings /
+// useWindowGeometryPolling / useViewerRename / useListToViewerHandlers /
+// useViewerTabReorder / useSessionSave) and the child UI (TopTabsBar /
+// ClassificationView / ViewerGrid / SettingsDialog).
+//
+// Inline side-effect hooks kept here (settings → tag colors / thumbnail
+// params / --ui-scale, GetLogPath fetch) are <= 5 lines each — abstracting
+// them into a hook would cost more in indirection than it would save.
 
 // Hook into uncaught errors and rejections once, before React mounts.
 installGlobalErrorHandlers();
 logger.info("app", "frontend mount");
-
-type TopTab = "list" | "viewer";
 
 function App() {
   const { loaded, initialState } = useSessionLoad();
@@ -73,26 +62,10 @@ type AppInnerProps = {
 };
 
 function AppInner({ initialState }: AppInnerProps) {
-  // Hydrate the initial ViewerSet from the persisted state. Empty / missing
-  // viewers fall back to a fresh single-viewer set (validateState on the Go
-  // side already enforces this, but we guard the hydration too in case of
-  // first-launch before any save).
-  const initialSet = useMemo<ViewerSet>(() => {
-    if (!initialState?.viewers || initialState.viewers.length === 0) {
-      return initialViewerSet();
-    }
-    const viewers: Viewer[] = initialState.viewers.map((v) => ({
-      id: v.id,
-      name: v.name,
-      layout: layoutFromPersisted(v.layout),
-    }));
-    const activeViewerId =
-      initialState.activeViewerId &&
-      viewers.some((v) => v.id === initialState.activeViewerId)
-        ? initialState.activeViewerId
-        : viewers[0].id;
-    return { viewers, activeViewerId };
-  }, [initialState]);
+  const initialSet = useMemo<ViewerSet>(
+    () => hydrateInitialViewerSet(initialState),
+    [initialState],
+  );
 
   const initTopTab: TopTab =
     initialState?.topTab === "viewer" ? "viewer" : "list";
@@ -145,103 +118,7 @@ function AppInner({ initialState }: AppInnerProps) {
   // Intentionally not persisted to settings/state.json.
   const listScrollTopRef = useRef(0);
 
-  // Window dimensions/position/maximized polling. Wails exposes no
-  // window-move or window-maximize event, so a 2s interval + resize listener
-  // is the best we have. The width/height/x/y fields track the *non-maximized*
-  // (restore) geometry — while WindowIsMaximised is true we deliberately do
-  // not overwrite them, so closing while maximized still leaves a sensible
-  // restore size for the next launch (issue #86).
-  const [windowState, setWindowState] = useState({
-    width: initialState?.window?.width ?? 1024,
-    height: initialState?.window?.height ?? 768,
-    x: initialState?.window?.x ?? -1,
-    y: initialState?.window?.y ?? -1,
-    maximized: initialState?.window?.maximized ?? false,
-  });
-  useEffect(() => {
-    let cancelled = false;
-    const POLL_INTERVAL_MS = 2000;
-    // Freeze geometry; only the maximized flag is allowed to flip. Shared by
-    // both the initial WindowIsMaximised() branch and the post-await re-check
-    // branch so future tweaks land in one place.
-    const markMaximized = () =>
-      setWindowState((cur) =>
-        cur.maximized ? cur : { ...cur, maximized: true },
-      );
-    const update = async () => {
-      try {
-        const maximized = await WindowIsMaximised();
-        if (cancelled) return;
-        if (maximized) {
-          markMaximized();
-          return;
-        }
-        const [sz, pos] = await Promise.all([
-          WindowGetSize(),
-          WindowGetPosition(),
-        ]);
-        if (cancelled) return;
-        // Re-check maximized: between the first WindowIsMaximised() and now
-        // the user could have maximized the window, in which case sz/pos
-        // reflect the *maximized* geometry. Committing it under maximized:
-        // false would clobber the restore geometry we are deliberately
-        // freezing (issue #86). Drop the snapshot and let the next poll
-        // pick up the maximized flag through the early-return branch above.
-        // The recheck must come *after* the Promise.all — folding it into
-        // the same Promise.all would let WindowIsMaximised resolve before
-        // WindowGetSize observed the maximized state, missing the race.
-        const maximizedAfter = await WindowIsMaximised();
-        if (cancelled) return;
-        if (maximizedAfter) {
-          markMaximized();
-          return;
-        }
-        setWindowState((cur) => {
-          if (
-            !cur.maximized &&
-            cur.width === sz.w &&
-            cur.height === sz.h &&
-            cur.x === pos.x &&
-            cur.y === pos.y
-          ) {
-            return cur;
-          }
-          const next = {
-            width: sz.w,
-            height: sz.h,
-            x: pos.x,
-            y: pos.y,
-            maximized: false,
-          };
-          const geometryChanged =
-            cur.width !== sz.w ||
-            cur.height !== sz.h ||
-            cur.x !== pos.x ||
-            cur.y !== pos.y;
-          logger.debug(
-            "session",
-            geometryChanged ? "window pos/size changed" : "window maximized cleared",
-            next,
-          );
-          return next;
-        });
-      } catch {
-        // ignore — Wails runtime may not be ready briefly during startup
-      }
-    };
-    const onResize = () => update();
-    window.addEventListener("resize", onResize);
-    const interval = window.setInterval(update, POLL_INTERVAL_MS);
-    logger.debug("session", "window pos/size polling started", {
-      intervalMs: POLL_INTERVAL_MS,
-    });
-    update();
-    return () => {
-      cancelled = true;
-      window.removeEventListener("resize", onResize);
-      window.clearInterval(interval);
-    };
-  }, []);
+  const windowState = useWindowGeometryPolling({ initial: initialState?.window });
 
   useSessionSave({
     window: windowState,
@@ -251,98 +128,7 @@ function AppInner({ initialState }: AppInnerProps) {
     list: classification.persistableState,
   });
 
-  // Global keybindings (Phase H4 + #7 + #11). We register the window listener
-  // exactly once and read live state through refs; otherwise the listener
-  // would tear down + re-add on every layout change, risking a dropped key.
-  const topTabRef = useRef(topTab);
-  const settingsOpenRef = useRef(settingsOpen);
-  const viewerRef = useRef(viewer);
-  topTabRef.current = topTab;
-  settingsOpenRef.current = settingsOpen;
-  viewerRef.current = viewer;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target)) return;
-      if (settingsOpenRef.current) return; // dialog has its own Esc handler
-
-      // Global top-tab switching (#7 + #11). Ctrl+Shift+1 → list, Ctrl+Shift+2..9
-      // → N-1th viewer (so Ctrl+Shift+2 still means "first viewer", preserving
-      // the old single-viewer keybinding's meaning). e.code is layout-
-      // independent; e.key would be the shifted character on most layouts.
-      if (isPrimaryModifier(e) && e.shiftKey) {
-        if (e.code === "Digit1") {
-          e.preventDefault();
-          setTopTab("list");
-          return;
-        }
-        const digitMatch = /^Digit([2-9])$/.exec(e.code);
-        if (digitMatch) {
-          const idx = Number(digitMatch[1]) - 2; // Digit2 → viewer index 0
-          const viewerLive = viewerRef.current;
-          if (idx >= 0 && idx < viewerLive.viewers.length) {
-            e.preventDefault();
-            viewerLive.setActiveViewer(viewerLive.viewers[idx].id);
-            setTopTab("viewer");
-          }
-          return;
-        }
-      }
-
-      if (topTabRef.current !== "viewer") return;
-
-      const viewerLive = viewerRef.current;
-      const layout = viewerLive.layout;
-      const activeLeaf = findLeaf(layout.root, layout.activeId);
-      if (!activeLeaf) return;
-
-      if (!isPrimaryModifier(e)) return;
-
-      // Ctrl+W: close active tab
-      if ((e.key === "w" || e.key === "W") && !e.shiftKey) {
-        e.preventDefault();
-        if (activeLeaf.activeIndex >= 0) {
-          viewerLive.closeTab(activeLeaf.id, activeLeaf.activeIndex);
-        }
-        return;
-      }
-      // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs in active panel
-      if (e.key === "Tab") {
-        e.preventDefault();
-        const n = activeLeaf.tabs.length;
-        if (n <= 1) return;
-        const dir = e.shiftKey ? -1 : 1;
-        const next = (((activeLeaf.activeIndex + dir) % n) + n) % n;
-        viewerLive.setActiveTab(activeLeaf.id, next);
-        return;
-      }
-      // Ctrl+0: fit to viewport
-      if (e.key === "0") {
-        e.preventDefault();
-        zoomCommandBus.emit("fit");
-        return;
-      }
-      // Ctrl+1: actual size (100%)
-      if (e.key === "1") {
-        e.preventDefault();
-        zoomCommandBus.emit("actualSize");
-        return;
-      }
-      // Ctrl+= / Ctrl++ : zoom in (also accept "+" shifted)
-      if (e.key === "=" || e.key === "+") {
-        e.preventDefault();
-        zoomCommandBus.emit("in");
-        return;
-      }
-      // Ctrl+- : zoom out
-      if (e.key === "-") {
-        e.preventDefault();
-        zoomCommandBus.emit("out");
-        return;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  useGlobalKeybindings({ topTab, setTopTab, viewer, settingsOpen });
 
   const onSelectList = useCallback(() => setTopTab("list"), []);
   const onSelectViewer = useCallback(
@@ -369,8 +155,6 @@ function AppInner({ initialState }: AppInnerProps) {
     [viewerSig],
   );
 
-  // ─── viewer add/close/rename ───────────────────────────────────────
-
   const onAddViewer = useCallback(() => {
     viewer.addViewer();
     setTopTab("viewer");
@@ -396,68 +180,15 @@ function AppInner({ initialState }: AppInnerProps) {
     [confirm, viewer],
   );
 
-  // ─── inline rename state (top-tab) ─────────────────────────────────
+  const { editingViewerId, startRename, stopRename, commitRename } =
+    useViewerRename({ renameViewer: viewer.renameViewer });
 
-  const [editingViewerId, setEditingViewerId] = useState<string | null>(null);
-  const startRename = useCallback((viewerId: string) => {
-    setEditingViewerId(viewerId);
-  }, []);
-  const stopRename = useCallback(() => {
-    setEditingViewerId(null);
-  }, []);
-  const commitRename = useCallback(
-    (viewerId: string, name: string) => {
-      const sanitized = sanitizeName(name);
-      if (sanitized === null) {
-        // Empty/whitespace → keep editing so the user can correct. Hook will
-        // surface the toast.
-        viewer.renameViewer(viewerId, name);
-        return;
-      }
-      viewer.renameViewer(viewerId, sanitized);
-      setEditingViewerId(null);
-    },
-    [viewer],
-  );
-
-  // ─── list → viewer wiring (single + bulk) ──────────────────────────
-
-  // openInViewer: from SampleModal's viewer-picker. We switch top-tab and
-  // active viewer to the chosen one before delegating the actual open.
-  const onOpenInViewer = useCallback(
-    (viewerId: string, filename: string) => {
-      const folder = classification.folderPath;
-      if (!folder) return;
-      void viewer.openInViewer(viewerId, `${folder}/${filename}`);
-      viewer.setActiveViewer(viewerId);
-      setTopTab("viewer");
-    },
-    [classification.folderPath, viewer],
-  );
-
-  const onOpenManyInTabs = useCallback(
-    (viewerId: string, filenames: string[]) => {
-      const folder = classification.folderPath;
-      if (!folder || filenames.length === 0) return;
-      const paths = filenames.map((f) => `${folder}/${f}`);
-      void viewer.openManyInViewer(viewerId, paths);
-      viewer.setActiveViewer(viewerId);
-      setTopTab("viewer");
-    },
-    [classification.folderPath, viewer],
-  );
-
-  const onOpenManyAsSplit = useCallback(
-    (viewerId: string, filenames: string[]) => {
-      const folder = classification.folderPath;
-      if (!folder || filenames.length === 0) return;
-      const paths = filenames.map((f) => `${folder}/${f}`);
-      void viewer.openManyAsSplitInViewer(viewerId, paths);
-      viewer.setActiveViewer(viewerId);
-      setTopTab("viewer");
-    },
-    [classification.folderPath, viewer],
-  );
+  const { onOpenInViewer, onOpenManyInTabs, onOpenManyAsSplit } =
+    useListToViewerHandlers({
+      folderPath: classification.folderPath,
+      viewer,
+      setTopTab,
+    });
 
   // UI scale (#10, #12, #39): expose the user's choice as a `--ui-scale` CSS
   // variable on <html>; App.css then applies `zoom: var(--ui-scale)` to
@@ -468,94 +199,33 @@ function AppInner({ initialState }: AppInnerProps) {
   }, [settings.data?.uiScalePercent]);
 
   // Top-tab viewer reorder DnD (#50, docs/spec-viewer-tab-reorder.md). The
-  // hook owns pointer state + body-style stack; we just feed it the count
-  // and a commit callback. `containerRef` is bound to .top-tabs-viewers so
-  // the hook can collect tab rects via DATA_VIEWER_TAB.
+  // hook owns pointer state + body-style stack; we hand it down to TopTabsBar
+  // which binds containerRef + reads `state` for the indicator / source-tab
+  // dimming. Calling the hook here (not inside TopTabsBar) keeps it tied to
+  // the viewer-set lifecycle so the count / onReorder closure stay live.
   const tabReorder = useViewerTabReorder({
     count: viewer.viewers.length,
     onReorder: viewer.reorderViewer,
   });
-  // Indicator and dragSource visibility key off the same state. Only show
-  // them once the drag has crossed the threshold (active) so a normal click
-  // doesn't briefly flash the indicator.
-  const dragActive = tabReorder.state?.active ?? false;
-  const dragSrcIdx = dragActive ? (tabReorder.state?.srcIdx ?? -1) : -1;
-  const dragInsertIdx = dragActive ? (tabReorder.state?.insertIdx ?? -1) : -1;
 
   return (
     <div className="app-toplevel">
-      <nav className="top-tabs" role="tablist" aria-label="トップレベルタブ">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={topTab === "list"}
-          className={`top-tab top-tab-list ${topTab === "list" ? "active" : ""}`}
-          onClick={onSelectList}
-        >
-          一覧
-        </button>
-        <div
-          className="top-tabs-viewers"
-          role="group"
-          aria-label="ビューア一覧"
-          ref={tabReorder.containerRef}
-        >
-          {viewer.viewers.map((v, i) => (
-            <Fragment key={v.id}>
-              {dragInsertIdx === i && (
-                <span className="viewer-tab-insert-indicator" aria-hidden="true" />
-              )}
-              <ViewerTab
-                index={i}
-                viewer={v}
-                isActive={topTab === "viewer" && v.id === viewer.activeViewerId}
-                isEditing={editingViewerId === v.id}
-                // anyRenaming gates drag-start on *any* tab while a rename
-                // session is open. Without it a pointerdown on a sibling tab
-                // would start a drag (its own isEditing is false) while the
-                // rename input keeps focus thanks to our preventDefault(),
-                // letting the user reorder behind a still-open editor.
-                anyRenaming={editingViewerId !== null}
-                isDragSource={dragSrcIdx === i}
-                canClose={viewer.viewers.length > 1}
-                onActivate={() => onSelectViewer(v.id)}
-                onStartRename={() => startRename(v.id)}
-                onCommitRename={(name) => commitRename(v.id, name)}
-                onCancelRename={stopRename}
-                onClose={() => void closeViewerWithConfirm(v.id)}
-                onStartDrag={tabReorder.startDrag}
-                shouldSuppressClick={tabReorder.shouldSuppressClick}
-              />
-            </Fragment>
-          ))}
-          {dragInsertIdx === viewer.viewers.length && (
-            <span className="viewer-tab-insert-indicator" aria-hidden="true" />
-          )}
-        </div>
-        <button
-          type="button"
-          className="top-tab-add"
-          onClick={onAddViewer}
-          disabled={viewer.viewers.length >= MAX_VIEWERS}
-          title={
-            viewer.viewers.length >= MAX_VIEWERS
-              ? `ビューア数の上限 (${MAX_VIEWERS}) に達しています`
-              : "新しいビューアを追加"
-          }
-          aria-label="ビューアを追加"
-        >
-          <PlusIcon />
-        </button>
-        <button
-          type="button"
-          className="top-tab-settings"
-          onClick={() => setSettingsOpen(true)}
-          title="設定"
-          aria-label="設定を開く"
-        >
-          <SettingsIcon />
-        </button>
-      </nav>
+      <TopTabsBar
+        topTab={topTab}
+        onSelectList={onSelectList}
+        viewers={viewer.viewers}
+        activeViewerId={viewer.activeViewerId}
+        editingViewerId={editingViewerId}
+        onSelectViewer={onSelectViewer}
+        onStartRename={startRename}
+        onCommitRename={commitRename}
+        onCancelRename={stopRename}
+        onCloseViewer={(viewerId) => void closeViewerWithConfirm(viewerId)}
+        reorder={tabReorder}
+        onAddViewer={onAddViewer}
+        onOpenSettings={() => setSettingsOpen(true)}
+        maxViewers={MAX_VIEWERS}
+      />
       <div className="top-tab-content">
         {topTab === "list" ? (
           <ClassificationView
@@ -610,210 +280,3 @@ function AppInner({ initialState }: AppInnerProps) {
 }
 
 export default App;
-
-// ─── ViewerTab (top-tab UI per viewer) ───────────────────────────────
-
-type ViewerTabProps = {
-  // index is the position of this tab in viewer.viewers — passed to the
-  // reorder hook so it can compute moveViewer's fromIdx (#50).
-  index: number;
-  viewer: Viewer;
-  isActive: boolean;
-  isEditing: boolean;
-  // anyRenaming = true while *any* viewer tab has an open rename input.
-  // We block drag-start on every tab in that state so a sibling drag can't
-  // proceed while the rename editor is still focused (#50).
-  anyRenaming: boolean;
-  // isDragSource = true while this tab is being dragged. Used to dim the
-  // source (.dragging className) so the user can tell where they grabbed
-  // from while the indicator shows the drop position.
-  isDragSource: boolean;
-  canClose: boolean;
-  onActivate: () => void;
-  onStartRename: () => void;
-  onCommitRename: (name: string) => void;
-  onCancelRename: () => void;
-  onClose: () => void;
-  onStartDrag: (
-    idx: number,
-    ev: { clientX: number; clientY: number; pointerId: number },
-  ) => void;
-  shouldSuppressClick: () => boolean;
-};
-
-function ViewerTab({
-  index,
-  viewer,
-  isActive,
-  isEditing,
-  anyRenaming,
-  isDragSource,
-  canClose,
-  onActivate,
-  onStartRename,
-  onCommitRename,
-  onCancelRename,
-  onClose,
-  onStartDrag,
-  shouldSuppressClick,
-}: ViewerTabProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  // #53: wrapper の padding 領域クリックでも focus を一覧タブ (タブ全体が
-  // <button>) と同じく「選択中のタブにフォーカスが乗る」状態に揃えるため、
-  // wrapper onClick から内側 name button を focus する用の ref。
-  const nameButtonRef = useRef<HTMLButtonElement>(null);
-  // Esc cancellation suppresses the blur-commit that would otherwise fire
-  // when isEditing flips false → the input unmounts while focused → React
-  // dispatches blur synchronously on the unmounting node, calling
-  // onCommitRename with the (unwanted) draft value. The flag is set in the
-  // Esc keydown handler before we trigger the unmount path.
-  const suppressBlurRef = useRef(false);
-
-  // On entering edit mode, focus + select the input. Run on transitions only
-  // (when isEditing flips true), which is what the dependency array gives us.
-  useEffect(() => {
-    if (isEditing) {
-      suppressBlurRef.current = false; // reset for the new edit session
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    }
-  }, [isEditing]);
-
-  if (isEditing) {
-    return (
-      <span className={`top-tab top-tab-viewer ${isActive ? "active" : ""}`}>
-        <input
-          ref={inputRef}
-          type="text"
-          className="top-tab-rename-input"
-          defaultValue={viewer.name}
-          maxLength={32}
-          onBlur={(e) => {
-            if (suppressBlurRef.current) {
-              // Esc-triggered teardown — keep the original name.
-              suppressBlurRef.current = false;
-              return;
-            }
-            onCommitRename(e.currentTarget.value);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              onCommitRename((e.target as HTMLInputElement).value);
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              suppressBlurRef.current = true;
-              onCancelRename();
-            }
-          }}
-          aria-label={`ビューア名を編集: ${viewer.name}`}
-        />
-      </span>
-    );
-  }
-
-  // #53: 一覧タブはタブ全体が <button> なのでタブ chrome のどこでも反応するが、
-  // ビューアタブは内側の name <button> だけがクリックターゲットなため、
-  // wrapper の padding (上下 4px / 左 22px / 右 10px) や close ボタン非表示時の
-  // 右側スペースをクリックしても無反応だった。wrapper 側で click / dblclick を
-  // 受け、close ボタン由来のイベントだけ除外することで一覧タブと当たり判定を揃える。
-  // close 内の CloseIcon は SVG 要素なので e.target は HTMLElement ではなく
-  // SVGElement になり得る。closest() は Element の API なので instanceof Element
-  // でガードしてから呼ぶ。
-  const isFromClose = (e: { target: EventTarget | null }) =>
-    e.target instanceof Element && e.target.closest(".top-tab-viewer-close") != null;
-
-  return (
-    <span
-      className={`top-tab top-tab-viewer ${isActive ? "active" : ""} ${
-        isDragSource ? "dragging" : ""
-      }`}
-      {...{ [DATA_VIEWER_TAB]: String(index) }}
-      onPointerDown={(e) => {
-        // Drag-start guards (spec §5.2). Anything that should fall through to
-        // the existing click / dblclick / close paths is rejected here.
-        if (e.button !== 0) return; // primary button only
-        // isEditing here is technically subsumed by anyRenaming (own rename
-        // implies any-rename) but kept for symmetry with the early-return
-        // pair below: own-rename uses the alternate render path, sibling-
-        // rename keeps this render path.
-        if (isEditing) return;
-        // Block drag while *any* tab is in rename mode. preventDefault on
-        // this pointerdown would otherwise keep the rename input focused
-        // and let the user reorder a sibling tab behind the open editor.
-        if (anyRenaming) return;
-        if (isFromClose(e)) return; // close button has its own onClick
-        // Suppress text selection on the wrapper span. The wrapper isn't
-        // focusable, so this is purely about clearing the I-beam cursor +
-        // user-select side effects when the drag turns active.
-        e.preventDefault();
-        onStartDrag(index, {
-          clientX: e.clientX,
-          clientY: e.clientY,
-          pointerId: e.pointerId,
-        });
-      }}
-      onClick={(e) => {
-        if (isFromClose(e)) return;
-        // Drag commit/cancel fires a synthetic click right after pointerup
-        // on most engines; suppress that one trailing click so the source
-        // tab doesn't re-activate after a successful reorder (#50).
-        if (shouldSuppressClick()) return;
-        onActivate();
-        // 一覧タブはタブ全体が <button> なので click で自動的にフォーカスが
-        // 乗るが、ビューアタブの wrapper は <span> でフォーカス不可。padding
-        // 領域クリック時に focus-visible リング含めて一覧タブと挙動を揃える
-        // ため、内側 name button へ明示的に focus を寄せる。name button 上の
-        // 直接クリックなら既に focus されているので呼んでも no-op。
-        nameButtonRef.current?.focus();
-      }}
-      onDoubleClick={(e) => {
-        if (isFromClose(e)) return;
-        e.preventDefault();
-        onStartRename();
-      }}
-    >
-      <button
-        ref={nameButtonRef}
-        type="button"
-        role="tab"
-        aria-selected={isActive}
-        className="top-tab-viewer-name"
-        title={viewer.name}
-      >
-        {viewer.name}
-      </button>
-      {canClose ? (
-        <button
-          type="button"
-          className="top-tab-viewer-close"
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose();
-          }}
-          title={`ビューア "${viewer.name}" を閉じる`}
-          aria-label={`ビューア "${viewer.name}" を閉じる`}
-          tabIndex={-1}
-        >
-          <CloseIcon size={14} />
-        </button>
-      ) : null}
-    </span>
-  );
-}
-
-// countLeafTabs — total tab count across the viewer's layout. Used only by
-// the close-confirm prompt ("how much will the user lose").
-function countLeafTabs(v: Viewer): number {
-  let n = 0;
-  walk(v.layout.root);
-  return n;
-  function walk(node: Viewer["layout"]["root"]) {
-    if (node.kind === "leaf") {
-      n += node.tabs.length;
-      return;
-    }
-    walk(node.a);
-    walk(node.b);
-  }
-}

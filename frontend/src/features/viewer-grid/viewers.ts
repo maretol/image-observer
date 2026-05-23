@@ -10,6 +10,7 @@ import {
   collapseEmptyLeaf,
   findLeaf,
   initialLayout,
+  layoutFromPersisted,
   recomputeActiveAfterClose,
   replaceNode,
   type Layout,
@@ -17,6 +18,7 @@ import {
   type LeafNode,
 } from "./layout";
 import { newTab, type Tab } from "./useTabs";
+import type { state } from "../../../wailsjs/go/models";
 
 // ─── Constants ───────────────────────────────────────────────────────
 
@@ -61,6 +63,45 @@ export function newViewer(name: string): Viewer {
 export function initialViewerSet(): ViewerSet {
   const v = newViewer(`${DEFAULT_NAME_PREFIX}1`);
   return { viewers: [v], activeViewerId: v.id };
+}
+
+// hydrateInitialViewerSet rebuilds the ViewerSet from persisted state. Empty
+// / missing viewers fall back to a fresh single-viewer set. Go-side
+// validateState already enforces the 1+-viewer invariant, but we guard the
+// hydration here too in case of first-launch before any save.
+export function hydrateInitialViewerSet(
+  initialState: state.StateData | null,
+): ViewerSet {
+  if (!initialState?.viewers || initialState.viewers.length === 0) {
+    return initialViewerSet();
+  }
+  const viewers: Viewer[] = initialState.viewers.map((v) => ({
+    id: v.id,
+    name: v.name,
+    layout: layoutFromPersisted(v.layout),
+  }));
+  const activeViewerId =
+    initialState.activeViewerId &&
+    viewers.some((v) => v.id === initialState.activeViewerId)
+      ? initialState.activeViewerId
+      : viewers[0].id;
+  return { viewers, activeViewerId };
+}
+
+// countLeafTabs sums all tab counts across a viewer's BSP layout. Used by the
+// close-confirm prompt to tell the user how much they will lose.
+export function countLeafTabs(v: Viewer): number {
+  let n = 0;
+  walk(v.layout.root);
+  return n;
+  function walk(node: LayoutNode) {
+    if (node.kind === "leaf") {
+      n += node.tabs.length;
+      return;
+    }
+    walk(node.a);
+    walk(node.b);
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
