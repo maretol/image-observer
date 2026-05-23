@@ -6,9 +6,10 @@ ViewerTab サブコンポーネントを **責務単位で分離** し、`App.ts
 orchestrator (子フック呼び出し + JSX 並べ替え) に縮小する。挙動は完全互換、
 既存テストは無修正で通過させる。
 
-> **ステータス**: 実装中。§6 Q1-Q8 を推奨案で確定。Phase 単一 PR / 8 commit 構成
+> **ステータス**: 実装完了。Phase 単一 PR / 8 commit 構成
 > (prep → window-polling → global-keybindings → viewer-rename → list-to-viewer
-> → viewer-tab → top-tabs-bar → doc-followup) で実装。
+> → viewer-tab → top-tabs-bar → doc-followup) で実装。App.tsx は 819 → 282 行。
+> §6 確定事項は §0 改訂履歴に追記済み。
 
 ---
 
@@ -18,6 +19,7 @@ orchestrator (子フック呼び出し + JSX 並べ替え) に縮小する。挙
 |--------|---------|
 | 2026-05-23 | 初版ドラフト。#66 (useClassification リファクタ) で確立した「軽量子フック分離 + orchestrator 集約」パターンを踏襲。 |
 | 2026-05-23 | §6 Q1-Q8 をすべて推奨案で確定 (ユーザー合意)。実装着手。 |
+| 2026-05-23 | 実装完了。App.tsx 819 → 282 行 (目安 ~200 行 ±50 行の上限近く、ヘッダコメント込み)。新規 6 ファイル: `src/TopTabsBar.tsx` / `src/useGlobalKeybindings.ts` / `src/topTab.ts` / `features/session/useWindowGeometryPolling.ts` / `features/viewer-grid/{ViewerTab.tsx, useViewerRename.ts, useListToViewerHandlers.ts}`。`viewers.ts` 拡張: `hydrateInitialViewerSet` / `countLeafTabs`。`.claude/context.md` §8 / §12 を本リファクタの構造で更新済み。 |
 
 ---
 
