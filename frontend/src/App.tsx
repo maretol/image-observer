@@ -161,19 +161,25 @@ function AppInner({ initialState }: AppInnerProps) {
   useEffect(() => {
     let cancelled = false;
     const POLL_INTERVAL_MS = 2000;
+    // Freeze geometry; only the maximized flag is allowed to flip. Shared by
+    // both the initial WindowIsMaximised() branch and the post-await re-check
+    // branch so future tweaks land in one place.
+    const markMaximized = () =>
+      setWindowState((cur) =>
+        cur.maximized ? cur : { ...cur, maximized: true },
+      );
     const update = async () => {
       try {
         const maximized = await WindowIsMaximised();
         if (cancelled) return;
         if (maximized) {
-          // Freeze geometry; only the maximized flag is allowed to flip.
-          setWindowState((cur) =>
-            cur.maximized ? cur : { ...cur, maximized: true },
-          );
+          markMaximized();
           return;
         }
-        const sz = await WindowGetSize();
-        const pos = await WindowGetPosition();
+        const [sz, pos] = await Promise.all([
+          WindowGetSize(),
+          WindowGetPosition(),
+        ]);
         if (cancelled) return;
         // Re-check maximized: between the first WindowIsMaximised() and now
         // the user could have maximized the window, in which case sz/pos
@@ -181,12 +187,13 @@ function AppInner({ initialState }: AppInnerProps) {
         // false would clobber the restore geometry we are deliberately
         // freezing (issue #86). Drop the snapshot and let the next poll
         // pick up the maximized flag through the early-return branch above.
+        // The recheck must come *after* the Promise.all — folding it into
+        // the same Promise.all would let WindowIsMaximised resolve before
+        // WindowGetSize observed the maximized state, missing the race.
         const maximizedAfter = await WindowIsMaximised();
         if (cancelled) return;
         if (maximizedAfter) {
-          setWindowState((cur) =>
-            cur.maximized ? cur : { ...cur, maximized: true },
-          );
+          markMaximized();
           return;
         }
         setWindowState((cur) => {
