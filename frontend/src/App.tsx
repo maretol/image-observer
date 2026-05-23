@@ -20,10 +20,10 @@ import {
 import {
   countLeafTabs,
   hydrateInitialViewerSet,
-  sanitizeName,
   type Viewer,
   type ViewerSet,
 } from "./features/viewer-grid/viewers";
+import { useViewerRename } from "./features/viewer-grid/useViewerRename";
 import {
   DATA_VIEWER_TAB,
   useViewerTabReorder,
@@ -184,29 +184,8 @@ function AppInner({ initialState }: AppInnerProps) {
     [confirm, viewer],
   );
 
-  // ─── inline rename state (top-tab) ─────────────────────────────────
-
-  const [editingViewerId, setEditingViewerId] = useState<string | null>(null);
-  const startRename = useCallback((viewerId: string) => {
-    setEditingViewerId(viewerId);
-  }, []);
-  const stopRename = useCallback(() => {
-    setEditingViewerId(null);
-  }, []);
-  const commitRename = useCallback(
-    (viewerId: string, name: string) => {
-      const sanitized = sanitizeName(name);
-      if (sanitized === null) {
-        // Empty/whitespace → keep editing so the user can correct. Hook will
-        // surface the toast.
-        viewer.renameViewer(viewerId, name);
-        return;
-      }
-      viewer.renameViewer(viewerId, sanitized);
-      setEditingViewerId(null);
-    },
-    [viewer],
-  );
+  const { editingViewerId, startRename, stopRename, commitRename } =
+    useViewerRename({ renameViewer: viewer.renameViewer });
 
   // ─── list → viewer wiring (single + bulk) ──────────────────────────
 
