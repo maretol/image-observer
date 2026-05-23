@@ -10,6 +10,7 @@ import {
 import {
   WindowGetSize,
   WindowGetPosition,
+  WindowIsMaximised,
 } from "../wailsjs/runtime/runtime";
 import { ClassificationView } from "./features/classification/ClassificationView";
 import { setKnownTagColors } from "./features/classification/colors";
@@ -144,23 +145,39 @@ function AppInner({ initialState }: AppInnerProps) {
   // Intentionally not persisted to settings/state.json.
   const listScrollTopRef = useRef(0);
 
-  // Window dimensions/position polling (Wails has no window-move event).
+  // Window dimensions/position/maximized polling. Wails exposes no
+  // window-move or window-maximize event, so a 2s interval + resize listener
+  // is the best we have. The width/height/x/y fields track the *non-maximized*
+  // (restore) geometry — while WindowIsMaximised is true we deliberately do
+  // not overwrite them, so closing while maximized still leaves a sensible
+  // restore size for the next launch (issue #86).
   const [windowState, setWindowState] = useState({
     width: initialState?.window?.width ?? 1024,
     height: initialState?.window?.height ?? 768,
     x: initialState?.window?.x ?? -1,
     y: initialState?.window?.y ?? -1,
+    maximized: initialState?.window?.maximized ?? false,
   });
   useEffect(() => {
     let cancelled = false;
     const POLL_INTERVAL_MS = 2000;
     const update = async () => {
       try {
+        const maximized = await WindowIsMaximised();
+        if (cancelled) return;
+        if (maximized) {
+          // Freeze geometry; only the maximized flag is allowed to flip.
+          setWindowState((cur) =>
+            cur.maximized ? cur : { ...cur, maximized: true },
+          );
+          return;
+        }
         const sz = await WindowGetSize();
         const pos = await WindowGetPosition();
         if (cancelled) return;
         setWindowState((cur) => {
           if (
+            !cur.maximized &&
             cur.width === sz.w &&
             cur.height === sz.h &&
             cur.x === pos.x &&
@@ -168,7 +185,13 @@ function AppInner({ initialState }: AppInnerProps) {
           ) {
             return cur;
           }
-          const next = { width: sz.w, height: sz.h, x: pos.x, y: pos.y };
+          const next = {
+            width: sz.w,
+            height: sz.h,
+            x: pos.x,
+            y: pos.y,
+            maximized: false,
+          };
           logger.debug("session", "window pos/size changed", next);
           return next;
         });
