@@ -1,12 +1,4 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ClassificationView } from "./features/classification/ClassificationView";
 import { setKnownTagColors } from "./features/classification/colors";
 import { useClassification } from "./features/classification/useClassification";
@@ -24,7 +16,6 @@ import {
 } from "./features/viewer-grid/viewers";
 import { useViewerRename } from "./features/viewer-grid/useViewerRename";
 import { useListToViewerHandlers } from "./features/viewer-grid/useListToViewerHandlers";
-import { ViewerTab } from "./features/viewer-grid/ViewerTab";
 import { useViewerTabReorder } from "./features/viewer-grid/useViewerTabReorder";
 import { useSessionLoad } from "./features/session/useSessionLoad";
 import { useSessionSave } from "./features/session/useSessionSave";
@@ -33,14 +24,24 @@ import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { useSettings } from "./features/settings/useSettings";
 import { useConfirm } from "./shared/components/ConfirmDialog";
 import { ToastProvider } from "./shared/components/Toast";
-import { PlusIcon } from "./shared/icons/PlusIcon";
-import { SettingsIcon } from "./shared/icons/SettingsIcon";
 import { installGlobalErrorHandlers, logger } from "./shared/utils/logger";
+import { TopTabsBar } from "./TopTabsBar";
 import { useGlobalKeybindings } from "./useGlobalKeybindings";
 import type { TopTab } from "./topTab";
 import { GetLogPath } from "../wailsjs/go/main/App";
 import { state } from "../wailsjs/go/models";
 import "./App.css";
+
+// App.tsx — top-level orchestrator. Hydrates persisted state, owns the cross-
+// feature state hubs (topTab / viewer / classification / settings / confirm /
+// window geometry), wires them into the child hooks (useGlobalKeybindings /
+// useWindowGeometryPolling / useViewerRename / useListToViewerHandlers /
+// useViewerTabReorder / useSessionSave) and the child UI (TopTabsBar /
+// ClassificationView / ViewerGrid / SettingsDialog).
+//
+// Inline side-effect hooks kept here (settings → tag colors / thumbnail
+// params / --ui-scale, GetLogPath fetch) are <= 5 lines each — abstracting
+// them into a hook would cost more in indirection than it would save.
 
 // Hook into uncaught errors and rejections once, before React mounts.
 installGlobalErrorHandlers();
@@ -154,8 +155,6 @@ function AppInner({ initialState }: AppInnerProps) {
     [viewerSig],
   );
 
-  // ─── viewer add/close/rename ───────────────────────────────────────
-
   const onAddViewer = useCallback(() => {
     viewer.addViewer();
     setTopTab("viewer");
@@ -200,94 +199,33 @@ function AppInner({ initialState }: AppInnerProps) {
   }, [settings.data?.uiScalePercent]);
 
   // Top-tab viewer reorder DnD (#50, docs/spec-viewer-tab-reorder.md). The
-  // hook owns pointer state + body-style stack; we just feed it the count
-  // and a commit callback. `containerRef` is bound to .top-tabs-viewers so
-  // the hook can collect tab rects via DATA_VIEWER_TAB.
+  // hook owns pointer state + body-style stack; we hand it down to TopTabsBar
+  // which binds containerRef + reads `state` for the indicator / source-tab
+  // dimming. Calling the hook here (not inside TopTabsBar) keeps it tied to
+  // the viewer-set lifecycle so the count / onReorder closure stay live.
   const tabReorder = useViewerTabReorder({
     count: viewer.viewers.length,
     onReorder: viewer.reorderViewer,
   });
-  // Indicator and dragSource visibility key off the same state. Only show
-  // them once the drag has crossed the threshold (active) so a normal click
-  // doesn't briefly flash the indicator.
-  const dragActive = tabReorder.state?.active ?? false;
-  const dragSrcIdx = dragActive ? (tabReorder.state?.srcIdx ?? -1) : -1;
-  const dragInsertIdx = dragActive ? (tabReorder.state?.insertIdx ?? -1) : -1;
 
   return (
     <div className="app-toplevel">
-      <nav className="top-tabs" role="tablist" aria-label="トップレベルタブ">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={topTab === "list"}
-          className={`top-tab top-tab-list ${topTab === "list" ? "active" : ""}`}
-          onClick={onSelectList}
-        >
-          一覧
-        </button>
-        <div
-          className="top-tabs-viewers"
-          role="group"
-          aria-label="ビューア一覧"
-          ref={tabReorder.containerRef}
-        >
-          {viewer.viewers.map((v, i) => (
-            <Fragment key={v.id}>
-              {dragInsertIdx === i && (
-                <span className="viewer-tab-insert-indicator" aria-hidden="true" />
-              )}
-              <ViewerTab
-                index={i}
-                viewer={v}
-                isActive={topTab === "viewer" && v.id === viewer.activeViewerId}
-                isEditing={editingViewerId === v.id}
-                // anyRenaming gates drag-start on *any* tab while a rename
-                // session is open. Without it a pointerdown on a sibling tab
-                // would start a drag (its own isEditing is false) while the
-                // rename input keeps focus thanks to our preventDefault(),
-                // letting the user reorder behind a still-open editor.
-                anyRenaming={editingViewerId !== null}
-                isDragSource={dragSrcIdx === i}
-                canClose={viewer.viewers.length > 1}
-                onActivate={() => onSelectViewer(v.id)}
-                onStartRename={() => startRename(v.id)}
-                onCommitRename={(name) => commitRename(v.id, name)}
-                onCancelRename={stopRename}
-                onClose={() => void closeViewerWithConfirm(v.id)}
-                onStartDrag={tabReorder.startDrag}
-                shouldSuppressClick={tabReorder.shouldSuppressClick}
-              />
-            </Fragment>
-          ))}
-          {dragInsertIdx === viewer.viewers.length && (
-            <span className="viewer-tab-insert-indicator" aria-hidden="true" />
-          )}
-        </div>
-        <button
-          type="button"
-          className="top-tab-add"
-          onClick={onAddViewer}
-          disabled={viewer.viewers.length >= MAX_VIEWERS}
-          title={
-            viewer.viewers.length >= MAX_VIEWERS
-              ? `ビューア数の上限 (${MAX_VIEWERS}) に達しています`
-              : "新しいビューアを追加"
-          }
-          aria-label="ビューアを追加"
-        >
-          <PlusIcon />
-        </button>
-        <button
-          type="button"
-          className="top-tab-settings"
-          onClick={() => setSettingsOpen(true)}
-          title="設定"
-          aria-label="設定を開く"
-        >
-          <SettingsIcon />
-        </button>
-      </nav>
+      <TopTabsBar
+        topTab={topTab}
+        onSelectList={onSelectList}
+        viewers={viewer.viewers}
+        activeViewerId={viewer.activeViewerId}
+        editingViewerId={editingViewerId}
+        onSelectViewer={onSelectViewer}
+        onStartRename={startRename}
+        onCommitRename={commitRename}
+        onCancelRename={stopRename}
+        onCloseViewer={(viewerId) => void closeViewerWithConfirm(viewerId)}
+        reorder={tabReorder}
+        onAddViewer={onAddViewer}
+        onOpenSettings={() => setSettingsOpen(true)}
+        maxViewers={MAX_VIEWERS}
+      />
       <div className="top-tab-content">
         {topTab === "list" ? (
           <ClassificationView
