@@ -22,9 +22,10 @@ import {
   MAX_VIEWERS,
   useViewerSet,
 } from "./features/viewer-grid/useViewerSet";
-import { findLeaf, layoutFromPersisted } from "./features/viewer-grid/layout";
+import { findLeaf } from "./features/viewer-grid/layout";
 import {
-  initialViewerSet,
+  countLeafTabs,
+  hydrateInitialViewerSet,
   sanitizeName,
   type Viewer,
   type ViewerSet,
@@ -73,26 +74,10 @@ type AppInnerProps = {
 };
 
 function AppInner({ initialState }: AppInnerProps) {
-  // Hydrate the initial ViewerSet from the persisted state. Empty / missing
-  // viewers fall back to a fresh single-viewer set (validateState on the Go
-  // side already enforces this, but we guard the hydration too in case of
-  // first-launch before any save).
-  const initialSet = useMemo<ViewerSet>(() => {
-    if (!initialState?.viewers || initialState.viewers.length === 0) {
-      return initialViewerSet();
-    }
-    const viewers: Viewer[] = initialState.viewers.map((v) => ({
-      id: v.id,
-      name: v.name,
-      layout: layoutFromPersisted(v.layout),
-    }));
-    const activeViewerId =
-      initialState.activeViewerId &&
-      viewers.some((v) => v.id === initialState.activeViewerId)
-        ? initialState.activeViewerId
-        : viewers[0].id;
-    return { viewers, activeViewerId };
-  }, [initialState]);
+  const initialSet = useMemo<ViewerSet>(
+    () => hydrateInitialViewerSet(initialState),
+    [initialState],
+  );
 
   const initTopTab: TopTab =
     initialState?.topTab === "viewer" ? "viewer" : "list";
@@ -802,18 +787,3 @@ function ViewerTab({
   );
 }
 
-// countLeafTabs — total tab count across the viewer's layout. Used only by
-// the close-confirm prompt ("how much will the user lose").
-function countLeafTabs(v: Viewer): number {
-  let n = 0;
-  walk(v.layout.root);
-  return n;
-  function walk(node: Viewer["layout"]["root"]) {
-    if (node.kind === "leaf") {
-      n += node.tabs.length;
-      return;
-    }
-    walk(node.a);
-    walk(node.b);
-  }
-}
