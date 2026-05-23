@@ -17,7 +17,6 @@ import {
   MAX_VIEWERS,
   useViewerSet,
 } from "./features/viewer-grid/useViewerSet";
-import { findLeaf } from "./features/viewer-grid/layout";
 import {
   countLeafTabs,
   hydrateInitialViewerSet,
@@ -40,11 +39,8 @@ import { CloseIcon } from "./shared/icons/CloseIcon";
 import { PlusIcon } from "./shared/icons/PlusIcon";
 import { SettingsIcon } from "./shared/icons/SettingsIcon";
 import { installGlobalErrorHandlers, logger } from "./shared/utils/logger";
-import {
-  isEditableTarget,
-  isPrimaryModifier,
-  zoomCommandBus,
-} from "./shared/utils/keybindings";
+import { useGlobalKeybindings } from "./useGlobalKeybindings";
+import type { TopTab } from "./topTab";
 import { GetLogPath } from "../wailsjs/go/main/App";
 import { state } from "../wailsjs/go/models";
 import "./App.css";
@@ -52,8 +48,6 @@ import "./App.css";
 // Hook into uncaught errors and rejections once, before React mounts.
 installGlobalErrorHandlers();
 logger.info("app", "frontend mount");
-
-type TopTab = "list" | "viewer";
 
 function App() {
   const { loaded, initialState } = useSessionLoad();
@@ -136,98 +130,7 @@ function AppInner({ initialState }: AppInnerProps) {
     list: classification.persistableState,
   });
 
-  // Global keybindings (Phase H4 + #7 + #11). We register the window listener
-  // exactly once and read live state through refs; otherwise the listener
-  // would tear down + re-add on every layout change, risking a dropped key.
-  const topTabRef = useRef(topTab);
-  const settingsOpenRef = useRef(settingsOpen);
-  const viewerRef = useRef(viewer);
-  topTabRef.current = topTab;
-  settingsOpenRef.current = settingsOpen;
-  viewerRef.current = viewer;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target)) return;
-      if (settingsOpenRef.current) return; // dialog has its own Esc handler
-
-      // Global top-tab switching (#7 + #11). Ctrl+Shift+1 → list, Ctrl+Shift+2..9
-      // → N-1th viewer (so Ctrl+Shift+2 still means "first viewer", preserving
-      // the old single-viewer keybinding's meaning). e.code is layout-
-      // independent; e.key would be the shifted character on most layouts.
-      if (isPrimaryModifier(e) && e.shiftKey) {
-        if (e.code === "Digit1") {
-          e.preventDefault();
-          setTopTab("list");
-          return;
-        }
-        const digitMatch = /^Digit([2-9])$/.exec(e.code);
-        if (digitMatch) {
-          const idx = Number(digitMatch[1]) - 2; // Digit2 → viewer index 0
-          const viewerLive = viewerRef.current;
-          if (idx >= 0 && idx < viewerLive.viewers.length) {
-            e.preventDefault();
-            viewerLive.setActiveViewer(viewerLive.viewers[idx].id);
-            setTopTab("viewer");
-          }
-          return;
-        }
-      }
-
-      if (topTabRef.current !== "viewer") return;
-
-      const viewerLive = viewerRef.current;
-      const layout = viewerLive.layout;
-      const activeLeaf = findLeaf(layout.root, layout.activeId);
-      if (!activeLeaf) return;
-
-      if (!isPrimaryModifier(e)) return;
-
-      // Ctrl+W: close active tab
-      if ((e.key === "w" || e.key === "W") && !e.shiftKey) {
-        e.preventDefault();
-        if (activeLeaf.activeIndex >= 0) {
-          viewerLive.closeTab(activeLeaf.id, activeLeaf.activeIndex);
-        }
-        return;
-      }
-      // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs in active panel
-      if (e.key === "Tab") {
-        e.preventDefault();
-        const n = activeLeaf.tabs.length;
-        if (n <= 1) return;
-        const dir = e.shiftKey ? -1 : 1;
-        const next = (((activeLeaf.activeIndex + dir) % n) + n) % n;
-        viewerLive.setActiveTab(activeLeaf.id, next);
-        return;
-      }
-      // Ctrl+0: fit to viewport
-      if (e.key === "0") {
-        e.preventDefault();
-        zoomCommandBus.emit("fit");
-        return;
-      }
-      // Ctrl+1: actual size (100%)
-      if (e.key === "1") {
-        e.preventDefault();
-        zoomCommandBus.emit("actualSize");
-        return;
-      }
-      // Ctrl+= / Ctrl++ : zoom in (also accept "+" shifted)
-      if (e.key === "=" || e.key === "+") {
-        e.preventDefault();
-        zoomCommandBus.emit("in");
-        return;
-      }
-      // Ctrl+- : zoom out
-      if (e.key === "-") {
-        e.preventDefault();
-        zoomCommandBus.emit("out");
-        return;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  useGlobalKeybindings({ topTab, setTopTab, viewer, settingsOpen });
 
   const onSelectList = useCallback(() => setTopTab("list"), []);
   const onSelectViewer = useCallback(
