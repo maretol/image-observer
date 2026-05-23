@@ -29,7 +29,7 @@ import { TopTabsBar } from "./TopTabsBar";
 import { useGlobalKeybindings } from "./useGlobalKeybindings";
 import type { TopTab } from "./topTab";
 import { GetLogPath } from "../wailsjs/go/main/App";
-import { state } from "../wailsjs/go/models";
+import type { state } from "../wailsjs/go/models";
 import "./App.css";
 
 // App.tsx — top-level orchestrator. Hydrates persisted state, owns the cross-

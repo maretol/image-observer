@@ -18,7 +18,7 @@ import {
   type LeafNode,
 } from "./layout";
 import { newTab, type Tab } from "./useTabs";
-import { state } from "../../../wailsjs/go/models";
+import type { state } from "../../../wailsjs/go/models";
 
 // ─── Constants ───────────────────────────────────────────────────────
 

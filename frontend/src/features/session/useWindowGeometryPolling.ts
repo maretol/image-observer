@@ -4,7 +4,7 @@ import {
   WindowGetSize,
   WindowIsMaximised,
 } from "../../../wailsjs/runtime/runtime";
-import { state } from "../../../wailsjs/go/models";
+import type { state } from "../../../wailsjs/go/models";
 import { logger } from "../../shared/utils/logger";
 
 // useWindowGeometryPolling polls WindowGetSize/Position and WindowIsMaximised
