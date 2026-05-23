@@ -192,7 +192,16 @@ function AppInner({ initialState }: AppInnerProps) {
             y: pos.y,
             maximized: false,
           };
-          logger.debug("session", "window pos/size changed", next);
+          const geometryChanged =
+            cur.width !== sz.w ||
+            cur.height !== sz.h ||
+            cur.x !== pos.x ||
+            cur.y !== pos.y;
+          logger.debug(
+            "session",
+            geometryChanged ? "window pos/size changed" : "window maximized cleared",
+            next,
+          );
           return next;
         });
       } catch {

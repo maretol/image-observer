@@ -677,7 +677,9 @@ func TestLoadState_LegacyV6_NoMaximizedField_DefaultsToFalse(t *testing.T) {
 	// JSON unmarshal must leave it at the zero value (false) so existing
 	// non-maximized sessions stay non-maximized.
 	p := setStateFile(t)
-	os.MkdirAll(filepath.Dir(p), 0o755)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	payload := []byte(`{
 		"version": 6,
 		"window": {"width":1024,"height":768,"x":-1,"y":-1},
@@ -701,7 +703,9 @@ func TestLoadState_V5MigrationLeavesMaximizedFalse(t *testing.T) {
 	// v5 had no maximized concept; migrated payloads must come through with
 	// Maximized=false (the previous geometry is preserved verbatim).
 	p := setStateFile(t)
-	os.MkdirAll(filepath.Dir(p), 0o755)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	v5 := []byte(`{
 		"version": 5,
 		"window": {"width":1600,"height":900,"x":42,"y":42},
