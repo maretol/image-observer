@@ -24,6 +24,7 @@ import {
   type ViewerSet,
 } from "./features/viewer-grid/viewers";
 import { useViewerRename } from "./features/viewer-grid/useViewerRename";
+import { useListToViewerHandlers } from "./features/viewer-grid/useListToViewerHandlers";
 import {
   DATA_VIEWER_TAB,
   useViewerTabReorder,
@@ -187,44 +188,12 @@ function AppInner({ initialState }: AppInnerProps) {
   const { editingViewerId, startRename, stopRename, commitRename } =
     useViewerRename({ renameViewer: viewer.renameViewer });
 
-  // ─── list → viewer wiring (single + bulk) ──────────────────────────
-
-  // openInViewer: from SampleModal's viewer-picker. We switch top-tab and
-  // active viewer to the chosen one before delegating the actual open.
-  const onOpenInViewer = useCallback(
-    (viewerId: string, filename: string) => {
-      const folder = classification.folderPath;
-      if (!folder) return;
-      void viewer.openInViewer(viewerId, `${folder}/${filename}`);
-      viewer.setActiveViewer(viewerId);
-      setTopTab("viewer");
-    },
-    [classification.folderPath, viewer],
-  );
-
-  const onOpenManyInTabs = useCallback(
-    (viewerId: string, filenames: string[]) => {
-      const folder = classification.folderPath;
-      if (!folder || filenames.length === 0) return;
-      const paths = filenames.map((f) => `${folder}/${f}`);
-      void viewer.openManyInViewer(viewerId, paths);
-      viewer.setActiveViewer(viewerId);
-      setTopTab("viewer");
-    },
-    [classification.folderPath, viewer],
-  );
-
-  const onOpenManyAsSplit = useCallback(
-    (viewerId: string, filenames: string[]) => {
-      const folder = classification.folderPath;
-      if (!folder || filenames.length === 0) return;
-      const paths = filenames.map((f) => `${folder}/${f}`);
-      void viewer.openManyAsSplitInViewer(viewerId, paths);
-      viewer.setActiveViewer(viewerId);
-      setTopTab("viewer");
-    },
-    [classification.folderPath, viewer],
-  );
+  const { onOpenInViewer, onOpenManyInTabs, onOpenManyAsSplit } =
+    useListToViewerHandlers({
+      folderPath: classification.folderPath,
+      viewer,
+      setTopTab,
+    });
 
   // UI scale (#10, #12, #39): expose the user's choice as a `--ui-scale` CSS
   // variable on <html>; App.css then applies `zoom: var(--ui-scale)` to
