@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/gofsnotify/fsnotify v0.0.6
 	github.com/wailsapp/wails/v2 v2.12.0
-	golang.org/x/image v0.40.0
+	golang.org/x/image v0.41.0
 )
 
 require (
