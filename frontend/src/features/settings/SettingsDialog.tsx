@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KeybindingsTable } from "./KeybindingsTable";
 import {
   NavIconAppearance,
@@ -98,6 +98,10 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const [category, setCategory] = useState<Category>("settings");
   const [activeId, setActiveId] = useState<SectionId>("logging");
+  // Suppress backdrop close when a pointerdown started inside the dialog
+  // (e.g. text selection drag in an input released over the backdrop). See
+  // ModalShell for the same pattern (#96).
+  const downOnBackdropRef = useRef(false);
 
   // Esc to close — registered only when open to avoid stealing keys otherwise.
   // App.tsx's global keydown listener already short-circuits on `settingsOpen`,
@@ -123,7 +127,16 @@ export function SettingsDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="settings-title"
-      onClick={onClose}
+      onPointerDown={(e) => {
+        downOnBackdropRef.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        const startedHere = downOnBackdropRef.current;
+        downOnBackdropRef.current = false;
+        if (e.target !== e.currentTarget) return;
+        if (!startedHere) return;
+        onClose();
+      }}
     >
       <div className="settings-dialog" onClick={(e) => e.stopPropagation()}>
         <header className="settings-header">
