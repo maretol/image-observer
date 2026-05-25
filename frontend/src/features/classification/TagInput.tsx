@@ -13,8 +13,13 @@ export type TagInputProps = {
 
 // TagInput is a chip-style multi-tag input. Each committed tag becomes a
 // removable chip; the trailing text field accepts the next tag with datalist
-// autocomplete against `knownTags`. Commit on Enter / "," / "、" / blur, and
-// Backspace on an empty draft removes the last chip (standard chip-input UX).
+// autocomplete against `knownTags`. Commit on Enter / "," / "、" / half-width
+// space / "　" (full-width space) / blur, and Backspace on an empty draft
+// removes the last chip (standard chip-input UX).
+// Tab with a draft that matches exactly one knownTag (case-insensitive prefix,
+// excluding already-added tags) commits that candidate; other Tab behavior
+// (no draft / 0 or >1 matches / Shift+Tab) falls through to default focus
+// navigation.
 export function TagInput({
   tags,
   knownTags,
@@ -57,6 +62,21 @@ export function TagInput({
     } else if (e.key === "Backspace" && draft === "" && tags.length > 0) {
       e.preventDefault();
       onChange(tags.slice(0, -1));
+    } else if (e.key === "Tab" && !e.shiftKey) {
+      // draft の case-insensitive prefix で knownTags を絞り、候補が 1 件なら
+      // Tab で確定。Shift+Tab (逆方向フォーカス移動) や draft が空 (trim 後) の
+      // ときは横取りしない。マッチ 0 件 / 複数件のときも通常の Tab 移動を維持。
+      // commit() 側が raw.trim() するのに合わせて検索クエリも trim する
+      // (先頭/末尾空白付き draft でも commit と同じタグにヒットさせる)。
+      const q = draft.trim().toLowerCase();
+      if (q === "") return;
+      const candidates = knownTags.filter(
+        (t) => !tags.includes(t) && t.toLowerCase().startsWith(q),
+      );
+      if (candidates.length === 1) {
+        e.preventDefault();
+        commit(candidates[0]);
+      }
     }
   };
 
