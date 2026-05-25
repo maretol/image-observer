@@ -52,6 +52,12 @@ export function ModalShell({
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // Tracks whether the current click began with a pointerdown on the bare
+  // backdrop. Browsers fire `click` on the deepest common ancestor of the
+  // pointerdown/pointerup targets, so a text-selection drag that starts inside
+  // a textarea and releases over the backdrop would otherwise trigger a
+  // backdrop click and close the dialog (#96).
+  const downOnBackdropRef = useRef(false);
 
   // Capture previous focus on open and restore it on close.
   useEffect(() => {
@@ -107,8 +113,16 @@ export function ModalShell({
   return createPortal(
     <div
       className={overlayClassName}
-      onClick={() => {
-        if (closeOnBackdrop) onClose();
+      onPointerDown={(e) => {
+        downOnBackdropRef.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        const startedHere = downOnBackdropRef.current;
+        downOnBackdropRef.current = false;
+        if (!closeOnBackdrop) return;
+        if (e.target !== e.currentTarget) return;
+        if (!startedHere) return;
+        onClose();
       }}
     >
       <div

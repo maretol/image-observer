@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { classification } from "../../../wailsjs/go/models";
 import { extractTags, serializeTags } from "./filters";
 import { TagInput } from "./TagInput";
@@ -35,6 +35,10 @@ export function EditPopover({
   const [tags, setTags] = useState<string[]>([]);
   const [confidence, setConfidence] = useState<string>("");
   const [note, setNote] = useState("");
+  // Suppress backdrop close when the pointerdown started inside the dialog
+  // (e.g. text selection drag in the note textarea released over the
+  // backdrop). See ModalShell for the same pattern (#96).
+  const downOnBackdropRef = useRef(false);
 
   // Reset local form whenever a new entry comes in.
   useEffect(() => {
@@ -84,7 +88,19 @@ export function EditPopover({
   };
 
   return (
-    <div className="confirm-dialog-overlay" onClick={onCancel}>
+    <div
+      className="confirm-dialog-overlay"
+      onPointerDown={(e) => {
+        downOnBackdropRef.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        const startedHere = downOnBackdropRef.current;
+        downOnBackdropRef.current = false;
+        if (e.target !== e.currentTarget) return;
+        if (!startedHere) return;
+        onCancel();
+      }}
+    >
       <div
         className="confirm-dialog cls-edit-popover"
         onClick={(e) => e.stopPropagation()}
