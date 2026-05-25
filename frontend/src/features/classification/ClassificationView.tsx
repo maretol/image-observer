@@ -24,6 +24,7 @@ import {
 } from "./cardContextMenuLogic";
 import { tagSummary } from "./filters";
 import { groupByDirectory, groupKeyOf } from "./groups";
+import { pickSibling } from "./sampleModalNav";
 import type { UseClassificationReturn } from "./useClassification";
 
 export type ClassificationViewProps = {
@@ -184,6 +185,33 @@ export function ClassificationView({
   useLayoutEffect(() => {
     setPreviewFilename(null);
   }, [folderPath]);
+
+  // Sample modal prev/next navigation (#94). Derived from `displayedOrder`
+  // (already collapsed-aware: Shift+click range selection also includes
+  // collapsed groups). pickSibling enforces the "no directory cross / no
+  // end-loop" contract; null means the respective direction is at an edge
+  // and the SampleModal renders the button as disabled. When displayedOrder
+  // updates mid-preview (filter / watcher) the memo recomputes — if the
+  // currently previewed file is filtered out both directions become null
+  // and the nav buttons disable, leaving the user with Esc / close.
+  const previewSibling = useMemo(() => {
+    if (previewFilename === null) return { prev: null, next: null };
+    return pickSibling(displayedOrder, previewFilename);
+  }, [displayedOrder, previewFilename]);
+  const onPrevPreview = useMemo<(() => void) | null>(
+    () =>
+      previewSibling.prev === null
+        ? null
+        : () => setPreviewFilename(previewSibling.prev),
+    [previewSibling.prev],
+  );
+  const onNextPreview = useMemo<(() => void) | null>(
+    () =>
+      previewSibling.next === null
+        ? null
+        : () => setPreviewFilename(previewSibling.next),
+    [previewSibling.next],
+  );
 
   // Right-click context menu state (#47). One menu instance at a time. The
   // Card emits position via onRequestContextMenu; CardContextMenu owns its
@@ -489,6 +517,8 @@ export function ClassificationView({
           if (previewFilename) onOpenInViewer(viewerId, previewFilename);
           closePreview();
         }}
+        onPrev={onPrevPreview}
+        onNext={onNextPreview}
       />
       {cardCtxMenu ? (
         <CardContextMenu
