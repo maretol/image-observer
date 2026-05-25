@@ -62,11 +62,14 @@ export function TagInput({
     } else if (e.key === "Backspace" && draft === "" && tags.length > 0) {
       e.preventDefault();
       onChange(tags.slice(0, -1));
-    } else if (e.key === "Tab" && !e.shiftKey && draft !== "") {
+    } else if (e.key === "Tab" && !e.shiftKey) {
       // draft の case-insensitive prefix で knownTags を絞り、候補が 1 件なら
-      // Tab で確定。Shift+Tab (逆方向フォーカス移動) や draft 空のときは横取り
-      // しない。マッチ 0 件 / 複数件のときも通常の Tab 移動を維持する。
-      const q = draft.toLowerCase();
+      // Tab で確定。Shift+Tab (逆方向フォーカス移動) や draft が空 (trim 後) の
+      // ときは横取りしない。マッチ 0 件 / 複数件のときも通常の Tab 移動を維持。
+      // commit() 側が raw.trim() するのに合わせて検索クエリも trim する
+      // (先頭/末尾空白付き draft でも commit と同じタグにヒットさせる)。
+      const q = draft.trim().toLowerCase();
+      if (q === "") return;
       const candidates = knownTags.filter(
         (t) => !tags.includes(t) && t.toLowerCase().startsWith(q),
       );
