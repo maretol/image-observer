@@ -13,8 +13,9 @@ export type TagInputProps = {
 
 // TagInput is a chip-style multi-tag input. Each committed tag becomes a
 // removable chip; the trailing text field accepts the next tag with datalist
-// autocomplete against `knownTags`. Commit on Enter / "," / "、" / blur, and
-// Backspace on an empty draft removes the last chip (standard chip-input UX).
+// autocomplete against `knownTags`. Commit on Enter / "," / "、" / half-width
+// space / "　" (full-width space) / blur, and Backspace on an empty draft
+// removes the last chip (standard chip-input UX).
 // Tab with a draft that matches exactly one knownTag (case-insensitive prefix,
 // excluding already-added tags) commits that candidate; other Tab behavior
 // (no draft / 0 or >1 matches / Shift+Tab) falls through to default focus
