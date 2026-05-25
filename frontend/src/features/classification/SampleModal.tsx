@@ -33,6 +33,11 @@ type SampleModalProps = {
   viewers: { id: string; name: string }[];
   activeViewerId: string;
   onOpenInViewer: (viewerId: string) => void;
+  // Prev / next navigation (#94). null = end of list within the current
+  // directory group (ディレクトリ跨ぎ / 端ループは禁止)。Both null hides the
+  // nav controls entirely; otherwise the respective button renders disabled.
+  onPrev: (() => void) | null;
+  onNext: (() => void) | null;
 };
 
 export function SampleModal({
@@ -43,6 +48,8 @@ export function SampleModal({
   viewers,
   activeViewerId,
   onOpenInViewer,
+  onPrev,
+  onNext,
 }: SampleModalProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "ok" | "error">(
@@ -86,6 +93,30 @@ export function SampleModal({
     };
   }, [open, imagePath]);
 
+  // Keyboard navigation (#94). ←/→ jump to prev/next within the current
+  // directory group. ModalShell handles Esc and Tab focus trap, so we only
+  // claim arrow keys here — no conflict. document-level listener mirrors how
+  // ModalShell wires its own keys.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft" && onPrev) {
+        e.preventDefault();
+        onPrev();
+      } else if (e.key === "ArrowRight" && onNext) {
+        e.preventDefault();
+        onNext();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onPrev, onNext]);
+
+  // Render the nav row only when at least one direction is available — when
+  // the current group has a single entry both are null and the chrome would
+  // be visual noise.
+  const navAvailable = onPrev !== null || onNext !== null;
+
   return (
     <ModalShell
       open={open}
@@ -120,6 +151,46 @@ export function SampleModal({
             alt={filename ?? ""}
             draggable={false}
           />
+        ) : null}
+        {navAvailable ? (
+          <>
+            <button
+              type="button"
+              className="sample-modal-nav sample-modal-nav-prev"
+              onClick={() => onPrev?.()}
+              disabled={onPrev === null}
+              aria-label="前の画像 (←)"
+              title="前の画像 (←)"
+            >
+              <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M10 4l-4 4 4 4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="sample-modal-nav sample-modal-nav-next"
+              onClick={() => onNext?.()}
+              disabled={onNext === null}
+              aria-label="次の画像 (→)"
+              title="次の画像 (→)"
+            >
+              <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M6 4l4 4-4 4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </>
         ) : null}
       </div>
       <div

@@ -869,6 +869,8 @@ html, body, #root {
   background: #1e1e20;
   padding: 12px;
   overflow: hidden;
+  /* Anchor for the prev/next nav overlay buttons (#94). */
+  position: relative;
 }
 
 .sample-modal-img {
@@ -895,6 +897,51 @@ html, body, #root {
 
 .sample-modal-error {
   color: #f48771;
+}
+
+/* Prev / next nav overlay (#94). Anchored to .sample-modal-body via its
+   position: relative. Center the icon, semi-transparent so the image stays
+   visible behind. Hidden entirely when both directions are unavailable
+   (single-entry group); rendered disabled at directory edges. */
+.sample-modal-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(45, 45, 48, 0.7);
+  color: #ddd;
+  border: 1px solid #3f3f46;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+}
+
+.sample-modal-nav-prev {
+  left: 12px;
+}
+
+.sample-modal-nav-next {
+  right: 12px;
+}
+
+.sample-modal-nav:hover:not(:disabled) {
+  background: rgba(55, 55, 58, 0.95);
+  color: #fff;
+  border-color: #555;
+}
+
+.sample-modal-nav:focus-visible {
+  outline: 1px solid #d97a3c;
+  outline-offset: 2px;
+}
+
+.sample-modal-nav:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .sample-modal-footer {
