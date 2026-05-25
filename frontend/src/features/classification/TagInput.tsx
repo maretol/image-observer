@@ -15,6 +15,10 @@ export type TagInputProps = {
 // removable chip; the trailing text field accepts the next tag with datalist
 // autocomplete against `knownTags`. Commit on Enter / "," / "、" / blur, and
 // Backspace on an empty draft removes the last chip (standard chip-input UX).
+// Tab with a draft that matches exactly one knownTag (case-insensitive prefix,
+// excluding already-added tags) commits that candidate; other Tab behavior
+// (no draft / 0 or >1 matches / Shift+Tab) falls through to default focus
+// navigation.
 export function TagInput({
   tags,
   knownTags,
@@ -57,6 +61,18 @@ export function TagInput({
     } else if (e.key === "Backspace" && draft === "" && tags.length > 0) {
       e.preventDefault();
       onChange(tags.slice(0, -1));
+    } else if (e.key === "Tab" && !e.shiftKey && draft !== "") {
+      // draft の case-insensitive prefix で knownTags を絞り、候補が 1 件なら
+      // Tab で確定。Shift+Tab (逆方向フォーカス移動) や draft 空のときは横取り
+      // しない。マッチ 0 件 / 複数件のときも通常の Tab 移動を維持する。
+      const q = draft.toLowerCase();
+      const candidates = knownTags.filter(
+        (t) => !tags.includes(t) && t.toLowerCase().startsWith(q),
+      );
+      if (candidates.length === 1) {
+        e.preventDefault();
+        commit(candidates[0]);
+      }
     }
   };
 
