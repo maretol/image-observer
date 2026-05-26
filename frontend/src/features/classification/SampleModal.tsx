@@ -176,6 +176,15 @@ export function SampleModal({
   // would still bounce the preview when focus sits on a chip ×; the
   // `.cls-tag-input` ancestor check covers the whole chip-input widget
   // (input field + chip × buttons) uniformly.
+  //
+  // While the modal owns ←/→ we always preventDefault on those keys (after
+  // the editable-target guard) regardless of whether the direction is
+  // available, then call the callback only if non-null. Without the
+  // unconditional preventDefault, the dirty-block path (effectivePrev /
+  // effectiveNext = null) and the edge-of-group path (onPrev / onNext = null)
+  // would fall through to the browser default — background scroll, focus
+  // ring jump, etc. — violating spec §5.4 / PR test plan「未保存中に ←/→
+  // キーが no-op」(spec §5.4) と single-entry group の暗黙の no-op 期待。
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -189,12 +198,12 @@ export function SampleModal({
       ) {
         return;
       }
-      if (e.key === "ArrowLeft" && effectivePrev) {
+      if (e.key === "ArrowLeft") {
         e.preventDefault();
-        effectivePrev();
-      } else if (e.key === "ArrowRight" && effectiveNext) {
+        effectivePrev?.();
+      } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        effectiveNext();
+        effectiveNext?.();
       }
     };
     document.addEventListener("keydown", onKey);
