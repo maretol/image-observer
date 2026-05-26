@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { GetThumbnail } from "../../../wailsjs/go/main/App";
 import { classification } from "../../../wailsjs/go/models";
 import { ModalShell } from "../../shared/components/ModalShell";

@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { classification } from "../../../wailsjs/go/models";
 import { ConflictDialog } from "../../shared/components/ConflictDialog";
 import { MergePromptDialog } from "../../shared/components/MergePromptDialog";
 import { CardContextMenu } from "./CardContextMenu";
@@ -184,6 +185,12 @@ export function ClassificationView({
   // the same modal and set editing.open=true — the underlying semantics
   // ("an entry is being inspected, hold external merges briefly") apply
   // equally to both starting points.
+  //
+  // saveEdit success path clears editing.open=false (legacy EditPopover
+  // semantics — popover closed on save). The unified modal stays open
+  // after save per spec §5.3, so handleSave re-flags editing.open=true
+  // below to keep defer effective while the user keeps viewing the
+  // entry.
   const openPreview = useCallback(
     (filename: string) => {
       setPreviewFilename(filename);
@@ -208,6 +215,26 @@ export function ClassificationView({
     setPreviewFilename(null);
     closeEdit();
   }, [folderPath, closeEdit]);
+
+  // saveEdit clears editing.open=false on success (legacy EditPopover
+  // semantics). For the unified modal we want editing.open to track the
+  // modal's open-state so subsequent watcher events keep getting deferred
+  // while the user is still viewing the entry. The one-frame
+  // true → false → true transition at save intentionally fires
+  // useClassificationReplay's performReplay() exactly once — saved =
+  // editing confirmed, so draining any deferred watcher results into the
+  // refreshed baseline is the correct moment. Conflict / error paths in
+  // saveEdit leave editing untouched, in which case re-calling openEdit
+  // with the same filename is a no-op same-value setState.
+  const handleSave = useCallback(
+    async (entry: classification.Entry) => {
+      await saveEdit(entry);
+      if (previewFilename !== null) {
+        openEdit(previewFilename);
+      }
+    },
+    [saveEdit, openEdit, previewFilename],
+  );
 
   // Edit pane resolves the active entry from previewFilename against the
   // current loadResult — the unified SampleModal (#93) owns the open
@@ -547,7 +574,7 @@ export function ClassificationView({
         entry={previewEntry}
         knownTags={knownTags}
         openSource={previewOpenSource}
-        onSave={saveEdit}
+        onSave={handleSave}
       />
       {cardCtxMenu ? (
         <CardContextMenu
