@@ -57,10 +57,14 @@ export function SampleEditPane({
   const [confidence, setConfidence] = useState<string>(entry?.confidence ?? "");
   const [note, setNote] = useState<string>(entry?.note ?? "");
 
-  // Reset local form whenever the active entry changes (filename swap or
-  // post-save baseline update via the parent re-supplying entry). Identity-
-  // comparing by filename keeps tag/note typing from being reset by the
-  // useLayoutEffect-driven referential churn upstream.
+  // Reset local form whenever the *baseline* the entry exposes changes —
+  // baseline = (filename, folder, confidence, note). Storing the previous
+  // baseline in `lastBaselineRef` and reset-on-mismatch absorbs the
+  // referential churn from watcher-driven `loadResult` updates (a new
+  // `Entry` object whose fields are unchanged) so in-pane typing isn't
+  // clobbered. Any of (filename swap via prev/next, post-save baseline
+  // refresh, external sidecar edit, entry → null) flips at least one
+  // baseline field and triggers reset.
   const lastBaselineRef = useRef<{
     filename: string | null;
     folder: string;
