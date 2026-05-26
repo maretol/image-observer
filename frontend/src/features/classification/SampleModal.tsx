@@ -171,7 +171,11 @@ export function SampleModal({
   // claim arrow keys here — no conflict. document-level listener mirrors how
   // ModalShell wires its own keys. Suppressed while the focus is in an
   // editable element so typing arrows inside the note textarea / tag input
-  // doesn't bounce the preview.
+  // doesn't bounce the preview. The TagInput chip × buttons are <button>s
+  // (not INPUT/TEXTAREA/contentEditable), so an INPUT/TEXTAREA-only guard
+  // would still bounce the preview when focus sits on a chip ×; the
+  // `.cls-tag-input` ancestor check covers the whole chip-input widget
+  // (input field + chip × buttons) uniformly.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -180,7 +184,8 @@ export function SampleModal({
         t &&
         (t.tagName === "INPUT" ||
           t.tagName === "TEXTAREA" ||
-          t.isContentEditable)
+          t.isContentEditable ||
+          t.closest(".cls-tag-input"))
       ) {
         return;
       }
