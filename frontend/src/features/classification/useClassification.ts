@@ -238,10 +238,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // alongside `setLoadResult(null)` in error-driven catch paths so that
   // when the entries we were operating on disappear, the dependent state
   // doesn't strand:
-  //   - editing.open=true with EditPopover showing entry=null is visually
-  //     harmless but causes the next watcher event to defer (the handler
-  //     treats it as "still open"), and re-surfaces the popover if the
-  //     same filename reappears.
+  //   - editing.open=true with the unified SampleModal showing entry=null
+  //     is visually harmless but causes the next watcher event to defer
+  //     (the handler treats it as "still open"), and re-surfaces the
+  //     modal if the same filename reappears.
   //   - conflict / mergePrompt similarly carry stale folder / draft
   //     pointers that surface in misleading ways on next render.
   //   - pendingResultRef would replay against a now-empty loadResult.
