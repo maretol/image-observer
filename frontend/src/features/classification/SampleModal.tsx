@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GetThumbnail } from "../../../wailsjs/go/main/App";
-import { classification } from "../../../wailsjs/go/models";
+import type { classification } from "../../../wailsjs/go/models";
 import { ModalShell } from "../../shared/components/ModalShell";
 import { CloseIcon } from "../../shared/icons/CloseIcon";
 import { toBytes } from "../../shared/utils/base64";
@@ -103,18 +103,22 @@ export function SampleModal({
     [openSource],
   );
 
-  // Reset dirty whenever the modal closes or the active entry changes
-  // (filename swap via prev/next, watcher-driven entry reference change,
-  // entry becoming null, etc.) — the SampleEditPane will re-fire
-  // onDirtyChange against its new baseline, but until that fires the
-  // parent's editDirty should not carry forward "was dirty for the
-  // previous entry" state. Unconditional reset on the dep change also
-  // closes the transient gap where SampleEditPane's `dirty` useMemo can
-  // briefly see the new entry alongside the previous render's
-  // tags/confidence/note before its baseline-reset useEffect flushes.
+  // Reset dirty when the modal closes or the active *filename* changes
+  // (prev/next swap, entry becoming null, etc.). We deliberately key on
+  // `entry?.filename` rather than `entry` itself: watcher-driven reloads
+  // hand us a new entry object whose baseline (folder / confidence /
+  // note) is unchanged, and SampleEditPane preserves the user's in-pane
+  // edits in that case (its `lastBaselineRef` short-circuits the reset).
+  // Resetting parent's editDirty on every ref churn would desync from
+  // child — SampleEditPane's onDirtyChange only re-fires when `dirty`
+  // changes, so a ref-only update would leave editDirty stuck at false
+  // while the pane still has unsaved tags/confidence/note. The save path
+  // (same filename, new baseline) is covered by SampleEditPane's
+  // baselineChanged branch instead: tags etc. get reset, dirty memo
+  // flips true→false, and onDirtyChange(false) drains editDirty.
   useEffect(() => {
     setEditDirty(false);
-  }, [open, entry]);
+  }, [open, entry?.filename]);
 
   useEffect(() => {
     if (!open || !imagePath) {
@@ -337,6 +341,3 @@ export function SampleModal({
     </ModalShell>
   );
 }
-
-// Exported for tests so spec §5.4 wording stays the single source of truth.
-export const __SAMPLE_MODAL_NAV_BLOCKED_TOOLTIP__ = NAV_BLOCKED_TOOLTIP;
