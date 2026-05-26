@@ -7,6 +7,11 @@ export type TagInputProps = {
   onChange: (next: string[]) => void;
   // datalist id; passed in so multiple TagInputs in one document don't collide.
   datalistId?: string;
+  // <input> id used for <label htmlFor> association on the host side. Without
+  // this, a sibling label cannot programmatically bind to the actual focusable
+  // element (the chip-input wrapper is a div, not a form control), so screen
+  // readers don't announce the label when focus lands on the input.
+  inputId?: string;
   ariaLabel?: string;
 };
 
@@ -29,6 +34,7 @@ export const TagInput = forwardRef<HTMLInputElement, TagInputProps>(function Tag
     knownTags,
     onChange,
     datalistId = "cls-tag-input-known",
+    inputId,
     ariaLabel,
   },
   ref,
@@ -129,6 +135,7 @@ export const TagInput = forwardRef<HTMLInputElement, TagInputProps>(function Tag
           if (typeof ref === "function") ref(el);
           else if (ref) ref.current = el;
         }}
+        id={inputId}
         type="text"
         className="cls-tag-input-field"
         list={datalistId}

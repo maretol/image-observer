@@ -18,6 +18,10 @@ const CONF_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "low", label: "low" },
 ];
 
+// <label htmlFor> targets the chip-input <input> inside TagInput. The pane is
+// always single-instance in the unified modal, so a stable global id is fine.
+const TAG_INPUT_ID = "sample-edit-pane-tags";
+
 export type SampleEditPaneProps = {
   // null while no entry is active (e.g. preview closed). The pane renders
   // a disabled placeholder so layout stays stable in the unified modal.
@@ -159,12 +163,15 @@ export function SampleEditPane({
   return (
     <div className="sample-edit-pane" role="group" aria-label="編集">
       <div className="cls-edit-row">
-        <label className="cls-edit-label">タグ</label>
+        <label className="cls-edit-label" htmlFor={TAG_INPUT_ID}>
+          タグ
+        </label>
         <TagInput
           ref={tagInputRef}
           tags={tags}
           knownTags={knownTags}
           onChange={setTags}
+          inputId={TAG_INPUT_ID}
           ariaLabel="タグ"
         />
       </div>
