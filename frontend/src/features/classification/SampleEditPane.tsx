@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { classification } from "../../../wailsjs/go/models";
 import { extractTags, serializeTags } from "./filters";
 import { computeEditDirty } from "./sampleEditDirty";
@@ -16,10 +23,11 @@ export type SampleEditPaneProps = {
   // a disabled placeholder so layout stays stable in the unified modal.
   entry: classification.Entry | null;
   knownTags: string[];
-  // Whether to autofocus the tag input on entry change. Set by the unified
-  // modal when opened from an "edit" trigger (Card pencil / context-menu
-  // 編集). For "preview" opens we leave focus on the preview pane.
-  autoFocusTag?: boolean;
+  // Tag <input> ref bubbled up so SampleModal can pass it to ModalShell as
+  // initialFocusRef for openSource === "edit" (ModalShell otherwise focuses
+  // the first focusable element, which would be a chip × button or the
+  // modal close icon — bypassing the tag input even with autoFocus set).
+  tagInputRef?: RefObject<HTMLInputElement | null>;
   onSave: (next: classification.Entry) => void;
   // Bubble dirty up so the parent (SampleModal) can disable prev/next
   // navigation while there are unsaved edits (spec §5.4).
@@ -29,7 +37,7 @@ export type SampleEditPaneProps = {
 export function SampleEditPane({
   entry,
   knownTags,
-  autoFocusTag = false,
+  tagInputRef,
   onSave,
   onDirtyChange,
 }: SampleEditPaneProps) {
@@ -95,7 +103,11 @@ export function SampleEditPane({
   }, [dirty, onDirtyChange]);
 
   const handleSave = useCallback(() => {
-    if (!entry) return;
+    // Gate on dirty so the Cmd/Ctrl+Enter shortcut matches the save
+    // button's disabled state — without this, the shortcut would fire
+    // saveEdit (and the editing.open=true → false → true blip from
+    // ClassificationView.handleSave) even when there is nothing to save.
+    if (!entry || !dirty) return;
     onSave(
       classification.Entry.createFrom({
         filename: entry.filename,
@@ -104,12 +116,16 @@ export function SampleEditPane({
         note,
       }),
     );
-  }, [entry, tags, confidence, note, onSave]);
+  }, [entry, dirty, tags, confidence, note, onSave]);
 
-  // Cmd/Ctrl+Enter to save. Scoped to this pane via a window listener so
-  // Tab focus inside child inputs doesn't matter. Esc is intentionally NOT
-  // handled here — ModalShell catches Esc to close the unified modal
-  // (spec §5.3: close discards unsaved with no confirm).
+  // Cmd/Ctrl+Enter to save. Bound at window so the shortcut works while
+  // focus is in any of the pane's inputs (tag chip-input / note textarea /
+  // confidence radios) without each one needing its own onKeyDown — the
+  // listener early-returns when there is no active entry or no dirty
+  // changes, so it is effectively scoped to "the unified modal with
+  // unsaved edits". Esc is intentionally NOT handled here — ModalShell
+  // catches Esc to close the unified modal (spec §5.3: close discards
+  // unsaved with no confirm).
   useEffect(() => {
     if (!entry) return;
     const onKey = (e: KeyboardEvent) => {
@@ -140,10 +156,10 @@ export function SampleEditPane({
       <div className="cls-edit-row">
         <label className="cls-edit-label">タグ</label>
         <TagInput
+          ref={tagInputRef}
           tags={tags}
           knownTags={knownTags}
           onChange={setTags}
-          autoFocus={autoFocusTag}
           ariaLabel="タグ"
         />
       </div>

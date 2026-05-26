@@ -1,11 +1,10 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { forwardRef, useRef, useState, type KeyboardEvent } from "react";
 import { readableTextColor, tagColor } from "./colors";
 
 export type TagInputProps = {
   tags: string[];
   knownTags: string[];
   onChange: (next: string[]) => void;
-  autoFocus?: boolean;
   // datalist id; passed in so multiple TagInputs in one document don't collide.
   datalistId?: string;
   ariaLabel?: string;
@@ -20,14 +19,20 @@ export type TagInputProps = {
 // excluding already-added tags) commits that candidate; other Tab behavior
 // (no draft / 0 or >1 matches / Shift+Tab) falls through to default focus
 // navigation.
-export function TagInput({
-  tags,
-  knownTags,
-  onChange,
-  autoFocus,
-  datalistId = "cls-tag-input-known",
-  ariaLabel,
-}: TagInputProps) {
+// SampleModal forwards initialFocusRef to ModalShell as the chip-input
+// <input> so openSource === "edit" lands focus there; without this, the
+// shell's first-focusable fallback would target a chip × button or the
+// modal close icon.
+export const TagInput = forwardRef<HTMLInputElement, TagInputProps>(function TagInput(
+  {
+    tags,
+    knownTags,
+    onChange,
+    datalistId = "cls-tag-input-known",
+    ariaLabel,
+  },
+  ref,
+) {
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -119,7 +124,11 @@ export function TagInput({
         );
       })}
       <input
-        ref={inputRef}
+        ref={(el) => {
+          inputRef.current = el;
+          if (typeof ref === "function") ref(el);
+          else if (ref) ref.current = el;
+        }}
         type="text"
         className="cls-tag-input-field"
         list={datalistId}
@@ -127,7 +136,6 @@ export function TagInput({
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={onKeyDown}
         onBlur={() => commit(draft)}
-        autoFocus={autoFocus}
         placeholder={
           tags.length === 0 ? "タグを入力 (Enter / スペース / , で確定)" : ""
         }
@@ -141,4 +149,4 @@ export function TagInput({
       </datalist>
     </div>
   );
-}
+});

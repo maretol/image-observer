@@ -12,6 +12,7 @@
 |------|---------|---------|
 | 2026-05-26 | 初版 | Phase 1 を「SampleModal を統合モーダルに拡張、EditPopover の独立呼び出しは廃止」に絞る。§10 で 6 つの設計判断点を提示。 |
 | 2026-05-26 | ユーザー合意 | §10-A〜F すべて推奨案 (A 案) で確定。実装着手可に更新。 |
+| 2026-05-26 | PR #102 レビュー対応 | §10-E の削除済み `EditPopover.tsx` へのリンクを除去 (git 履歴で参照可能の旨だけ残す)。 |
 
 ---
 
@@ -263,7 +264,7 @@ dirty の上昇方法 (callback ref / state lift) は実装時に決める。
 
 ### 10-E. EditPopover コンポーネントの扱い
 
-- **A 案 (推奨)**: 削除し、中身を `SampleEditPane.tsx` として作り直す (dialog 外殻を取り除いた形)。 [filename](frontend/src/features/classification/EditPopover.tsx) は git 履歴に残るので将来参照可能。
+- **A 案 (推奨)**: 削除し、中身を `SampleEditPane.tsx` として作り直す (dialog 外殻を取り除いた形)。`EditPopover.tsx` は git 履歴に残るので将来参照可能。
 - B 案: EditPopover を残して、SampleModal の中に `<EditPopover open={true} entry={...} />` をネスト。dialog 内 dialog の二重構造が混乱を招くため非推奨。
 
 ### 10-F. モーダル幅の目安

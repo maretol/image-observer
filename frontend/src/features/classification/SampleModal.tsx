@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GetThumbnail } from "../../../wailsjs/go/main/App";
 import { classification } from "../../../wailsjs/go/models";
 import { ModalShell } from "../../shared/components/ModalShell";
@@ -19,7 +19,10 @@ const PREVIEW_SIZE = 1024;
 const PREVIEW_MODE = "letterbox";
 
 // Tooltip used on prev/next while editing pane has unsaved changes (#93,
-// spec §5.4). Shared so the button label and aria stay in sync.
+// spec §5.4). Surfaced via `title` only — `aria-label` stays on the
+// operation name ("前の画像 (←)") so screen readers always announce what
+// the button does. The unsaved state itself is conveyed by the dirty
+// badge in the header (aria-label "未保存の変更があります").
 const NAV_BLOCKED_TOOLTIP =
   "未保存の変更があります。保存またはキャンセルしてください";
 
@@ -85,6 +88,20 @@ export function SampleModal({
   // Bubble dirty state up from SampleEditPane so prev/next can be blocked
   // while there are unsaved edits (#93 spec §5.4).
   const [editDirty, setEditDirty] = useState(false);
+
+  // Initial-focus routing for ModalShell. ModalShell's default behavior is
+  // to focus the first focusable descendant on open, which would land on
+  // the close icon and override any child `autoFocus`. We explicitly hand
+  // it a ref so spec §5.2 is honored:
+  //   openSource === "edit"    → tag input (editing pane)
+  //   openSource === "preview" → close button (preview side; Tab from here
+  //                              flows into prev/next → edit pane)
+  const tagInputRef = useRef<HTMLInputElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const initialFocusRef = useMemo(
+    () => (openSource === "edit" ? tagInputRef : closeBtnRef),
+    [openSource],
+  );
 
   // Reset dirty whenever the modal closes or the active entry changes
   // (filename swap via prev/next, watcher-driven entry reference change,
@@ -185,6 +202,7 @@ export function SampleModal({
     <ModalShell
       open={open}
       onClose={onClose}
+      initialFocusRef={initialFocusRef}
       ariaLabel={
         filename ? `${filename} のプレビューと編集` : "画像プレビューと編集"
       }
@@ -205,6 +223,7 @@ export function SampleModal({
           ) : null}
         </div>
         <button
+          ref={closeBtnRef}
           type="button"
           className="sample-modal-close"
           onClick={onClose}
@@ -235,7 +254,7 @@ export function SampleModal({
                 className="sample-modal-nav sample-modal-nav-prev"
                 onClick={() => effectivePrev?.()}
                 disabled={effectivePrev === null}
-                aria-label={prevBlocked ? NAV_BLOCKED_TOOLTIP : "前の画像 (←)"}
+                aria-label="前の画像 (←)"
                 title={prevBlocked ? NAV_BLOCKED_TOOLTIP : "前の画像 (←)"}
               >
                 <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
@@ -253,7 +272,7 @@ export function SampleModal({
                 className="sample-modal-nav sample-modal-nav-next"
                 onClick={() => effectiveNext?.()}
                 disabled={effectiveNext === null}
-                aria-label={nextBlocked ? NAV_BLOCKED_TOOLTIP : "次の画像 (→)"}
+                aria-label="次の画像 (→)"
                 title={nextBlocked ? NAV_BLOCKED_TOOLTIP : "次の画像 (→)"}
               >
                 <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
@@ -272,7 +291,7 @@ export function SampleModal({
         <SampleEditPane
           entry={entry}
           knownTags={knownTags}
-          autoFocusTag={openSource === "edit"}
+          tagInputRef={tagInputRef}
           onSave={onSave}
           onDirtyChange={setEditDirty}
         />
@@ -289,7 +308,6 @@ export function SampleModal({
             type="button"
             className="sample-modal-open-viewer"
             onClick={() => onOpenInViewer(viewers[0].id)}
-            autoFocus={openSource === "preview"}
           >
             ビューア「{viewers[0].name}」で開く
           </button>
@@ -308,7 +326,6 @@ export function SampleModal({
                 onClick={() => onOpenInViewer(v.id)}
                 title={v.name}
                 aria-label={`ビューア「${v.name}」で開く${isActive ? " (現在アクティブ)" : ""}`}
-                autoFocus={openSource === "preview" && isActive}
               >
                 {isActive ? "✓ " : ""}
                 {v.name}
