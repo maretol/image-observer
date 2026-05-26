@@ -86,13 +86,17 @@ export function SampleModal({
   // while there are unsaved edits (#93 spec §5.4).
   const [editDirty, setEditDirty] = useState(false);
 
-  // Reset dirty whenever the modal closes or the active entry filename
-  // changes — the SampleEditPane resets its own form, but parent-side dirty
-  // memory shouldn't outlive the entry it was computed for.
+  // Reset dirty whenever the modal closes or the active entry changes
+  // (filename swap via prev/next, watcher-driven entry reference change,
+  // entry becoming null, etc.) — the SampleEditPane will re-fire
+  // onDirtyChange against its new baseline, but until that fires the
+  // parent's editDirty should not carry forward "was dirty for the
+  // previous entry" state. Unconditional reset on the dep change also
+  // closes the transient gap where SampleEditPane's `dirty` useMemo can
+  // briefly see the new entry alongside the previous render's
+  // tags/confidence/note before its baseline-reset useEffect flushes.
   useEffect(() => {
-    if (!open || !entry) {
-      setEditDirty(false);
-    }
+    setEditDirty(false);
   }, [open, entry]);
 
   useEffect(() => {

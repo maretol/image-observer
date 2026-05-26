@@ -226,14 +226,25 @@ export function ClassificationView({
   // refreshed baseline is the correct moment. Conflict / error paths in
   // saveEdit leave editing untouched, in which case re-calling openEdit
   // with the same filename is a no-op same-value setState.
+  //
+  // previewFilenameRef provides the *current* (not closure-captured)
+  // filename at await completion. Without the ref, "保存クリック → 即
+  // Esc/×/backdrop で閉じる" の操作で handleSave のクロージャが閉じる前の
+  // previewFilename を保持したまま openEdit を呼んでしまい、モーダルが
+  // 閉じた後に editing.open=true が復活して watcher replay の defer が
+  // 解除されない。render-time assignment は AGENTS.md H-8 の
+  // "state ref の同期タイミング" に従う。
+  const previewFilenameRef = useRef<string | null>(null);
+  previewFilenameRef.current = previewFilename;
   const handleSave = useCallback(
     async (entry: classification.Entry) => {
       await saveEdit(entry);
-      if (previewFilename !== null) {
-        openEdit(previewFilename);
+      const current = previewFilenameRef.current;
+      if (current !== null) {
+        openEdit(current);
       }
     },
-    [saveEdit, openEdit, previewFilename],
+    [saveEdit, openEdit],
   );
 
   // Edit pane resolves the active entry from previewFilename against the
