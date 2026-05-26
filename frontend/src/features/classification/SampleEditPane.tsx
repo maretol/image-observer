@@ -90,9 +90,14 @@ export function SampleEditPane({
     }
   }, [entry]);
 
-  // Derive dirty against the latest baseline. The pure helper applies
-  // serializeTags normalization so cosmetic tag reorderings don't flip
-  // dirty on (see sampleEditDirty.test.ts).
+  // Derive dirty against the latest baseline. The pure helper round-trips
+  // both sides through serializeTags(extractTags(...)) to absorb cosmetic
+  // format differences only — legacy "alice,bob" (no space after comma) or
+  // parens form "head (a + b)" baselines compare clean against the
+  // canonical "alice, bob" save format, and duplicate-tag inputs are
+  // de-duplicated before compare. Tag order itself is *not* normalized
+  // (serializeTags does not sort), so a user-driven reorder still flips
+  // dirty on. See sampleEditDirty.test.ts.
   const dirty = useMemo(
     () => computeEditDirty(entry, tags, confidence, note),
     [entry, tags, confidence, note],
