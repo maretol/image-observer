@@ -808,10 +808,13 @@ html, body, #root {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
-  /* Cap so we don't stretch edge-to-edge on ultra-wide / ultra-tall displays. */
+  /* Cap so we don't stretch edge-to-edge on ultra-wide / ultra-tall displays.
+     Width was bumped from 1100 → 1280 when the edit pane joined the modal
+     (#93): the preview keeps roughly its old width while the right pane
+     gets ~360px. */
   max-width: 90vw;
   max-height: 90vh;
-  width: min(1100px, 90vw);
+  width: min(1280px, 90vw);
   /* DEFINITE height (not just max-height) so the body's `flex: 1` resolves
      against a known value and the image's `max-height: 100%` actually clamps.
      With only max-height set, the modal would be content-sized and the
@@ -819,6 +822,31 @@ html, body, #root {
      its natural height (PR #46 regression: image overflowed the viewport). */
   height: min(800px, 90vh);
   overflow: hidden;
+}
+
+/* Horizontal split for the unified preview + edit modal (#93). The preview
+   pane (.sample-modal-body) takes most of the room and shrinks to fit; the
+   edit pane (.sample-edit-pane) has a fixed comfortable width and scrolls
+   internally when the textarea / tag chips grow. */
+.sample-modal-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  overflow: hidden;
+}
+
+/* Small unsaved-changes dot inside the modal header title (#93 spec §5.3).
+   Subtle accent color reuses the existing terracotta token so the dot reads
+   as "attention" without screaming. */
+.sample-modal-dirty-badge {
+  display: inline-block;
+  margin-left: 8px;
+  color: #d97a3c;
+  font-size: 14px;
+  line-height: 1;
+  vertical-align: middle;
 }
 
 .sample-modal-header {
@@ -862,6 +890,7 @@ html, body, #root {
 
 .sample-modal-body {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   align-items: center;
@@ -1727,20 +1756,9 @@ html, body, #root {
   word-break: break-word;
 }
 
-/* Edit popover (uses base .confirm-dialog styles for layout) */
-
-.cls-edit-popover {
-  min-width: 420px;
-  max-width: 540px;
-}
-
-.cls-edit-title {
-  font-size: 13px;
-  color: #aaa;
-  margin-bottom: 12px;
-  font-family: ui-monospace, monospace;
-  word-break: break-all;
-}
+/* Edit pane field primitives (cls-edit-*). Reused by .sample-edit-pane
+   (#93). Layout (outer wrapper / dialog chrome) is handled by the pane
+   class itself; only the per-field building blocks live here. */
 
 .cls-edit-row {
   display: flex;
@@ -1852,6 +1870,50 @@ html, body, #root {
   align-items: center;
   gap: 4px;
   cursor: pointer;
+}
+
+/* Unified sample modal edit pane (#93). The pane sits on the right side
+   of .sample-modal-content next to .sample-modal-body. Width is fixed so
+   the preview takes the rest. Internal scroll handles tall textarea / many
+   tag chips. Reuses .cls-edit-row / .cls-edit-label / .cls-edit-textarea /
+   .cls-edit-radios from the former EditPopover. */
+.sample-edit-pane {
+  width: 360px;
+  flex-shrink: 0;
+  padding: 14px 16px;
+  border-left: 1px solid #3f3f46;
+  background: #2a2a2d;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+/* Placeholder when no entry resolves (mid filter race). Keeps the layout
+   stable so the preview pane doesn't reflow. */
+.sample-edit-pane-empty {
+  /* Intentionally empty — the wrapper above already reserves the column. */
+}
+
+/* The note row grows to fill remaining height so the textarea expands
+   instead of leaving dead space at the bottom of the pane. */
+.sample-edit-pane-note-row {
+  flex: 1;
+  min-height: 0;
+}
+
+.sample-edit-pane-note {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+}
+
+.sample-edit-pane-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  flex-shrink: 0;
 }
 
 /* Conflict dialog */

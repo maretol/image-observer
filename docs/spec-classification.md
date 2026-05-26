@@ -243,7 +243,8 @@ frontend/src/
 │       ├── SearchBox.tsx
 │       ├── ClassificationGrid.tsx
 │       ├── Card.tsx
-│       ├── EditPopover.tsx
+│       ├── SampleEditPane.tsx    # 統合 SampleModal 内の編集ペイン (#93 で
+│       │                         # 旧 EditPopover.tsx を抽出)
 │       ├── Lightbox.tsx
 │       ├── filters.ts            # extractTags / tagSummary / applyFilter (純関数)
 │       ├── filters.test.ts       # § 11 のテスト対象

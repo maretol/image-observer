@@ -14,8 +14,7 @@ import { CardContextMenu } from "./CardContextMenu";
 import { ClassificationHeader } from "./ClassificationHeader";
 import { ConfidenceSegment } from "./ConfidenceSegment";
 import { DirectoryGroup } from "./DirectoryGroup";
-import { EditPopover } from "./EditPopover";
-import { SampleModal } from "./SampleModal";
+import { SampleModal, type SampleModalOpenSource } from "./SampleModal";
 import { SearchBox } from "./SearchBox";
 import { TagChips } from "./TagChips";
 import {
@@ -66,7 +65,6 @@ export function ClassificationView({
     loading,
     filter,
     filteredEntries,
-    editing,
     conflict,
     mergePrompt,
     isCollapsed,
@@ -97,11 +95,6 @@ export function ClassificationView({
   } = state;
 
   const allEntries = loadResult?.entries ?? [];
-
-  const editingEntry = useMemo(() => {
-    if (!editing.open || !editing.filename) return null;
-    return allEntries.find((e) => e.filename === editing.filename) ?? null;
-  }, [editing, allEntries]);
 
   const knownTags = useMemo(() => {
     return Array.from(tagSummary(allEntries).keys()).sort();
@@ -172,19 +165,58 @@ export function ClassificationView({
     if (groupsElRef.current) groupsElRef.current.scrollTop = 0;
   }, [folderPath, scrollTopRef]);
 
-  // Sample modal (#9). Filename only — paired with folderPath in render to
-  // build the IPC path. Folder change dismisses an open preview because the
-  // captured filename no longer belongs to the current view. Not persisted.
+  // Sample modal (#9, unified preview+edit since #93). Filename only —
+  // paired with folderPath in render to build the IPC path. Folder change
+  // dismisses an open preview because the captured filename no longer
+  // belongs to the current view. Not persisted.
+  //
+  // `previewOpenSource` records *how* the modal was opened so the unified
+  // modal can route initial focus: "preview" leaves focus on the preview
+  // side (Card thumb click / keyboard activation), "edit" autofocuses the
+  // tag input (Card pencil button / context-menu 編集). See spec §5.2.
   const [previewFilename, setPreviewFilename] = useState<string | null>(null);
-  const openPreview = useCallback((filename: string) => {
-    setPreviewFilename(filename);
-  }, []);
+  const [previewOpenSource, setPreviewOpenSource] =
+    useState<SampleModalOpenSource>("preview");
+  // The unified modal also drives `useClassification.editing` so the
+  // existing replay-defer machinery in useClassificationReplay (watcher
+  // events arriving while editing.open=true get parked and replayed when
+  // the modal closes) keeps working. Both preview and edit triggers open
+  // the same modal and set editing.open=true — the underlying semantics
+  // ("an entry is being inspected, hold external merges briefly") apply
+  // equally to both starting points.
+  const openPreview = useCallback(
+    (filename: string) => {
+      setPreviewFilename(filename);
+      setPreviewOpenSource("preview");
+      openEdit(filename);
+    },
+    [openEdit],
+  );
+  const openEditModal = useCallback(
+    (filename: string) => {
+      setPreviewFilename(filename);
+      setPreviewOpenSource("edit");
+      openEdit(filename);
+    },
+    [openEdit],
+  );
   const closePreview = useCallback(() => {
     setPreviewFilename(null);
-  }, []);
+    closeEdit();
+  }, [closeEdit]);
   useLayoutEffect(() => {
     setPreviewFilename(null);
-  }, [folderPath]);
+    closeEdit();
+  }, [folderPath, closeEdit]);
+
+  // Edit pane resolves the active entry from previewFilename against the
+  // current loadResult — the unified SampleModal (#93) owns the open
+  // filename directly instead of going through useClassification.editing,
+  // so the lookup happens here and the entry is passed in as a prop.
+  const previewEntry = useMemo(() => {
+    if (previewFilename === null) return null;
+    return allEntries.find((e) => e.filename === previewFilename) ?? null;
+  }, [previewFilename, allEntries]);
 
   // Sample modal prev/next navigation (#94). Derived from `displayedOrder`
   // (already collapsed-aware: Shift+click range selection also includes
@@ -473,7 +505,7 @@ export function ClassificationView({
               showCheckbox={showCheckbox}
               modifierEnabled={modifierEnabled}
               onToggle={toggleGroup}
-              onClickEdit={openEdit}
+              onClickEdit={openEditModal}
               onClickPreview={openPreview}
               onToggleSelect={toggleSelected}
               onExtendSelectionTo={(filename) =>
@@ -484,13 +516,6 @@ export function ClassificationView({
           ))}
         </div>
       )}
-      <EditPopover
-        open={editing.open}
-        entry={editingEntry}
-        knownTags={knownTags}
-        onSave={saveEdit}
-        onCancel={closeEdit}
-      />
       <ConflictDialog
         open={conflict !== null}
         onReload={resolveConflictReload}
@@ -519,6 +544,10 @@ export function ClassificationView({
         }}
         onPrev={onPrevPreview}
         onNext={onNextPreview}
+        entry={previewEntry}
+        knownTags={knownTags}
+        openSource={previewOpenSource}
+        onSave={saveEdit}
       />
       {cardCtxMenu ? (
         <CardContextMenu
