@@ -22,6 +22,12 @@ const CONF_OPTIONS: Array<{ value: string; label: string }> = [
 // always single-instance in the unified modal, so a stable global id is fine.
 const TAG_INPUT_ID = "sample-edit-pane-tags";
 
+// id of the confidence heading <div>. Referenced from the radio group's
+// aria-labelledby so SR users hear "confidence" when entering the group
+// (the heading is not a <label htmlFor> because the radios are wrapped by
+// per-option <label>s — a single htmlFor cannot point at all of them).
+const CONF_GROUP_LABEL_ID = "sample-edit-pane-confidence-label";
+
 export type SampleEditPaneProps = {
   // null while no entry is active (e.g. preview closed). The pane renders
   // a disabled placeholder so layout stays stable in the unified modal.
@@ -94,14 +100,15 @@ export function SampleEditPane({
     }
   }, [entry]);
 
-  // Derive dirty against the latest baseline. The pure helper round-trips
-  // both sides through serializeTags(extractTags(...)) to absorb cosmetic
-  // format differences only — legacy "alice,bob" (no space after comma) or
-  // parens form "head (a + b)" baselines compare clean against the
-  // canonical "alice, bob" save format, and duplicate-tag inputs are
-  // de-duplicated before compare. Tag order itself is *not* normalized
-  // (serializeTags does not sort), so a user-driven reorder still flips
-  // dirty on. See sampleEditDirty.test.ts.
+  // Derive dirty against the latest baseline. The pure helper passes the
+  // entry side through serializeTags(extractTags(entry.folder)) and the
+  // local tags side through serializeTags(tags) only — so legacy
+  // "alice,bob" (no space after comma) or parens form "head (a + b)"
+  // baselines round-trip to the canonical "alice, bob" save format and
+  // do not show up as dirty on open. The local side intentionally skips
+  // extractTags (TagInput.commit already rejects duplicates on input, so
+  // the state never holds them) and does not sort, so a user-driven
+  // reorder still flips dirty on. See sampleEditDirty.test.ts.
   const dirty = useMemo(
     () => computeEditDirty(entry, tags, confidence, note),
     [entry, tags, confidence, note],
@@ -129,14 +136,15 @@ export function SampleEditPane({
 
   // Cmd/Ctrl+Enter to save. Bound at window so the shortcut works while
   // focus is in any of the pane's inputs (tag chip-input / note textarea /
-  // confidence radios) without each one needing its own onKeyDown — the
-  // listener early-returns when there is no active entry or no dirty
-  // changes, so it is effectively scoped to "the unified modal with
-  // unsaved edits". Esc is intentionally NOT handled here — ModalShell
-  // catches Esc to close the unified modal (spec §5.3: close discards
-  // unsaved with no confirm).
+  // confidence radios) without each one needing its own onKeyDown. Gated
+  // on `entry && dirty` *before* preventDefault so non-dirty Ctrl+Enter
+  // falls through to the platform default (e.g. textarea newline) instead
+  // of being silently swallowed — matches the save button's disabled
+  // state. Esc is intentionally NOT handled here — ModalShell catches Esc
+  // to close the unified modal (spec §5.3: close discards unsaved with no
+  // confirm).
   useEffect(() => {
-    if (!entry) return;
+    if (!entry || !dirty) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
@@ -145,7 +153,7 @@ export function SampleEditPane({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [entry, handleSave]);
+  }, [entry, dirty, handleSave]);
 
   const handleCancel = useCallback(() => {
     if (!entry) return;
@@ -176,8 +184,14 @@ export function SampleEditPane({
         />
       </div>
       <div className="cls-edit-row">
-        <label className="cls-edit-label">confidence</label>
-        <div className="cls-edit-radios">
+        <div id={CONF_GROUP_LABEL_ID} className="cls-edit-label">
+          confidence
+        </div>
+        <div
+          className="cls-edit-radios"
+          role="radiogroup"
+          aria-labelledby={CONF_GROUP_LABEL_ID}
+        >
           {CONF_OPTIONS.map((opt) => (
             <label key={opt.value} className="cls-edit-radio">
               <input

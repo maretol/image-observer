@@ -7,10 +7,13 @@ import { extractTags, serializeTags } from "./filters";
 // is testable in isolation (spec §5.4 hinges on this — false negatives
 // here would let unsaved edits silently survive a prev/next jump).
 //
-// Tag comparison goes through serializeTags on *both* sides so legacy
-// "alice,bob" sidecars (no space after comma) round-trip cleanly against
-// the canonical "alice, bob" save format and don't show up as dirty on
-// open. Only genuine user edits flip dirty on.
+// Tag comparison passes the entry side through extractTags() to canonicalize
+// legacy parens / "alice,bob" (no space after comma) folders, then runs
+// serializeTags() on *both* sides so the comparison is against the canonical
+// "alice, bob" save format. The local `tags` side is not re-extracted —
+// TagInput.commit already rejects duplicates on input so the state never
+// holds them, and the order is preserved (a user-driven reorder still
+// flips dirty on). Only genuine user edits flip dirty on.
 export function computeEditDirty(
   entry: classification.Entry | null,
   tags: string[],
