@@ -59,15 +59,31 @@ export function ImageView({
 
   // Fetch image when path changes. 3 IPC を並行発火 (spec-low-res-preview.md §6):
   //   GetImageInfo → 寸法を tab state に流し initial fit を駆動
-  //   getPreview   → 低解像度プレビュー (original 先着時は破棄、失敗は黙殺)
+  //   getPreview   → 低解像度プレビュー (original 確定後は破棄、失敗は黙殺)
   //   ReadImage    → オリジナル本体 (既存挙動)
-  // originalArrived フラグは preview の .then が同一 useEffect 実行内で
-  // ReadImage 完了を観測するためのローカル。useRef ではないので tab.path
-  // 切替時には新しい useEffect 呼び出しでリセットされる。
+  // originalSettled フラグは preview の .then が同一 useEffect 実行内で
+  // ReadImage 完了 (success/failure 両方) を観測するためのローカル。後着 preview
+  // が表示に使われない (success) or 不可視 (failure) Blob を作るのを抑止する。
+  // useRef ではないので tab.path 切替時には新しい useEffect 呼び出しでリセット
+  // される。
   useEffect(() => {
     let cancelled = false;
-    let originalArrived = false;
+    let originalSettled = false;
     let createdPreviewUrl: string | null = null;
+
+    // ReadImage 成功 / 失敗どちらでも、もう preview Blob は表示に使われない
+    // ので即破棄してメモリを返す。<img src> swap が React の commit 後に走る
+    // ので、ブラウザが旧 src を参照している間に revoke すると最悪レンダリングが
+    // 中断される可能性がある → setTimeout で 1 frame 以上遅延させてから revoke。
+    // 失敗経路では <img> 自体出ないが、念のため同じ流儀で扱う (cleanup でも
+    // 重ねて revoke するが URL.revokeObjectURL は idempotent)。
+    const releasePreview = () => {
+      if (!createdPreviewUrl) return;
+      const toRevoke = createdPreviewUrl;
+      createdPreviewUrl = null;
+      setPreviewUrl(null);
+      setTimeout(() => URL.revokeObjectURL(toRevoke), 100);
+    };
 
     setImageData(null);
     setPreviewUrl(null);
@@ -93,12 +109,13 @@ export function ImageView({
         /* swallow: ReadImage surfaces user-facing error */
       });
 
-    // 低解像度プレビュー。original 先着なら作らない (spec D-12)。
+    // 低解像度プレビュー。original が settled (success/failure 問わず) なら
+    // Blob を作らない (spec D-12 + 失敗経路の不可視 Blob 回避)。
     // 失敗は logger.warn のみで吞む (spec D-5)、ただし cancelled 後は
     // tab 切替 / unmount でログがノイズ化するので warn も抑止。
     getPreview(tab.path)
       .then((res) => {
-        if (cancelled || originalArrived) return;
+        if (cancelled || originalSettled) return;
         const bytes = toBytes(res.data);
         const blob = new Blob([bytes], { type: res.mimeType });
         createdPreviewUrl = URL.createObjectURL(blob);
@@ -112,14 +129,15 @@ export function ImageView({
         });
       });
 
-    // オリジナル本体。成功で originalArrived を立てて preview を抑止。
-    // onUpdateTabState は updateRef/tabIndexRef 経由 (上記 GetImageInfo と
-    // 同じ理由)。
+    // オリジナル本体。success/failure どちらでも originalSettled を立てて
+    // preview を抑止 + 既存 Blob を解放。onUpdateTabState は updateRef/
+    // tabIndexRef 経由 (上記 GetImageInfo と同じ理由)。
     ReadImage(tab.path)
       .then((res) => {
         if (cancelled) return;
-        originalArrived = true;
+        originalSettled = true;
         setImageData(res);
+        releasePreview();
         const cur = tabRef.current;
         if (cur.imageWidth !== res.width || cur.imageHeight !== res.height) {
           updateRef.current(tabIndexRef.current, {
@@ -130,6 +148,8 @@ export function ImageView({
       })
       .catch((e) => {
         if (cancelled) return;
+        originalSettled = true;
+        releasePreview();
         const msg = errorMessage(e);
         setLoadError(msg);
         toast(`画像読み込みに失敗: ${basename(tab.path)} — ${msg}`, "error");
