@@ -15,6 +15,17 @@ const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8.0;
 const ZOOM_STEP = 1.2;
 
+// preview Blob URL を revoke するまでの遅延 (ms)。
+//
+// React の commit 後に <img src> が swap されるのを待ってから旧 URL を破棄
+// する目的。即時 revoke だと unmount / tab.path 切替の瞬間にブラウザが
+// まだ旧 src を参照していて描画が崩れる可能性がある。
+//
+// 値は 60Hz 想定で 1-2 frame (~16.7〜33ms) より大きく、人間の知覚閾値
+// (~100ms) 以下に収めて余分なメモリ保持を最小化。releasePreview() と
+// useEffect cleanup の両方で同じ遅延を使う。
+const PREVIEW_REVOKE_DELAY_MS = 100;
+
 type Props = {
   tab: Tab;
   tabIndex: number;
@@ -72,17 +83,16 @@ export function ImageView({
     let createdPreviewUrl: string | null = null;
 
     // ReadImage 成功 / 失敗どちらでも、もう preview Blob は表示に使われない
-    // ので即破棄してメモリを返す。<img src> swap が React の commit 後に走る
-    // ので、ブラウザが旧 src を参照している間に revoke すると最悪レンダリングが
-    // 中断される可能性がある → setTimeout で 1 frame 以上遅延させてから revoke。
-    // 失敗経路では <img> 自体出ないが、念のため同じ流儀で扱う (cleanup でも
-    // 重ねて revoke するが URL.revokeObjectURL は idempotent)。
+    // ので解放してメモリを返す。revoke の遅延理由 / 値は
+    // PREVIEW_REVOKE_DELAY_MS のコメント参照。失敗経路では <img> 自体出ない
+    // が、cleanup でも重ねて revoke する可能性に備えて idempotent な扱いに
+    // 統一 (URL.revokeObjectURL は idempotent)。
     const releasePreview = () => {
       if (!createdPreviewUrl) return;
       const toRevoke = createdPreviewUrl;
       createdPreviewUrl = null;
       setPreviewUrl(null);
-      setTimeout(() => URL.revokeObjectURL(toRevoke), 100);
+      setTimeout(() => URL.revokeObjectURL(toRevoke), PREVIEW_REVOKE_DELAY_MS);
     };
 
     setImageData(null);
@@ -157,7 +167,15 @@ export function ImageView({
 
     return () => {
       cancelled = true;
-      if (createdPreviewUrl) URL.revokeObjectURL(createdPreviewUrl);
+      // releasePreview() と同じ遅延で revoke。unmount / tab.path 切替直後は
+      // ブラウザがまだ旧 <img src> を参照中の可能性があるため即時 revoke
+      // しない。setPreviewUrl は呼ばない (component が unmount 中 / 次の
+      // useEffect で setPreviewUrl(null) が走るため不要)。
+      if (createdPreviewUrl) {
+        const toRevoke = createdPreviewUrl;
+        createdPreviewUrl = null;
+        setTimeout(() => URL.revokeObjectURL(toRevoke), PREVIEW_REVOKE_DELAY_MS);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.path]);
