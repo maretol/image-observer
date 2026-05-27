@@ -1,22 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { GetThumbnail } from "../../../wailsjs/go/main/App";
 import type { classification } from "../../../wailsjs/go/models";
 import { ModalShell } from "../../shared/components/ModalShell";
 import { CloseIcon } from "../../shared/icons/CloseIcon";
 import { toBytes } from "../../shared/utils/base64";
 import { errorMessage } from "../../shared/utils/error";
 import { logger } from "../../shared/utils/logger";
+import { getPreview } from "../../shared/utils/thumbnailDefaults";
 import { SampleEditPane } from "./SampleEditPane";
-
-// Preview thumb dimension. Bigger than the list-card thumbnail (typically
-// 256px) so the modal looks crisp on a 1080p screen, but small enough that
-// the Go-side cached preview decodes in well under a frame. Letterbox mode
-// preserves aspect ratio so the modal can size to the natural shape of the
-// image without forcing a square crop. Cached separately from the list size
-// in Go's per-size thumb cache; first preview on a path triggers a fresh
-// resize, subsequent previews are instant.
-const PREVIEW_SIZE = 1024;
-const PREVIEW_MODE = "letterbox";
 
 // Tooltip used on prev/next while editing pane has unsaved changes (#93,
 // spec §5.4). Surfaced via `title` only — `aria-label` stays on the
@@ -130,7 +120,7 @@ export function SampleModal({
     let createdUrl: string | null = null;
     setUrl(null);
     setState("loading");
-    GetThumbnail(imagePath, PREVIEW_SIZE, PREVIEW_MODE)
+    getPreview(imagePath)
       .then((res) => {
         if (cancelled) return;
         const bytes = toBytes(res.data);
