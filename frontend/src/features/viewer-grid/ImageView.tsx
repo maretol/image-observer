@@ -75,11 +75,15 @@ export function ImageView({
 
     // 寸法先行確定 (header 読み only)。失敗は黙殺 — ReadImage が同じ理由で
     // 失敗するならそちらでユーザー向けエラーが surface する。
+    // async callback 内の onUpdateTabState は updateRef/tabIndexRef 経由で
+    // 呼ぶ (タブ並び替え中に await から戻ると closure 内 tabIndex が古く
+    // なり別タブを更新するリスクがあるため)。
     GetImageInfo(tab.path)
       .then((info) => {
         if (cancelled) return;
-        if (tab.imageWidth !== info.width || tab.imageHeight !== info.height) {
-          onUpdateTabState(tabIndex, {
+        const cur = tabRef.current;
+        if (cur.imageWidth !== info.width || cur.imageHeight !== info.height) {
+          updateRef.current(tabIndexRef.current, {
             imageWidth: info.width,
             imageHeight: info.height,
           });
@@ -90,7 +94,8 @@ export function ImageView({
       });
 
     // 低解像度プレビュー。original 先着なら作らない (spec D-12)。
-    // 失敗は logger.warn のみで吞む (spec D-5)。
+    // 失敗は logger.warn のみで吞む (spec D-5)、ただし cancelled 後は
+    // tab 切替 / unmount でログがノイズ化するので warn も抑止。
     getPreview(tab.path)
       .then((res) => {
         if (cancelled || originalArrived) return;
@@ -100,6 +105,7 @@ export function ImageView({
         setPreviewUrl(createdPreviewUrl);
       })
       .catch((e) => {
+        if (cancelled) return;
         logger.warn("viewer-grid", "preview load failed", {
           path: tab.path,
           err: errorMessage(e),
@@ -107,13 +113,16 @@ export function ImageView({
       });
 
     // オリジナル本体。成功で originalArrived を立てて preview を抑止。
+    // onUpdateTabState は updateRef/tabIndexRef 経由 (上記 GetImageInfo と
+    // 同じ理由)。
     ReadImage(tab.path)
       .then((res) => {
         if (cancelled) return;
         originalArrived = true;
         setImageData(res);
-        if (tab.imageWidth !== res.width || tab.imageHeight !== res.height) {
-          onUpdateTabState(tabIndex, {
+        const cur = tabRef.current;
+        if (cur.imageWidth !== res.width || cur.imageHeight !== res.height) {
+          updateRef.current(tabIndexRef.current, {
             imageWidth: res.width,
             imageHeight: res.height,
           });
