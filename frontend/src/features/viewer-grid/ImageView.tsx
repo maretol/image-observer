@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReadImage } from "../../../wailsjs/go/main/App";
+import { GetImageInfo, ReadImage } from "../../../wailsjs/go/main/App";
 import { imgread } from "../../../wailsjs/go/models";
 import type { Tab } from "./useTabs";
-import { toDataURL } from "../../shared/utils/base64";
+import { toBytes, toDataURL } from "../../shared/utils/base64";
 import { pushBodyStyle } from "../../shared/utils/bodyStyles";
 import { useToastFn } from "../../shared/components/Toast";
 import { errorMessage } from "../../shared/utils/error";
 import { zoomCommandBus, type ZoomCommand } from "../../shared/utils/keybindings";
+import { logger } from "../../shared/utils/logger";
 import { basename } from "../../shared/utils/path";
+import { getPreview } from "../../shared/utils/thumbnailDefaults";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8.0;
@@ -31,6 +33,9 @@ export function ImageView({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [imageData, setImageData] = useState<imgread.Result | null>(null);
+  // 低解像度プレビュー (#97)。original 到着までの一時表示用 Blob URL。
+  // original が先着した場合は setPreviewUrl をスキップして Blob を作らない (spec D-12)。
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const toast = useToastFn();
   const dragRef = useRef<{
@@ -52,14 +57,60 @@ export function ImageView({
   const updateRef = useRef(onUpdateTabState);
   updateRef.current = onUpdateTabState;
 
-  // Fetch image when path changes
+  // Fetch image when path changes. 3 IPC を並行発火 (spec-low-res-preview.md §6):
+  //   GetImageInfo → 寸法を tab state に流し initial fit を駆動
+  //   getPreview   → 低解像度プレビュー (original 先着時は破棄、失敗は黙殺)
+  //   ReadImage    → オリジナル本体 (既存挙動)
+  // originalArrived フラグは preview の .then が同一 useEffect 実行内で
+  // ReadImage 完了を観測するためのローカル。useRef ではないので tab.path
+  // 切替時には新しい useEffect 呼び出しでリセットされる。
   useEffect(() => {
     let cancelled = false;
+    let originalArrived = false;
+    let createdPreviewUrl: string | null = null;
+
     setImageData(null);
+    setPreviewUrl(null);
     setLoadError(null);
+
+    // 寸法先行確定 (header 読み only)。失敗は黙殺 — ReadImage が同じ理由で
+    // 失敗するならそちらでユーザー向けエラーが surface する。
+    GetImageInfo(tab.path)
+      .then((info) => {
+        if (cancelled) return;
+        if (tab.imageWidth !== info.width || tab.imageHeight !== info.height) {
+          onUpdateTabState(tabIndex, {
+            imageWidth: info.width,
+            imageHeight: info.height,
+          });
+        }
+      })
+      .catch(() => {
+        /* swallow: ReadImage surfaces user-facing error */
+      });
+
+    // 低解像度プレビュー。original 先着なら作らない (spec D-12)。
+    // 失敗は logger.warn のみで吞む (spec D-5)。
+    getPreview(tab.path)
+      .then((res) => {
+        if (cancelled || originalArrived) return;
+        const bytes = toBytes(res.data);
+        const blob = new Blob([bytes], { type: res.mimeType });
+        createdPreviewUrl = URL.createObjectURL(blob);
+        setPreviewUrl(createdPreviewUrl);
+      })
+      .catch((e) => {
+        logger.warn("viewer-grid", "preview load failed", {
+          path: tab.path,
+          err: errorMessage(e),
+        });
+      });
+
+    // オリジナル本体。成功で originalArrived を立てて preview を抑止。
     ReadImage(tab.path)
       .then((res) => {
         if (cancelled) return;
+        originalArrived = true;
         setImageData(res);
         if (tab.imageWidth !== res.width || tab.imageHeight !== res.height) {
           onUpdateTabState(tabIndex, {
@@ -74,8 +125,10 @@ export function ImageView({
         setLoadError(msg);
         toast(`画像読み込みに失敗: ${basename(tab.path)} — ${msg}`, "error");
       });
+
     return () => {
       cancelled = true;
+      if (createdPreviewUrl) URL.revokeObjectURL(createdPreviewUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.path]);
@@ -374,10 +427,17 @@ export function ImageView({
     };
   }, []);
 
+  // src precedence (spec D-11): original > preview > 空文字。
+  // <img> の width/height は常に元画像寸法 (D-7) なので、preview の
+  // letterbox 余白付き 1024×1024 PNG はブラウザが強制 scale して表示する
+  // (位置 / サイズは正確、解像度だけ粗い)。
   const src = useMemo(
-    () =>
-      imageData ? toDataURL(imageData.data, imageData.mimeType) : "",
-    [imageData]
+    () => {
+      if (imageData) return toDataURL(imageData.data, imageData.mimeType);
+      if (previewUrl) return previewUrl;
+      return "";
+    },
+    [imageData, previewUrl],
   );
 
   if (loadError) {
@@ -387,17 +447,15 @@ export function ImageView({
       </div>
     );
   }
-  if (!imageData) {
-    return (
-      <div className="image-view" ref={containerRef}>
-        <div className="image-view-loading">読み込み中…</div>
-      </div>
-    );
-  }
+
+  // hasContent = 初期 fit 完了 (= 寸法到着済み) かつ表示する src あり。
+  // どちらか欠けると "読み込み中…" のままにする (spec D-14)。
+  const hasContent =
+    tab.initialized && (imageData !== null || previewUrl !== null);
 
   return (
     <div className="image-view" ref={containerRef} onPointerDown={onPointerDown}>
-      {tab.initialized && (
+      {hasContent && (
         <img
           className="image-view-img"
           src={src}
@@ -410,6 +468,9 @@ export function ImageView({
             height: tab.imageHeight,
           }}
         />
+      )}
+      {!hasContent && (
+        <div className="image-view-loading">読み込み中…</div>
       )}
     </div>
   );
