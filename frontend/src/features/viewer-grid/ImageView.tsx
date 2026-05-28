@@ -492,10 +492,16 @@ export function ImageView({
     );
   }
 
-  // hasContent = 初期 fit 完了 (= 寸法到着済み) かつ表示する src あり。
-  // どちらか欠けると "読み込み中…" のままにする (spec D-14)。
+  // hasContent = 初期 fit 完了 + 寸法到着済み + 表示する src あり (spec D-14)。
+  // セッション復元では `layout/serialization.ts` が `initialized: zoom > 0` を
+  // 立てるため initialized=true && imageWidth/Height=0 の窓が存在する。
+  // この窓中に previewUrl が先着して <img> を 0×0 で描画して blank になるのを
+  // 避けるため、寸法 > 0 も AND 条件に含める。
   const hasContent =
-    tab.initialized && (imageData !== null || previewUrl !== null);
+    tab.initialized &&
+    tab.imageWidth > 0 &&
+    tab.imageHeight > 0 &&
+    (imageData !== null || previewUrl !== null);
 
   // <img> の寸法 / 位置 (spec D-7):
   //   - original 表示中: W×H (= 元画像寸法) をそのまま使う。

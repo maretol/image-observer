@@ -13,6 +13,7 @@
 | 2026-05-27 | PR #103 Copilot レビュー反映: §3.1 SampleModal 記述を `getPreview` 経由に更新 / §10 D-14・D-15 の実装挙動を「`tab.initialized && (previewUrl || imageData)` 揃うまで「読み込み中…」維持」に統一。 |
 | 2026-05-27 | PR #103 Copilot レビュー round 3 反映: 表記の `⏐⏐` (Unicode lookalike) を `||` に修正 (コピペ誤植防止)。 |
 | 2026-05-28 | #104 反映: §4 D-7 の方針を改訂 (preview 中の `<img>` を `max(W,H)` 正方形 + offset で描画してアスペクト比歪みを解消)。§5.2.2 / §10-3 を新方針に追従。 |
+| 2026-05-28 | PR #107 Copilot レビュー反映: §4 D-14 の `hasContent` 条件にセッション復元の `initialized=true && imageWidth/Height=0` 窓ガード (寸法 > 0) を追記。 |
 
 ## 1. ゴール (DoD)
 
@@ -69,7 +70,7 @@
 | D-11 | preview と original の race (preview のあとに original) | **常に「最新の `setImageData(original)`」が優先**。preview だけが届いた段階では `<img src>` は preview。original が後着で setImageData → React の reconciliation で src を上書き | 単一 useState (`imageData`) + 別 useState (`previewUrl`) の 2 state で表現。`src = imageData ? toDataURL(imageData) : previewUrl ?? ""` の memo |
 | D-12 | original が **先に** 到着するケース (preview がディスクキャッシュにない + ReadImage が速い) | **preview の resolve 時点で imageData が既にあれば preview を捨てる (setPreviewUrl しない)** | 余計な src 差し替えを避ける。preview 結果は廃棄 (cancel ではなく resolve 後の早期 return) |
 | D-13 | preview が `<img src>` に当たっている間の `tab.initialized` フラグ | **寸法 (`GetImageInfo` 完了) を受けて `tab.initialized = true` を立てる。preview / original どちらの到着でもよい** | 既存 `useEffect` (initial fit) は `tab.initialized` + `imageWidth/Height` をトリガとして動くので、寸法だけ揃えば fit が走り、その時点で preview src で表示開始できる |
-| D-14 | 既存の "読み込み中…" テキスト | **`tab.initialized && (previewUrl || imageData)` が揃うまで表示し続ける**。揃った時点で `<img>` を出し、テキストは消える | 「寸法のみ + src 無し」で空 `<img>` を出すと alt 文字が一瞬出てチラつく。AND 成立を待つ方が UX として穏当 (実装も `hasContent` フラグ 1 つで済む) |
+| D-14 | 既存の "読み込み中…" テキスト | **`tab.initialized && tab.imageWidth > 0 && tab.imageHeight > 0 && (previewUrl \|\| imageData)` が揃うまで表示し続ける**。揃った時点で `<img>` を出し、テキストは消える | 「寸法のみ + src 無し」で空 `<img>` を出すと alt 文字が一瞬出てチラつく。AND 成立を待つ方が UX として穏当 (実装も `hasContent` フラグ 1 つで済む)。**セッション復元** (`layout/serialization.ts`) では `initialized: zoom > 0` で復元するため `initialized=true && imageWidth/Height=0` の窓が発生する。この窓中に preview が先着すると D-7 の rendering が 0×0 になり blank 表示が出るので、寸法 > 0 も hasContent の AND 条件に含めて防ぐ (#107 レビュー対応)。 |
 | D-15 | preview / GetImageInfo の失敗時の `tab.initialized` | **GetImageInfo 成功でのみ寸法が埋まる。`ReadImage` 成功時も寸法は埋まる**。両方失敗なら従来通り loadError surface | GetImageInfo は header だけ読むので壊れた画像でない限り通る。失敗するならどうせ ReadImage も失敗するはずなので extra error handling は不要 |
 | D-16 | 既存の `ReadImage` の戻り `width/height` との関係 | **ReadImage の戻りの width/height は引き続き受け取って tab state 同期に使う**。GetImageInfo は寸法を早く知るための先行発火であり、ReadImage の戻りも同等の値を持つ (両方とも `imgread.decodeImageDimensions` 経由) | dup check ロジックは現状通り `tab.imageWidth !== res.width` の不一致時にだけ updateTabState |
 
