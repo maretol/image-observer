@@ -475,9 +475,6 @@ export function ImageView({
   }, []);
 
   // src precedence (spec D-11): original > preview > 空文字。
-  // <img> の width/height は常に元画像寸法 (D-7) なので、preview の
-  // letterbox 余白付き 1024×1024 PNG はブラウザが強制 scale して表示する
-  // (位置 / サイズは正確、解像度だけ粗い)。
   const src = useMemo(
     () => {
       if (imageData) return toDataURL(imageData.data, imageData.mimeType);
@@ -495,10 +492,34 @@ export function ImageView({
     );
   }
 
-  // hasContent = 初期 fit 完了 (= 寸法到着済み) かつ表示する src あり。
-  // どちらか欠けると "読み込み中…" のままにする (spec D-14)。
+  // hasContent = 初期 fit 完了 + 寸法到着済み + 表示する src あり (spec D-14)。
+  // セッション復元では `layout/serialization.ts` が `initialized: zoom > 0` を
+  // 立てるため initialized=true && imageWidth/Height=0 の窓が存在する。
+  // この窓中に previewUrl が先着して <img> を 0×0 で描画して blank になるのを
+  // 避けるため、寸法 > 0 も AND 条件に含める。
   const hasContent =
-    tab.initialized && (imageData !== null || previewUrl !== null);
+    tab.initialized &&
+    tab.imageWidth > 0 &&
+    tab.imageHeight > 0 &&
+    (imageData !== null || previewUrl !== null);
+
+  // <img> の寸法 / 位置 (spec D-7):
+  //   - original 表示中: W×H (= 元画像寸法) をそのまま使う。
+  //   - preview 表示中: bitmap が N×N letterbox 正方形 (内側に W:H で
+  //     content + 透過余白) のため、W×H に直接 stretch すると非一様
+  //     scale で content のアスペクト比が歪む (#104)。
+  //     代わりに bitmap を max(W,H) の正方形として描画し、offset で
+  //     content 領域がちょうど [0..W]×[0..H] (= original と同じ矩形) に
+  //     乗るよう寄せる。letterbox 余白は矩形の外側に押し出され、
+  //     コンテナの `overflow: hidden` で clip される。
+  const isPreview = imageData === null && previewUrl !== null;
+  const renderedSize = Math.max(tab.imageWidth, tab.imageHeight);
+  const previewOffsetX = (tab.imageWidth - renderedSize) / 2;
+  const previewOffsetY = (tab.imageHeight - renderedSize) / 2;
+  const imgWidth = isPreview ? renderedSize : tab.imageWidth;
+  const imgHeight = isPreview ? renderedSize : tab.imageHeight;
+  const imgX = tab.panX + (isPreview ? previewOffsetX * tab.zoom : 0);
+  const imgY = tab.panY + (isPreview ? previewOffsetY * tab.zoom : 0);
 
   return (
     <div className="image-view" ref={containerRef} onPointerDown={onPointerDown}>
@@ -509,10 +530,10 @@ export function ImageView({
           alt=""
           draggable={false}
           style={{
-            transform: `translate3d(${tab.panX}px, ${tab.panY}px, 0) scale(${tab.zoom})`,
+            transform: `translate3d(${imgX}px, ${imgY}px, 0) scale(${tab.zoom})`,
             transformOrigin: "0 0",
-            width: tab.imageWidth,
-            height: tab.imageHeight,
+            width: imgWidth,
+            height: imgHeight,
           }}
         />
       )}
