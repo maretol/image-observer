@@ -16,6 +16,7 @@
 | 2026-05-29 | PR #109 レビュー対応 round 2 | baseline reset useEffect を per-field 化し、partial save (entry.folder のみ変化) で未 blur の note / confidence 入力が消える問題を修正 (§6 追記)。`useClassificationEdit.saveEdit` を `loadResultRef.current.mtime` ベースに変更し、unmount 後の queue replay でも最新 mtime で IPC 発火するようにした (§5.3 / §5.6 補足)。 |
 | 2026-05-29 | PR #109 レビュー対応 round 3 | `runSave` に `inFlightSnapshotRef` + snapshot 同値性チェックを追加。× / バックドロップ click で input blur が in-flight 開始し、その直後の unmount cleanup が同一 snapshot で queue を踏むケースで余計な IPC が出る問題を解消 (§5.3 補足)。 |
 | 2026-05-29 | PR #109 レビュー対応 round 4 | `applyFieldDefaults` の probe 判定を `*bool` 再 decode に拡張し、`editAutoSave: null` を「キー存在だが unparseable」として true に補填 (§7.2 補足)。これで JSON null が壊れた手動モードとして読み込まれる経路を塞ぐ。 |
+| 2026-05-30 | PR #109 レビュー対応 round 5 | per-field baseline reset に `touchedAfterBaselineRef` を追加。in-flight 中にユーザーが当該フィールドを旧 baseline と同じ値へ戻した場合に、保存完了時の新 baseline で local 入力を上書きする問題を修正 (§6.0 補足)。 |
 
 ---
 
@@ -274,6 +275,25 @@ manual モードは現状通り「未保存破棄 (確認なし)」。
   - 一致: user は当該フィールドをまだ触っていない → 新 baseline に同期 (= disk truth に追従)
   - 不一致: user が当該フィールドを編集中 → local を保持 (in-flight typing を尊重)
 - どちらの分岐でも `lastBaselineRef` は **新 baseline で更新** する。これを忘れると、user が後で偶然 *元の* baseline に戻したときに再び per-field 同期が走ってしまう。
+
+#### round 5: 「touched then reverted」を捉えるため `touchedAfterBaselineRef` を追加
+
+round 2 の per-field 同期は **値の一致** だけで「user が触ったか」を判定していたため、以下のケースで in-flight 入力が消える穴があった:
+
+1. baseline: `tags=[]` / `note=""`
+2. user が tags を `abc` まで入力 → blur → save IPC 発火 (in-flight 中)
+3. user が save 完了前に tags を空 (`[]`) に戻す (= 旧 baseline と同じ)
+4. save 完了 → 親 `setLoadResult` (新 entry.folder = `"abc"`)
+5. round 2 実装: `localSerialized([]) === oldBaselineSerialized([])` → true → local を新 baseline `["abc"]` に同期 → **user の revert が消失**
+
+対策: per-field の `touchedAfterBaselineRef.{tags,confidence,note}` フラグを導入。
+
+- ユーザー入力ハンドラ (`handleTagsChange` / `handleConfidenceChange` / `handleNoteChange`) で対応フィールドの flag を true に。
+- baseline reset useEffect の per-field 同期条件を「local == 旧 baseline **かつ** touched == false」に強化。touched なら値が偶然一致しても sync しない。
+- 両分岐 (filename 変化 / 同一 filename + baseline patch) で flag を false にリセット。次の baseline observation 以降の touch を改めて追跡できるようにする。
+- `handleCancel` (manual モード) も local を baseline に戻すタイミングで flag をリセット (リセット後の外部 patch を正しく取り込めるようにする)。
+
+これで「touched then reverted」のケースでも local が保持され、user の最終操作が新 baseline で上書きされない。
 
 ### 6.1 useSettings の利用
 

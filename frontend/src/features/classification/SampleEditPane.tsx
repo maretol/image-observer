@@ -107,6 +107,23 @@ export function SampleEditPane({
     note: string;
   }>({ filename: null, folder: "", confidence: "", note: "" });
 
+  // Per-field "touched since last baseline observation" flags. Set true in
+  // the input handlers; cleared in the baseline reset useEffect (both
+  // branches). Read by the per-field sync to suppress overwriting a field
+  // the user touched during an in-flight save, even if their final value
+  // happens to equal the *previous* baseline (Copilot review #109 round 5).
+  // Example: tags=[] in baseline, user types "abc" and blurs → save IPC
+  // in-flight → user clears tags back to [] before the save returns → save
+  // success arrives with entry.folder="abc" → without touched tracking the
+  // equality check (local [] == old baseline []) would resync local to
+  // ["abc"], silently discarding the user's revert. The flag distinguishes
+  // "never touched" from "touched then reverted".
+  const touchedAfterBaselineRef = useRef<{
+    tags: boolean;
+    confidence: boolean;
+    note: boolean;
+  }>({ tags: false, confidence: false, note: false });
+
   useEffect(() => {
     if (!entry) {
       lastBaselineRef.current = {
@@ -121,6 +138,11 @@ export function SampleEditPane({
       confidenceRef.current = "";
       setNote("");
       noteRef.current = "";
+      touchedAfterBaselineRef.current = {
+        tags: false,
+        confidence: false,
+        note: false,
+      };
       return;
     }
     const last = lastBaselineRef.current;
@@ -142,32 +164,47 @@ export function SampleEditPane({
       confidenceRef.current = entry.confidence;
       setNote(entry.note);
       noteRef.current = entry.note;
+      touchedAfterBaselineRef.current = {
+        tags: false,
+        confidence: false,
+        note: false,
+      };
       return;
     }
     // Same entry, baseline patched (auto-save success that only touched a
     // subset of fields, or an external sidecar edit). Per-field sync: only
     // overwrite a local field if it still matches the *previous* baseline
-    // — i.e. the user had not diverged from what we thought was the
-    // baseline at the time. Diverged fields keep the user's in-flight typing
-    // (Copilot review #5: a partial save that only changed entry.folder
-    // would otherwise clobber an unsaved note draft).
+    // AND the user has not touched it since the last baseline observation
+    // — touched fields are kept local even when their value coincidentally
+    // matches the previous baseline (Copilot review #109 round 5: user
+    // touching and reverting during an in-flight save would otherwise be
+    // overwritten by the post-save baseline patch).
     if (last.folder !== entry.folder) {
       const oldBaselineSerialized = serializeTags(extractTags(last.folder));
       const localSerialized = serializeTags(tagsRef.current);
-      if (localSerialized === oldBaselineSerialized) {
+      if (
+        localSerialized === oldBaselineSerialized &&
+        !touchedAfterBaselineRef.current.tags
+      ) {
         const nextTags = extractTags(entry.folder);
         setTags(nextTags);
         tagsRef.current = nextTags;
       }
     }
     if (last.confidence !== entry.confidence) {
-      if (confidenceRef.current === last.confidence) {
+      if (
+        confidenceRef.current === last.confidence &&
+        !touchedAfterBaselineRef.current.confidence
+      ) {
         setConfidence(entry.confidence);
         confidenceRef.current = entry.confidence;
       }
     }
     if (last.note !== entry.note) {
-      if (noteRef.current === last.note) {
+      if (
+        noteRef.current === last.note &&
+        !touchedAfterBaselineRef.current.note
+      ) {
         setNote(entry.note);
         noteRef.current = entry.note;
       }
@@ -176,12 +213,20 @@ export function SampleEditPane({
     // against the latest entry, even for fields we just kept local. Without
     // this, a field the user is editing would re-trigger the per-field sync
     // on the next render once the user happens to match the *original*
-    // baseline again.
+    // baseline again. Reset touched flags too — they are scoped to the
+    // window between two consecutive baseline observations, so post-patch
+    // future user input should be re-tracked from zero against the new
+    // baseline.
     lastBaselineRef.current = {
       filename: entry.filename,
       folder: entry.folder,
       confidence: entry.confidence,
       note: entry.note,
+    };
+    touchedAfterBaselineRef.current = {
+      tags: false,
+      confidence: false,
+      note: false,
     };
   }, [entry]);
 
@@ -344,6 +389,7 @@ export function SampleEditPane({
 
   const handleTagsChange = useCallback((next: string[]) => {
     tagsRef.current = next;
+    touchedAfterBaselineRef.current.tags = true;
     setTags(next);
   }, []);
 
@@ -351,6 +397,7 @@ export function SampleEditPane({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const v = e.target.value;
       noteRef.current = v;
+      touchedAfterBaselineRef.current.note = true;
       setNote(v);
     },
     [],
@@ -359,6 +406,7 @@ export function SampleEditPane({
   const handleConfidenceChange = useCallback(
     (value: string) => {
       confidenceRef.current = value;
+      touchedAfterBaselineRef.current.confidence = true;
       setConfidence(value);
       // Radio has no blur — auto-save fires on the change itself. Pass the
       // new value explicitly because confidenceRef has just been written
@@ -468,6 +516,14 @@ export function SampleEditPane({
     confidenceRef.current = entry.confidence;
     setNote(entry.note);
     noteRef.current = entry.note;
+    // Local now equals baseline — clear touched flags so a subsequent
+    // external baseline patch can re-sync (otherwise the touched-from-
+    // before-cancel flag would suppress the next per-field sync).
+    touchedAfterBaselineRef.current = {
+      tags: false,
+      confidence: false,
+      note: false,
+    };
   }, [entry]);
 
   if (!entry) {
