@@ -147,6 +147,14 @@ type SettingsData struct {
 	TagColors            map[string]string `json:"tagColors"`
 	UIScalePercent       int               `json:"uiScalePercent"`
 	WatchMode            string            `json:"watchMode"`
+	// EditAutoSave drives the SampleEditPane save mode (#105).
+	// true (default) → save on individual input blur / radio change.
+	// false           → manual save only (button / Cmd+Ctrl+Enter), the
+	//                   pre-#105 behavior.
+	// Field absence in the JSON (upgrading from a build before #105) is
+	// distinguished from an explicit `false` via the probe in `Load` — see
+	// the comment near the probe call below.
+	EditAutoSave bool `json:"editAutoSave"`
 }
 
 // settingsFilePathOverride lets tests redirect away from the user config dir.
@@ -178,6 +186,7 @@ func DefaultSettings() SettingsData {
 		TagColors:            cloneTagColors(defaultTagColors),
 		UIScalePercent:       defaultUIScalePercent,
 		WatchMode:            WatchModeAuto,
+		EditAutoSave:         true,
 	}
 }
 
@@ -207,7 +216,19 @@ func Load() SettingsData {
 			s.Version, SettingsSchemaVersion)
 		return DefaultSettings()
 	}
-	applyFieldDefaults(&s)
+	// Distinguish "field absent in JSON" from an explicit `false` for bool
+	// fields. Go's encoding/json fills missing bools with the zero value
+	// (`false`), which for EditAutoSave (#105 default = true) would mean
+	// "upgrading from a pre-#105 build silently switches the user into manual
+	// mode". The cheap fix is to decode the same blob a second time into a
+	// raw map and check key presence; the perf cost (~kB file) is negligible
+	// vs the UX bug of a silent default flip.
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		log.Printf("settings: probe decode failed (treating bool fields as present): %v", err)
+		probe = nil
+	}
+	applyFieldDefaults(&s, probe)
 	return s
 }
 
@@ -279,7 +300,12 @@ func Validate(s *SettingsData) error {
 
 // applyFieldDefaults patches each field's value to its default if the
 // loaded value isn't in the allowed set. Mutates in place.
-func applyFieldDefaults(s *SettingsData) {
+//
+// `probe` carries the raw key presence for bool fields whose zero value is
+// indistinguishable from an explicit false. Pass nil to treat all bool
+// fields as present (e.g. during direct construction tests where Load's
+// probe is not available).
+func applyFieldDefaults(s *SettingsData, probe map[string]json.RawMessage) {
 	if _, ok := validLogLevels[s.LogLevel]; !ok {
 		s.LogLevel = "info"
 	}
@@ -320,6 +346,29 @@ func applyFieldDefaults(s *SettingsData) {
 		for k, v := range s.TagColors {
 			if !isValidHexColor(v) {
 				delete(s.TagColors, k)
+			}
+		}
+	}
+	// EditAutoSave: bool zero value (`false`) is indistinguishable from "field
+	// missing in JSON" without a probe. Treat missing as the default (true) so
+	// users upgrading from a pre-#105 build don't silently land in manual mode.
+	// Explicit `false` (key present, value false) is preserved.
+	//
+	// JSON `null` is a third case: encoding/json leaves a bool field at its
+	// zero value when the source is null, AND the key is "present" in the
+	// raw probe map. Without the *bool re-decode below, a corrupted
+	// `editAutoSave: null` would silently land in manual mode (false) —
+	// which is the opposite of the "invalid field → field default" rule the
+	// other per-field branches follow. Treat null like missing (fall back
+	// to true), keep true / false as decoded (PR #109 round 4 #8).
+	if probe != nil {
+		raw, present := probe["editAutoSave"]
+		if !present {
+			s.EditAutoSave = true
+		} else {
+			var bp *bool
+			if err := json.Unmarshal(raw, &bp); err != nil || bp == nil {
+				s.EditAutoSave = true
 			}
 		}
 	}

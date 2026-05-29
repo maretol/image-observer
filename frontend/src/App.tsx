@@ -231,6 +231,7 @@ function AppInner({ initialState }: AppInnerProps) {
           <ClassificationView
             state={classification}
             multiSelectMode={settings.data?.multiSelectMode}
+            editAutoSave={settings.data?.editAutoSave}
             scrollTopRef={listScrollTopRef}
             viewers={viewerList}
             activeViewerId={viewer.activeViewerId}

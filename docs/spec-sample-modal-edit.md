@@ -14,6 +14,7 @@
 | 2026-05-26 | ユーザー合意 | §10-A〜F すべて推奨案 (A 案) で確定。実装着手可に更新。 |
 | 2026-05-26 | PR #102 レビュー対応 | §10-E の削除済み `EditPopover.tsx` へのリンクを除去 (git 履歴で参照可能の旨だけ残す)。 |
 | 2026-05-26 | PR #102 レビュー対応 (続) | §9 の typo (`promp` → `prompt`) を修正。 |
+| 2026-05-29 | #105 連携 | §11 Phase 2 の "autosave モード" を #105 (=[spec-edit-autosave.md](spec-edit-autosave.md)) に切り出した旨を注記。本 spec の Phase 1 (明示保存固定) は維持。 |
 
 ---
 
@@ -288,7 +289,7 @@ dirty の上昇方法 (callback ref / state lift) は実装時に決める。
 - ペイン折り畳み / リサイズ
 - prev/next 移動時の inline confirm option (§10-D B 案、ユーザーから要望があれば)
 - モーダル幅をユーザー設定に
-- autosave モード (§10-C B 案)
+- ~~autosave モード (§10-C B 案)~~ → **#105 ([spec-edit-autosave.md](spec-edit-autosave.md)) で実装**
 
 ## 12. 関連
 

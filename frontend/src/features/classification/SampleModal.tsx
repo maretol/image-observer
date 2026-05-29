@@ -53,7 +53,13 @@ type SampleModalProps = {
   entry: classification.Entry | null;
   knownTags: string[];
   openSource: SampleModalOpenSource;
-  onSave: (next: classification.Entry) => void;
+  // Pre-#105 manual mode returns void; #105 auto mode awaits the resulting
+  // Promise inside SampleEditPane to serialize in-flight saves (spec §5.3).
+  // Callers may pass either signature; the pane wraps with Promise.resolve.
+  onSave: (next: classification.Entry) => void | Promise<void>;
+  // #105: drives whether SampleEditPane is in auto (true) or manual (false)
+  // save mode. Forwarded straight to the pane.
+  autoSave: boolean;
 };
 
 export function SampleModal({
@@ -70,6 +76,7 @@ export function SampleModal({
   knownTags,
   openSource,
   onSave,
+  autoSave,
 }: SampleModalProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "ok" | "error">(
@@ -302,6 +309,7 @@ export function SampleModal({
           tagInputRef={tagInputRef}
           onSave={onSave}
           onDirtyChange={setEditDirty}
+          autoSave={autoSave}
         />
       </div>
       <div

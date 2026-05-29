@@ -436,7 +436,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     resolveConflictCancel,
   } = useClassificationEdit({
     conflict,
-    loadResult,
+    loadResultRef,
     folderRef,
     requestGenRef,
     setLoadResult,
