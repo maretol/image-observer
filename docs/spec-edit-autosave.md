@@ -17,6 +17,7 @@
 | 2026-05-29 | PR #109 レビュー対応 round 3 | `runSave` に `inFlightSnapshotRef` + snapshot 同値性チェックを追加。× / バックドロップ click で input blur が in-flight 開始し、その直後の unmount cleanup が同一 snapshot で queue を踏むケースで余計な IPC が出る問題を解消 (§5.3 補足)。 |
 | 2026-05-29 | PR #109 レビュー対応 round 4 | `applyFieldDefaults` の probe 判定を `*bool` 再 decode に拡張し、`editAutoSave: null` を「キー存在だが unparseable」として true に補填 (§7.2 補足)。これで JSON null が壊れた手動モードとして読み込まれる経路を塞ぐ。 |
 | 2026-05-30 | PR #109 レビュー対応 round 5 | per-field baseline reset に `touchedAfterBaselineRef` を追加。in-flight 中にユーザーが当該フィールドを旧 baseline と同じ値へ戻した場合に、保存完了時の新 baseline で local 入力を上書きする問題を修正 (§6.0 補足)。 |
+| 2026-05-30 | PR #109 レビュー対応 round 6 | `ClassificationView.handleSave` に pre-IPC folder check を追加。folder 切替で SampleEditPane が unmount される際、save-on-unmount cleanup が stale onSaveRef 経由で OLD entry を NEW folder の sidecar に書き込もうとする race を塞いだ (§5.6 補足)。 |
 
 ---
 
@@ -246,6 +247,21 @@ manual モードは現状通り「未保存破棄 (確認なし)」。
 - prev/next nav は SampleModal の nav-block invariant により dirty=false 時しか発生しない → unmount せず entry switch する経路では cleanup が発火しないので問題なし。
 - 実 unmount (Esc / × / 親の list タブ unmount) でのみ cleanup が走り、その時点での最新 entryRef + refs を比較。直前に save 成功していれば refs == baseline で `computeEditDirty=false` → 余計な save なし。
 - 入力中の unmount (Esc で typing 途中 close) は dirty=true なので save 発火、ユーザー編集を救う本来の意図が動く。
+
+**folder 切替経由の unmount race** (PR #109 round 6): `openFolder` は `folderRef.current = picked` を**同期で**書き換えた直後に `resetEntriesDependentState` を呼び `editing.open=false` にする。これで ModalShell が `open=false` を受けて `return null` し、SampleEditPane が unmount される。問題は:
+
+- ModalShell が null を返す render では SampleEditPane の component 関数自体が呼ばれない (children は instantiate されない) → render-time sync が走らない → `onSaveRef.current` は最後の successful render (modal open 中) の `handleSave` のまま
+- cleanup から `runSave` → `onSaveRef.current(entry)` → 古い `handleSave` → `saveEdit(entry)`
+- `saveEdit` は `cur = folderRef.current` を**新 folder** として読み、`UpdateClassificationEntry(NEW_folder, entry_with_OLD_filename, OLD_mtime)` を発射してしまう (post-IPC の folder check は cur=NEW のままなので素通り)
+- 結果: OLD entry が NEW folder の同名 sidecar に書き込まれる / 別 mtime で CONFLICT が起き OLD filename を持つ conflict dialog が NEW folder context で表示される、等の誤動作
+
+**対策**: `ClassificationView.handleSave` で useCallback closure の `folderPath` を render-time sync の `folderPathRef.current` (= 現在の最新 folderPath) と比較し、ズレていれば save を skip する。
+
+- folder 切替前の render で作られた `handleSave_N` は closure に `folderPath=OLD` を持つ
+- folder 切替後の `folderPathRef.current` は `NEW`
+- stale `handleSave_N` が cleanup から呼ばれると `OLD !== NEW` → skip
+
+`saveEdit` 内側の post-IPC folder check は「await 中の switch」に対する gate、`handleSave` 内側の pre-IPC folder check は「call 前の switch」(= 今回の save-on-unmount race) に対する gate。レイヤを分けて両方覆う (AGENTS.md H-8 「コンテキスト同一性」の round 14 ルールを pre-IPC まで拡張)。
 
 ### 5.7 アクセシビリティ
 

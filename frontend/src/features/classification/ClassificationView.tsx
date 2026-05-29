@@ -242,15 +242,39 @@ export function ClassificationView({
   // "state ref の同期タイミング" に従う。
   const previewFilenameRef = useRef<string | null>(null);
   previewFilenameRef.current = previewFilename;
+  // folderPathRef holds the *latest* folderPath at render time, so handleSave
+  // can detect when it is being invoked from a stale closure captured before
+  // a folder switch. SampleEditPane's save-on-unmount cleanup (#105 §5.6)
+  // calls onSave through onSaveRef.current, which still points at the
+  // handleSave from the last render where the pane was mounted — and
+  // openFolder synchronously bumps folderRef + tears down the modal, so by
+  // the time the cleanup fires, that captured handleSave's `folderPath`
+  // closure is the OLD folder while folderPathRef.current is NEW. Without
+  // this guard the cleanup would route the OLD entry through saveEdit, which
+  // reads folderRef.current = NEW and writes the OLD entry into the NEW
+  // folder's sidecar (Copilot review #109 round 6). The post-IPC folder
+  // check inside saveEdit only covers mid-await switches — this pre-IPC
+  // check covers the pre-call switch the round 6 scenario actually
+  // triggers.
+  const folderPathRef = useRef<string>(folderPath);
+  folderPathRef.current = folderPath;
   const handleSave = useCallback(
     async (entry: classification.Entry) => {
+      if (folderPath !== folderPathRef.current) {
+        // Stale closure from before a folder switch — skip silently.
+        // Logging would be noisy because the cleanup also fires on legitimate
+        // modal-close paths and only the folder-switch variant takes this
+        // branch; if this path turns out to fire unexpectedly, a logger.warn
+        // here is the right next step.
+        return;
+      }
       await saveEdit(entry);
       const current = previewFilenameRef.current;
       if (current !== null) {
         openEdit(current);
       }
     },
-    [saveEdit, openEdit],
+    [folderPath, saveEdit, openEdit],
   );
 
   // Edit pane resolves the active entry from previewFilename against the
