@@ -48,6 +48,9 @@ func TestLoad_Missing_ReturnsDefaults(t *testing.T) {
 	if s.WatchMode != WatchModeAuto {
 		t.Errorf("WatchMode default: got %q, want %q", s.WatchMode, WatchModeAuto)
 	}
+	if !s.EditAutoSave {
+		t.Errorf("EditAutoSave default: got %v, want true", s.EditAutoSave)
+	}
 	if len(s.TagColors) == 0 {
 		t.Errorf("TagColors default should be a non-empty map (defaultTagColors)")
 	}
@@ -71,6 +74,7 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	in.TagColors = map[string]string{"alpha": "#abcdef", "beta": "#000000"}
 	in.UIScalePercent = 125
 	in.WatchMode = WatchModeOff
+	in.EditAutoSave = false
 	if err := Save(in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -104,6 +108,9 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	}
 	if out.WatchMode != WatchModeOff {
 		t.Errorf("WatchMode: got %q", out.WatchMode)
+	}
+	if out.EditAutoSave != false {
+		t.Errorf("EditAutoSave: got %v, want false (round-trip preserves explicit false)", out.EditAutoSave)
 	}
 }
 
@@ -302,6 +309,30 @@ func TestLoad_NewFieldsMissing_GetDefaults(t *testing.T) {
 	}
 	if s.WatchMode != WatchModeAuto {
 		t.Errorf("missing WatchMode should default, got %q", s.WatchMode)
+	}
+	if !s.EditAutoSave {
+		t.Errorf("missing EditAutoSave should default to true (not Go bool zero), got %v", s.EditAutoSave)
+	}
+}
+
+// TestLoad_EditAutoSave_ExplicitFalse_Preserved pins the probe-based key
+// presence check in applyFieldDefaults. Without the probe, an explicit
+// `"editAutoSave": false` would be indistinguishable from "field missing"
+// and snap back to the default `true` — silently overriding a user who
+// chose manual mode.
+func TestLoad_EditAutoSave_ExplicitFalse_Preserved(t *testing.T) {
+	p := setSettingsFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	body, _ := json.Marshal(map[string]any{
+		"version":      SettingsSchemaVersion,
+		"editAutoSave": false,
+	})
+	if err := os.WriteFile(p, body, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.EditAutoSave != false {
+		t.Errorf("explicit false should be preserved (probe path), got %v", s.EditAutoSave)
 	}
 }
 
