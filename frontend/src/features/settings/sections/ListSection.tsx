@@ -37,6 +37,27 @@ const WATCH_MODES: Array<{
   },
 ];
 
+// #105: edit-pane save mode. The Segment uses number-coded values because the
+// underlying setting is a bool (`editAutoSave`); 1/0 just route through the
+// generic Segment<T extends string | number> wrapper. boolean directly would
+// require widening Segment's type parameter, which we don't want for one site.
+const EDIT_AUTO_SAVE_MODES: Array<{
+  value: number;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: 1,
+    label: "自動 (フォーカス離脱時)",
+    hint: "タグ・note の入力からフォーカスが外れたとき、または confidence を変更したときに即保存",
+  },
+  {
+    value: 0,
+    label: "手動 (保存ボタン)",
+    hint: "保存ボタンまたは Cmd/Ctrl+Enter で明示的に保存",
+  },
+];
+
 export function ListSection({
   data,
   onChange,
@@ -66,6 +87,17 @@ export function ListSection({
           options={WATCH_MODES}
           value={data.watchMode}
           onChange={(v) => onChange({ watchMode: v })}
+        />
+      </Field>
+      <Field
+        label="タグ・note の保存方法"
+        hint="自動: 各入力からフォーカスが外れたとき / confidence を変更したときに保存。手動: 保存ボタンまたは Cmd/Ctrl+Enter で保存します"
+      >
+        <Segment
+          name="editAutoSave"
+          options={EDIT_AUTO_SAVE_MODES}
+          value={data.editAutoSave ? 1 : 0}
+          onChange={(v) => onChange({ editAutoSave: v === 1 })}
         />
       </Field>
     </>

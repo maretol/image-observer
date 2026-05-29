@@ -182,6 +182,7 @@ export namespace settings {
 	    tagColors: Record<string, string>;
 	    uiScalePercent: number;
 	    watchMode: string;
+	    editAutoSave: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsData(source);
@@ -200,6 +201,7 @@ export namespace settings {
 	        this.tagColors = source["tagColors"];
 	        this.uiScalePercent = source["uiScalePercent"];
 	        this.watchMode = source["watchMode"];
+	        this.editAutoSave = source["editAutoSave"];
 	    }
 	}
 
@@ -391,11 +393,11 @@ export namespace state {
 	    x: number;
 	    y: number;
 	    maximized?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new WindowState(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.width = source["width"];

@@ -32,6 +32,11 @@ export type ClassificationViewProps = {
   // "checkbox" (default) | "modifier" | "both" — see settings.SettingsData.
   // Falls back to "checkbox" while settings load.
   multiSelectMode?: string;
+  // #105: drives SampleEditPane save mode. Optional because settings load
+  // is async — `undefined` (still loading) is treated the same as `true`
+  // (auto), matching the persisted default so users don't see manual-mode
+  // chrome flash during the first paint.
+  editAutoSave?: boolean;
   // Owned by the parent so the scroll position survives ClassificationView
   // unmount when the top tab switches away from "list". Folder changes reset
   // it to 0 (handled below). Not persisted to settings/state.json.
@@ -52,6 +57,7 @@ export type ClassificationViewProps = {
 export function ClassificationView({
   state,
   multiSelectMode = "checkbox",
+  editAutoSave = true,
   scrollTopRef,
   viewers,
   activeViewerId,
@@ -586,6 +592,7 @@ export function ClassificationView({
         knownTags={knownTags}
         openSource={previewOpenSource}
         onSave={handleSave}
+        autoSave={editAutoSave}
       />
       {cardCtxMenu ? (
         <CardContextMenu

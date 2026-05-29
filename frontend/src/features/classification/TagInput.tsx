@@ -13,6 +13,14 @@ export type TagInputProps = {
   // readers don't announce the label when focus lands on the input.
   inputId?: string;
   ariaLabel?: string;
+  // Fires after the internal commit(draft) on the chip-input's blur. The
+  // commit runs first (synchronously calling onChange with the final tags
+  // including any just-typed draft), then this callback. SampleEditPane uses
+  // it to gate auto-save (#105): if the host mirrors `onChange` into a ref,
+  // it can read the post-commit tag list synchronously inside this handler
+  // even though React's setState has not yet flushed (see
+  // spec-edit-autosave.md §5.2). Optional so non-auto-save consumers ignore it.
+  onBlur?: () => void;
 };
 
 // TagInput is a chip-style multi-tag input. Each committed tag becomes a
@@ -36,6 +44,7 @@ export const TagInput = forwardRef<HTMLInputElement, TagInputProps>(function Tag
     datalistId = "cls-tag-input-known",
     inputId,
     ariaLabel,
+    onBlur,
   },
   ref,
 ) {
@@ -142,7 +151,15 @@ export const TagInput = forwardRef<HTMLInputElement, TagInputProps>(function Tag
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={onKeyDown}
-        onBlur={() => commit(draft)}
+        onBlur={() => {
+          // Order matters: commit(draft) synchronously calls onChange with
+          // the final tags so the host's onChange wrapper can mirror into a
+          // ref; the host's onBlur callback (auto-save in #105) then reads
+          // that ref to get post-commit tags. Swapping the order would lose
+          // the just-typed draft on the auto-save IPC.
+          commit(draft);
+          onBlur?.();
+        }}
         placeholder={
           tags.length === 0 ? "タグを入力 (Enter / スペース / , で確定)" : ""
         }
