@@ -77,6 +77,21 @@ export function SampleEditPane({
   const confidenceRef = useRef<string>(confidence);
   const noteRef = useRef<string>(note);
 
+  // Prop refs synced at render time (AGENTS.md H-8 "state ref の同期タイミング").
+  // The in-flight queue's finally callback (§5.3) and the save-on-unmount
+  // cleanup (§5.6) both fire *outside* the React render that triggered them,
+  // so reading these props from useEffect-bound dependencies would let the
+  // queue's recursive dequeue and the unmount cleanup hold a *stale* onSave
+  // (= old `saveEdit` closure → old `loadResult.mtime` → CONFLICT on the
+  // second IPC). Mirroring at render time guarantees that by the time these
+  // callbacks fire, refs already reflect the latest props.
+  const onSaveRef = useRef(onSave);
+  const autoSaveRef = useRef(autoSave);
+  const entryRef = useRef(entry);
+  onSaveRef.current = onSave;
+  autoSaveRef.current = autoSave;
+  entryRef.current = entry;
+
   // Reset local form whenever the *baseline* the entry exposes changes —
   // baseline = (filename, folder, confidence, note). Storing the previous
   // baseline in `lastBaselineRef` and reset-on-mismatch absorbs the
@@ -188,16 +203,30 @@ export function SampleEditPane({
         return;
       }
       saveInFlightRef.current = true;
-      Promise.resolve(onSave(buildEntry(snap))).finally(() => {
+      // Read onSave through the ref so the recursive dequeue below picks up
+      // the *latest* handleSave (and the saveEdit it closes over, and that
+      // saveEdit's latest loadResult.mtime). Capturing onSave from the
+      // useCallback dependency would freeze the mtime at runSave-creation
+      // time and the queued second save would always send a stale mtime →
+      // CONFLICT from Go's expectedMtime check (Copilot review thread #2).
+      Promise.resolve(onSaveRef.current(buildEntry(snap))).finally(() => {
         saveInFlightRef.current = false;
-        const next = queuedSnapshotRef.current;
-        if (next) {
+        if (!queuedSnapshotRef.current) return;
+        // Defer the dequeue to a macrotask so React first commits any
+        // setState side-effects of the in-flight save (parent setLoadResult
+        // → new mtime → handleSave / saveEdit re-memo → onSaveRef updated
+        // via render-time sync above). Without setTimeout(0), the recursive
+        // runSave call would still see the pre-commit onSave snapshot and
+        // race the same mtime conflict we just solved upstream.
+        setTimeout(() => {
+          const next = queuedSnapshotRef.current;
+          if (!next) return;
           queuedSnapshotRef.current = null;
           runSave(next);
-        }
+        }, 0);
       });
     },
-    [buildEntry, onSave],
+    [buildEntry],
   );
 
   // performAutoSave is the gate for #105 blur / radio handlers. It reads
@@ -263,19 +292,28 @@ export function SampleEditPane({
 
   // Save-on-unmount (#105 §5.6). Auto-save mode treats modal close (Esc /
   // backdrop, where no field-level blur fires before the input unmounts)
-  // as an implicit blur. Without this, a user who types into the note
-  // textarea and presses Esc loses the edit silently. The cleanup also
-  // runs when the active entry changes (prev/next jump), but the nav-block
-  // invariant (#93 §5.4) guarantees dirty=false at nav time, so that path
-  // is a no-op in practice. If a save is already in-flight, runSave's
-  // 1-slot queue catches the cleanup snapshot — possibly redundant if
-  // nothing was typed after the triggering blur, but always correct.
+  // as an implicit blur for any field that hadn't been blurred before
+  // close. The cleanup intentionally fires *only at unmount* (deps left
+  // empty + refs read at fire time): an earlier `[autoSave, entry, runSave]`
+  // dependency set would also fire on every `entry` reference change — and
+  // a successful save creates a new entry object via setLoadResult, so the
+  // cleanup would replay against the stale-closure baseline and double-save
+  // the user's edits (Copilot review thread #3). Refs read at fire time
+  // give us the latest entry / autoSave; the dirty check is against the
+  // latest baseline so a just-saved entry sees refs == baseline → false →
+  // no spurious save. runSave / saveInFlightRef are component-scoped and
+  // still callable after unmount (parent ClassificationView still mounts).
+  // The eslint hook-deps rule would push autoSave / entry / runSave back
+  // into deps; the empty-deps shape is intentional and a lint suppression
+  // would be appropriate if a linter were configured.
   useEffect(() => {
     return () => {
-      if (!autoSave || !entry) return;
+      if (!autoSaveRef.current) return;
+      const cur = entryRef.current;
+      if (!cur) return;
       if (
         !computeEditDirty(
-          entry,
+          cur,
           tagsRef.current,
           confidenceRef.current,
           noteRef.current,
@@ -284,13 +322,17 @@ export function SampleEditPane({
         return;
       }
       runSave({
-        filename: entry.filename,
+        filename: cur.filename,
         tags: tagsRef.current,
         confidence: confidenceRef.current,
         note: noteRef.current,
       });
     };
-  }, [autoSave, entry, runSave]);
+    // Deps intentionally empty: see comment above. autoSave / entry / runSave
+    // are accessed via refs synced at render time so the cleanup always reads
+    // the latest values without re-firing on each prop churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleNoteBlur = useCallback(() => {
     performAutoSave({ note: noteRef.current });
