@@ -15,6 +15,7 @@
 | 2026-05-29 | PR #109 レビュー対応 | runSave の dequeue を `onSaveRef` + `setTimeout(0)` で stale closure / batched render を回避 (§5.3 更新)。save-on-unmount cleanup を unmount 限定 + refs 参照に変更し entry オブジェクト churn での重複保存を回避 (§5.6 更新)。 |
 | 2026-05-29 | PR #109 レビュー対応 round 2 | baseline reset useEffect を per-field 化し、partial save (entry.folder のみ変化) で未 blur の note / confidence 入力が消える問題を修正 (§6 追記)。`useClassificationEdit.saveEdit` を `loadResultRef.current.mtime` ベースに変更し、unmount 後の queue replay でも最新 mtime で IPC 発火するようにした (§5.3 / §5.6 補足)。 |
 | 2026-05-29 | PR #109 レビュー対応 round 3 | `runSave` に `inFlightSnapshotRef` + snapshot 同値性チェックを追加。× / バックドロップ click で input blur が in-flight 開始し、その直後の unmount cleanup が同一 snapshot で queue を踏むケースで余計な IPC が出る問題を解消 (§5.3 補足)。 |
+| 2026-05-29 | PR #109 レビュー対応 round 4 | `applyFieldDefaults` の probe 判定を `*bool` 再 decode に拡張し、`editAutoSave: null` を「キー存在だが unparseable」として true に補填 (§7.2 補足)。これで JSON null が壊れた手動モードとして読み込まれる経路を塞ぐ。 |
 
 ---
 
@@ -376,6 +377,8 @@ func Load() SettingsData {
 ```
 
 **最終案**: 上記の probe 方式を採用。`SettingsData` は bool のまま、Load 内に `editAutoSave` キー存在チェックを足す。コストは Unmarshal 2 回だがファイル数 KB なので無視できる。Save 側は `omitempty` 無しの普通の `bool` を書く (= 常に key が存在 → 次回 Load では default 補填経路に乗らない)。
+
+**round 4 補強**: 単純な `_, present := probe["editAutoSave"]` だけだと、JSON `null` が来たとき「キー存在」と判定され (raw value がそのまま `null`)、`SettingsData.EditAutoSave` 側は zero value (`false`) のまま残るため、結果として「壊れた null 値が手動モードとして読み込まれる」(他フィールドの「invalid → field default」ポリシーから外れる) 問題が発生する。対策は raw を `*bool` に再 decode し、エラー or `nil` (= JSON null) なら true に補填する形にする。`true` / `false` は通常通り decode して反映 (= 初期 Unmarshal の結果をそのまま保持)。テストケース `TestLoad_EditAutoSave_NullValue_DefaultsToTrue` で pin。
 
 §10-D に「ポインタ方式 vs probe 方式」の判断を残す。
 

@@ -353,9 +353,23 @@ func applyFieldDefaults(s *SettingsData, probe map[string]json.RawMessage) {
 	// missing in JSON" without a probe. Treat missing as the default (true) so
 	// users upgrading from a pre-#105 build don't silently land in manual mode.
 	// Explicit `false` (key present, value false) is preserved.
+	//
+	// JSON `null` is a third case: encoding/json leaves a bool field at its
+	// zero value when the source is null, AND the key is "present" in the
+	// raw probe map. Without the *bool re-decode below, a corrupted
+	// `editAutoSave: null` would silently land in manual mode (false) —
+	// which is the opposite of the "invalid field → field default" rule the
+	// other per-field branches follow. Treat null like missing (fall back
+	// to true), keep true / false as decoded (PR #109 round 4 #8).
 	if probe != nil {
-		if _, present := probe["editAutoSave"]; !present {
+		raw, present := probe["editAutoSave"]
+		if !present {
 			s.EditAutoSave = true
+		} else {
+			var bp *bool
+			if err := json.Unmarshal(raw, &bp); err != nil || bp == nil {
+				s.EditAutoSave = true
+			}
 		}
 	}
 }

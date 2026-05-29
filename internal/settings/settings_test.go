@@ -336,6 +336,26 @@ func TestLoad_EditAutoSave_ExplicitFalse_Preserved(t *testing.T) {
 	}
 }
 
+// TestLoad_EditAutoSave_NullValue_DefaultsToTrue covers the third probe case
+// (PR #109 round 4 #8): JSON `null` leaves a bool field at the zero value
+// during the initial Unmarshal, AND the key is present in the raw probe
+// map. Without the *bool re-decode in applyFieldDefaults, a corrupted
+// `editAutoSave: null` would silently land in manual mode (false) — the
+// opposite of the "invalid field → field default" rule the other per-field
+// branches enforce.
+func TestLoad_EditAutoSave_NullValue_DefaultsToTrue(t *testing.T) {
+	p := setSettingsFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	body := []byte(`{"version":1,"editAutoSave":null}`)
+	if err := os.WriteFile(p, body, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if !s.EditAutoSave {
+		t.Errorf("JSON null should fall back to default (true), got %v", s.EditAutoSave)
+	}
+}
+
 func TestSave_AtomicNoLingerTmp(t *testing.T) {
 	p := setSettingsFile(t)
 	if err := Save(DefaultSettings()); err != nil {
