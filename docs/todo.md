@@ -50,6 +50,7 @@
 - [x] **EXIF Orientation**: v1 では読まない (尊重しない)。
 - [x] **背景**: 単色 (ビューア領域の地色) + 透過部分はチェッカ柄。
 - [x] **低解像度プレビュー先行表示 (#97)**: ビューアでオリジナルロード中に SampleModal と同じ `getPreview()` (= `GetThumbnail(path, 1024, "letterbox")` の TS ラッパ) を流用してプレビューを一時表示する。Phase 1 は単一 `<img>` の src 差し替え + `GetImageInfo` 先行発火 + preview/original/dimensions の 3 並行 IPC + 共通定数/ラッパを `shared/utils/thumbnailDefaults.ts` に集約。skip threshold / fade transition / 横断メモリキャッシュは Phase 2 で別途検討。 → PR #103 (実装完了、手動検証は PR test plan で実施) / [spec-low-res-preview.md](spec-low-res-preview.md) → #104 で preview 描画方針を改訂 (`max(W,H)` 正方形 + offset でアスペクト比歪みを解消)。
+- [ ] **ビューアタブ間プレビューキャッシュ (#106)**: タブ切替時に過去取得済みの preview Blob URL を即時表示し「読み込み中…」blank を解消。viewer 横断のモジュールスコープ Map (固定上限 16 / JS Map insertion order ベース LRU) を `features/viewer-grid/previewCache.ts` に新設。タブ閉じても cache 残置 (LRU 任せ)、cache hit 時は `getPreview` IPC スキップ、`GetImageInfo` / `ReadImage` は併走。Blob revoke 責任は cache 側に一元化 (ImageView 側の revoke を撤去)、setCachedPreview 戻り値 `adopted` で重複 Blob を呼び出し側に廃棄させる。mtime invalidation / DeleteImage 連携 / watcher 連携は Phase 2。 → [spec-viewer-tab-cache.md](spec-viewer-tab-cache.md) (#97 spec §11 Out of scope に挙げていた「viewer 横断のプレビューメモリキャッシュ」が本仕様の Phase 1)。
 
 ## F. 状態の永続化 🟡
 
