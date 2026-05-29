@@ -20,3 +20,17 @@ export const PREVIEW_MODE = "letterbox";
 export function getPreview(path: string): Promise<thumb.Result> {
   return GetThumbnail(path, PREVIEW_SIZE, PREVIEW_MODE);
 }
+
+// preview Blob URL を revoke するまでの遅延 (ms)。
+//
+// React の commit 後に <img src> が swap されるのを待ってから旧 URL を
+// 破棄する目的。即時 revoke だと unmount / tab.path 切替の瞬間にブラウザ
+// がまだ旧 src を参照していて描画が崩れる可能性がある。
+//
+// 値は 60Hz 想定で 1-2 frame (~16.7〜33ms) より大きく、人間の知覚閾値
+// (~100ms) 以下に収めて余分なメモリ保持を最小化。
+//
+// AGENTS.md D-1 (同概念の定数が複数箇所に分散しないよう shared 集約):
+// ImageView の useEffect cleanup と previewCache の LRU evict 遅延の
+// 両方が同じ値を参照する。
+export const PREVIEW_REVOKE_DELAY_MS = 100;
