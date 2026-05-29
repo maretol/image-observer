@@ -13,6 +13,7 @@
 | 2026-05-29 | 初版 | issue #105 の要件整理 + 設計判断 (§10-A〜E) を提示。Phase 1 は新 settings フィールド + SampleEditPane の auto-save 経路 + ListSection UI 追加。 |
 | 2026-05-29 | ユーザー合意 | §10-A〜E すべて推奨案 (A 案) で確定。実装着手 (PR #109)。 |
 | 2026-05-29 | PR #109 レビュー対応 | runSave の dequeue を `onSaveRef` + `setTimeout(0)` で stale closure / batched render を回避 (§5.3 更新)。save-on-unmount cleanup を unmount 限定 + refs 参照に変更し entry オブジェクト churn での重複保存を回避 (§5.6 更新)。 |
+| 2026-05-29 | PR #109 レビュー対応 round 2 | baseline reset useEffect を per-field 化し、partial save (entry.folder のみ変化) で未 blur の note / confidence 入力が消える問題を修正 (§6 追記)。`useClassificationEdit.saveEdit` を `loadResultRef.current.mtime` ベースに変更し、unmount 後の queue replay でも最新 mtime で IPC 発火するようにした (§5.3 / §5.6 補足)。 |
 
 ---
 
@@ -195,6 +196,10 @@ const performAutoSave = (tags, confidence, note) => {
 
 AGENTS.md H-8「state ref の同期タイミング」と同じ理屈で、ref を render-time に書き、async path はその ref を読む。
 
+**round 2 補強** (`saveEdit` 側の mtime 参照): SampleEditPane が **unmount** 済みのとき、cleanup から queue に積まれた snapshot が後で setTimeout でリプレイされる経路では、unmount 後に再 render は走らないため `onSaveRef.current` が更新されない。`onSaveRef.current` が握っている `handleSave` → `saveEdit` の closure はどちらも save が in-flight だった時点のもので、`saveEdit` の `loadResult.mtime` は古い (= save 前の値)。これだと unmount 時の追加 save がまた CONFLICT を踏む。
+
+対策: `useClassificationEdit.saveEdit` を `loadResult` prop 直参照ではなく `loadResultRef.current` 経由に変更。`loadResultRef` は `useClassification.ts:338` で render-time sync されており、ClassificationView が re-render するたびに最新 mtime を保持する (SampleEditPane が unmount しても ClassificationView は生きているので、ref は更新され続ける)。OLD `saveEdit` クロージャでも call 時に最新 mtime を読めるので、unmount 後の replay でも CONFLICT を踏まない。
+
 ### 5.4 manual モードでの merge prompt / conflict との関係
 
 saveEdit が conflict を返したら既存の ConflictDialog が出る (= `useClassificationEdit` の経路は同じ)。auto モードでも:
@@ -243,6 +248,26 @@ manual モードは現状通り「未保存破棄 (確認なし)」。
 - Cmd/Ctrl+Enter ショートカットの hint は manual モードでのみ「保存」ボタン tooltip に出る (auto モードは button 自体が無い)
 
 ## 6. 状態管理 / フック
+
+### 6.0 baseline reset の per-field 化 (PR #109 round 2)
+
+`SampleEditPane` 内の baseline reset useEffect (deps `[entry]`) は、初版では「baseline の **いずれかのフィールド** が変わったら **全フィールド** を新 baseline に reset」していた。これだと auto-save 成功 → 親 `setLoadResult` → 新 `entry` (タグだけ patched、note / confidence は不変) → effect 再発火 → note / confidence も「同値の」新 baseline に reset、というだけなら問題なく見える。
+
+しかし「タグの save が in-flight の間に user が note を入力する」と:
+
+1. user タグ入力 → blur → save IPC 発火 (`saveEdit({...tags: ["alice", "bob"]})`)
+2. save 完了前に user が note 欄に "メモ" と入力 → `noteRef.current = "メモ"`, `setNote("メモ")` 反映
+3. save 完了 → 親 `setLoadResult` (新 entry.folder = serialize(["alice", "bob"])、entry.note = "" のまま)
+4. 新 `entry` オブジェクト → SampleEditPane の baseline reset effect が再発火
+5. 旧版実装: 全フィールド reset → `setNote("")`, `noteRef.current = ""` で **user の "メモ" 入力が消失**
+
+対策: per-field 同期に変更。
+
+- **filename 変化 (prev/next nav)**: 全フィールド reset (これは別 entry なので local 編集は持ち越し対象外)。nav は dirty=false 時しか許されないので、未保存 local edits が失われる経路は実質発生しない。
+- **同一 filename 下の baseline patch**: 各フィールド独立に「local が **旧** baseline と一致しているか」をチェック:
+  - 一致: user は当該フィールドをまだ触っていない → 新 baseline に同期 (= disk truth に追従)
+  - 不一致: user が当該フィールドを編集中 → local を保持 (in-flight typing を尊重)
+- どちらの分岐でも `lastBaselineRef` は **新 baseline で更新** する。これを忘れると、user が後で偶然 *元の* baseline に戻したときに再び per-field 同期が走ってしまう。
 
 ### 6.1 useSettings の利用
 

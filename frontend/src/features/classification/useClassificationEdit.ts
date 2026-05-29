@@ -24,7 +24,15 @@ export type UseClassificationEditReturn = {
 
 type Props = {
   conflict: ConflictPrompt | null;
-  loadResult: classification.LoadResult | null;
+  // loadResultRef is the render-time-synced mirror of `loadResult`
+  // (useClassification.ts:338). saveEdit reads `.current.mtime` at *call
+  // time* rather than capturing it via useCallback closure so that a stale
+  // `saveEdit` (held by an unmounted SampleEditPane that still has a
+  // queued auto-save replaying after the in-flight save's setLoadResult
+  // committed) still picks up the latest mtime — without this the queued
+  // save would replay against the pre-save mtime and trip the Go-side
+  // expectedMtime CONFLICT path (Copilot review #109 round 2, #6).
+  loadResultRef: React.MutableRefObject<classification.LoadResult | null>;
 
   folderRef: React.MutableRefObject<string>;
   requestGenRef: React.MutableRefObject<number>;
@@ -50,7 +58,7 @@ type Props = {
 export function useClassificationEdit(props: Props): UseClassificationEditReturn {
   const {
     conflict,
-    loadResult,
+    loadResultRef,
     folderRef,
     requestGenRef,
     setLoadResult,
@@ -74,12 +82,18 @@ export function useClassificationEdit(props: Props): UseClassificationEditReturn
   const saveEdit = useCallback(
     async (entry: classification.Entry) => {
       const cur = folderRef.current;
-      if (!cur || !loadResult) return;
+      // Read the live mtime from the ref so a saveEdit closure captured by an
+      // unmounted SampleEditPane (queued auto-save replay after in-flight
+      // success) still sends the latest mtime. Without this, the queued IPC
+      // would carry the pre-save mtime and trip Go's expectedMtime CONFLICT
+      // path (PR #109 round 2 #6).
+      const lr = loadResultRef.current;
+      if (!cur || !lr) return;
       try {
         const out = await UpdateClassificationEntry(
           cur,
           entry,
-          loadResult.mtime,
+          lr.mtime,
         );
         // Folder check before any state commit — the UpdateEntry disk
         // write itself is fine to complete against `cur`, but patching
@@ -139,7 +153,7 @@ export function useClassificationEdit(props: Props): UseClassificationEditReturn
     },
     [
       folderRef,
-      loadResult,
+      loadResultRef,
       requestGenRef,
       setConflict,
       setEditing,

@@ -124,12 +124,11 @@ export function SampleEditPane({
       return;
     }
     const last = lastBaselineRef.current;
-    const baselineChanged =
-      last.filename !== entry.filename ||
-      last.folder !== entry.folder ||
-      last.confidence !== entry.confidence ||
-      last.note !== entry.note;
-    if (baselineChanged) {
+    // filename change = entirely different entry (prev/next nav). Reset all
+    // three fields to the new baseline because the previous local edits do
+    // not belong to this entry. nav is blocked while dirty (#93 §5.4) so
+    // there are no unsaved edits to preserve here.
+    if (last.filename !== entry.filename) {
       lastBaselineRef.current = {
         filename: entry.filename,
         folder: entry.folder,
@@ -143,7 +142,47 @@ export function SampleEditPane({
       confidenceRef.current = entry.confidence;
       setNote(entry.note);
       noteRef.current = entry.note;
+      return;
     }
+    // Same entry, baseline patched (auto-save success that only touched a
+    // subset of fields, or an external sidecar edit). Per-field sync: only
+    // overwrite a local field if it still matches the *previous* baseline
+    // — i.e. the user had not diverged from what we thought was the
+    // baseline at the time. Diverged fields keep the user's in-flight typing
+    // (Copilot review #5: a partial save that only changed entry.folder
+    // would otherwise clobber an unsaved note draft).
+    if (last.folder !== entry.folder) {
+      const oldBaselineSerialized = serializeTags(extractTags(last.folder));
+      const localSerialized = serializeTags(tagsRef.current);
+      if (localSerialized === oldBaselineSerialized) {
+        const nextTags = extractTags(entry.folder);
+        setTags(nextTags);
+        tagsRef.current = nextTags;
+      }
+    }
+    if (last.confidence !== entry.confidence) {
+      if (confidenceRef.current === last.confidence) {
+        setConfidence(entry.confidence);
+        confidenceRef.current = entry.confidence;
+      }
+    }
+    if (last.note !== entry.note) {
+      if (noteRef.current === last.note) {
+        setNote(entry.note);
+        noteRef.current = entry.note;
+      }
+    }
+    // Always advance the baseline pointer so subsequent diff checks are
+    // against the latest entry, even for fields we just kept local. Without
+    // this, a field the user is editing would re-trigger the per-field sync
+    // on the next render once the user happens to match the *original*
+    // baseline again.
+    lastBaselineRef.current = {
+      filename: entry.filename,
+      folder: entry.folder,
+      confidence: entry.confidence,
+      note: entry.note,
+    };
   }, [entry]);
 
   // Derive dirty against the latest baseline. The pure helper passes the
