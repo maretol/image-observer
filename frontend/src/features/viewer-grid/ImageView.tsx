@@ -9,22 +9,14 @@ import { errorMessage } from "../../shared/utils/error";
 import { zoomCommandBus, type ZoomCommand } from "../../shared/utils/keybindings";
 import { logger } from "../../shared/utils/logger";
 import { basename } from "../../shared/utils/path";
-import { getPreview } from "../../shared/utils/thumbnailDefaults";
+import {
+  getPreview,
+  PREVIEW_REVOKE_DELAY_MS,
+} from "../../shared/utils/thumbnailDefaults";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8.0;
 const ZOOM_STEP = 1.2;
-
-// preview Blob URL を revoke するまでの遅延 (ms)。
-//
-// React の commit 後に <img src> が swap されるのを待ってから旧 URL を破棄
-// する目的。即時 revoke だと unmount / tab.path 切替の瞬間にブラウザが
-// まだ旧 src を参照していて描画が崩れる可能性がある。
-//
-// 値は 60Hz 想定で 1-2 frame (~16.7〜33ms) より大きく、人間の知覚閾値
-// (~100ms) 以下に収めて余分なメモリ保持を最小化。releasePreview() と
-// useEffect cleanup の両方で同じ遅延を使う。
-const PREVIEW_REVOKE_DELAY_MS = 100;
 
 type Props = {
   tab: Tab;
