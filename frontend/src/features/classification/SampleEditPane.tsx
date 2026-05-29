@@ -217,12 +217,16 @@ export function SampleEditPane({
     note: string;
   };
   const saveInFlightRef = useRef(false);
+  const inFlightSnapshotRef = useRef<Snapshot | null>(null);
   const queuedSnapshotRef = useRef<Snapshot | null>(null);
 
   useEffect(() => {
     // Discard any queued snapshot whenever the active entry (or its absence)
     // changes — replaying an old filename's snapshot against a new entry
-    // would clobber the wrong record.
+    // would clobber the wrong record. inFlightSnapshotRef is cleared by the
+    // save's finally handler instead; the in-flight save itself is for the
+    // OLD filename and is allowed to complete on the OLD folder (saveEdit's
+    // folderRef check inside useClassificationEdit gates the state commit).
     queuedSnapshotRef.current = null;
   }, [entry?.filename]);
 
@@ -235,13 +239,53 @@ export function SampleEditPane({
     });
   }, []);
 
+  // Snapshot equality used by runSave to short-circuit redundant queue
+  // entries when the same content is already in-flight or queued. Without
+  // this, a × / backdrop click whose first effect is the input's blur
+  // (which fires the in-flight save) followed by the unmount cleanup would
+  // re-queue the same snapshot and double-save the user's edits on flush
+  // — wasting an IPC and bumping mtime / waking the watcher for no gain
+  // (PR #109 round 3 #7).
+  const snapshotsEqual = useCallback(
+    (a: Snapshot, b: Snapshot): boolean => {
+      if (a.filename !== b.filename) return false;
+      if (a.confidence !== b.confidence) return false;
+      if (a.note !== b.note) return false;
+      if (a.tags.length !== b.tags.length) return false;
+      for (let i = 0; i < a.tags.length; i++) {
+        if (a.tags[i] !== b.tags[i]) return false;
+      }
+      return true;
+    },
+    [],
+  );
+
   const runSave = useCallback(
     (snap: Snapshot) => {
       if (saveInFlightRef.current) {
+        // Skip if the same content is already in flight: the existing IPC
+        // covers this exact state, queuing a duplicate would just re-fire
+        // the same write on flush (PR #109 round 3 #7).
+        if (
+          inFlightSnapshotRef.current &&
+          snapshotsEqual(snap, inFlightSnapshotRef.current)
+        ) {
+          return;
+        }
+        // Skip if the queued slot already holds the same snapshot —
+        // overwriting with an identical value is a no-op but keeps the
+        // queue-handling logic symmetric with the in-flight check.
+        if (
+          queuedSnapshotRef.current &&
+          snapshotsEqual(snap, queuedSnapshotRef.current)
+        ) {
+          return;
+        }
         queuedSnapshotRef.current = snap;
         return;
       }
       saveInFlightRef.current = true;
+      inFlightSnapshotRef.current = snap;
       // Read onSave through the ref so the recursive dequeue below picks up
       // the *latest* handleSave (and the saveEdit it closes over, and that
       // saveEdit's latest loadResult.mtime). Capturing onSave from the
@@ -250,6 +294,7 @@ export function SampleEditPane({
       // CONFLICT from Go's expectedMtime check (Copilot review thread #2).
       Promise.resolve(onSaveRef.current(buildEntry(snap))).finally(() => {
         saveInFlightRef.current = false;
+        inFlightSnapshotRef.current = null;
         if (!queuedSnapshotRef.current) return;
         // Defer the dequeue to a macrotask so React first commits any
         // setState side-effects of the in-flight save (parent setLoadResult
@@ -265,7 +310,7 @@ export function SampleEditPane({
         }, 0);
       });
     },
-    [buildEntry],
+    [buildEntry, snapshotsEqual],
   );
 
   // performAutoSave is the gate for #105 blur / radio handlers. It reads
