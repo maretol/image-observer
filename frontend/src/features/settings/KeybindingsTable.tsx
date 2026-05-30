@@ -41,7 +41,7 @@ const KEYBINDINGS: Array<{ keys: string; action: string; scope: string }> = [
     scope: "一覧",
   },
   {
-    keys: "T / C / N",
+    keys: "t / c / n",
     action: "プレビューでタグ / confidence / note 編集にフォーカス",
     scope: "一覧 (プレビュー)",
   },
