@@ -2,7 +2,7 @@
 
 PR #109 (6 round) の post-mortem (#110) で残った action item **B (component/hook テスト基盤)** と **C (境界の責務リファクタ)** を実装するための仕様書。A (spec/着手プロトコル) / D (運用ルール) は PR #111 で反映済み。本 spec はそれらの「再発防止策を、実際に再発しうる SampleEditPane auto-save の配線部分へ適用する」フォローアップにあたる。
 
-> **ステータス**: §11 決定事項ユーザー合意済み (2026-05-30、D-1〜D-5 すべて推奨 A 案)。**Phase 1 (B) 着手中** → Phase 2 (C) は Phase 1 マージ後。
+> **ステータス**: §11 決定事項ユーザー合意済み (2026-05-30、D-1〜D-5 すべて推奨 A 案)。**Phase 1 (B) 完了 (PR #113)** / **Phase 2 (C) 未着手** — Phase 1 マージ後に着手する。
 > issue triage で先行合意済み: **テスト基盤 = happy-dom + @testing-library/react 最小構成** (§11 D-5) / **B+C を 1 spec で Phase 分割** (§12)。
 > §4 の同期モデル表が C の target 設計であり、CLAUDE.md「非同期処理の着手前ルール」に従い **C の最初の commit はこの表** にする。
 
@@ -14,6 +14,7 @@ PR #109 (6 round) の post-mortem (#110) で残った action item **B (component
 |------|---------|---------|
 | 2026-05-30 | 初版 | #110 B+C の要件整理。§4 同期モデル表 (C の target) / §5 Phase 1 (B: happy-dom + RTL + `useAutoSaveQueue` 抽出 + renderHook テスト) / §6 Phase 2 (C: `onSave` context API 化 + `folderPathRef` guard 撤去) / §11 決定事項を提示。 |
 | 2026-05-30 | ユーザー合意 | §11 D-1〜D-5 すべて推奨 (A) 案で確定。Phase 1 (B) 着手。D-2 は (a) 案 = ctx は folder のみ意味付け / mtime は fresh read 温存 / `setTimeout(0)` dequeue 据え置き。 |
+| 2026-05-30 | PR #113 レビュー対応 | Copilot 指摘を反映。(1) §5.4 にテスト項目 8 を追加 — in-flight へ revert した際に queued を破棄する実在バグ (round 5 のキュー版) を `useAutoSaveQueue` で修正し pin。(2) §5.5 の `computeBaselineSync` シグネチャを実装最終形 (非 null entry 専用 / `BaselineSyncAction` discriminated union) に追従。(3) ステータスを Phase 1 完了 / Phase 2 未着手に更新。 |
 
 ---
 
@@ -198,23 +199,29 @@ export function useAutoSaveQueue(args: UseAutoSaveQueueArgs): UseAutoSaveQueueRe
 5. `runSave(A)` → `runSave(B)` → `runSave(C)` 連続 → IPC は最大 2 回 (A in-flight + 最新 C が queued、B は捨てられる)。
 6. dequeue が `setTimeout(0)` 相当の macrotask 後である (flush 前は replay が走らない)。
 7. `resetQueue()` 後は queued snapshot が破棄され replay されない (entry 切替時の stale 着地防止)。
+8. in-flight=A・queued=B のとき `runSave(A)` (in-flight へ revert) → **queued B を破棄**。A 解決後 B は replay されず最終状態は A に留まる (round 5 のキュー版。#110 B の Copilot レビューで顕在化した実在バグの修正)。
 
 ### 5.5 baseline reset の純 reducer 抽出 (round 2 / round 5)
 
 baseline reset useEffect の per-field 同期判定を純関数へ:
 
 ```ts
-// sampleEditBaselineSync.ts
-export type BaselineFields = { filename: string | null; folder: string; confidence: string; note: string };
-export type LocalFields = { tags: string[]; confidence: string; note: string };
+// sampleEditBaselineSync.ts (実装の最終形)
+export type Baseline = { filename: string | null; folder: string; confidence: string; note: string };
+export type LocalEdit = { tags: string[]; confidence: string; note: string };
 export type Touched = { tags: boolean; confidence: boolean; note: boolean };
-// 戻り値: 各フィールドを新 baseline に同期すべきか + 新 baselineRef + touched リセット
+export type BaselineSyncAction =
+  | { kind: "resetAll" } // filename 変化 = 別 entry (prev/next nav) → 全フィールド reset
+  | { kind: "perField"; syncTags: boolean; syncConfidence: boolean; syncNote: boolean };
+// entry === null (clear → EMPTY_BASELINE) は呼び出し側 (useEffect) で処理し、本関数は
+// 非 null entry 専用の total function。戻り値は discriminated union で resetAll と
+// per-field 同期を型で分離する (フラットな bool 集合より誤用しにくい)。
 export function computeBaselineSync(
-  prevBaseline: BaselineFields,
-  entry: classification.Entry | null,
-  local: LocalFields,
+  prev: Baseline,
+  entry: classification.Entry,
+  local: LocalEdit,
   touched: Touched,
-): { syncTags: boolean; syncConfidence: boolean; syncNote: boolean; resetAll: boolean };
+): BaselineSyncAction;
 ```
 
 - useEffect は「reducer を呼んで結果に従い setState するだけ」に縮退。
