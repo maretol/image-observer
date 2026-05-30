@@ -24,6 +24,7 @@ import {
   computeCardContextMenuMode,
 } from "./cardContextMenuLogic";
 import { tagSummary } from "./filters";
+import { arrowDirection, pickGridNeighbor } from "./gridNav";
 import { groupByDirectory, groupKeyOf } from "./groups";
 import { pickSibling } from "./sampleModalNav";
 import type { UseClassificationReturn } from "./useClassification";
@@ -161,6 +162,47 @@ export function ClassificationView({
       scrollTopRef.current = e.currentTarget.scrollTop;
     },
     [scrollTopRef],
+  );
+
+  // Arrow-key grid navigation (#115). When a card thumb is focused, ←/→ move
+  // through cards in reading (DOM) order — flowing across row and directory-
+  // group boundaries — and ↑/↓ move by visual row, picking the card whose
+  // horizontal center is nearest. Geometry is read from getBoundingClientRect
+  // at keypress time so it stays correct under the responsive column count and
+  // the per-group grids; pickGridNeighbor owns the (testable) decision.
+  // Collapsed groups render no cards, so they're skipped automatically. Enter/
+  // Space activation already lives on the Card thumb itself, so we only move
+  // focus here. The handler is bound on the scroll container and reacts to the
+  // keydown bubbling up from the focused thumb.
+  const onGroupsKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const dir = arrowDirection(e.key);
+      if (!dir) return;
+      const container = groupsElRef.current;
+      if (!container) return;
+      const active = document.activeElement;
+      // Only hijack arrows while a card thumb has focus — leave them alone for
+      // any other focusable (filter inputs etc. live outside .cls-groups, but
+      // guard defensively).
+      if (
+        !(active instanceof HTMLElement) ||
+        !active.classList.contains("cls-card-thumb")
+      ) {
+        return;
+      }
+      const cards = Array.from(
+        container.querySelectorAll<HTMLElement>(".cls-card-thumb"),
+      );
+      const current = cards.indexOf(active);
+      if (current < 0) return;
+      const rects = cards.map((c) => c.getBoundingClientRect());
+      const next = pickGridNeighbor(rects, current, dir);
+      if (next === null) return;
+      e.preventDefault();
+      cards[next].focus({ preventScroll: true });
+      cards[next].scrollIntoView({ block: "nearest" });
+    },
+    [],
   );
   // Reset on folder change. Initialized with the current folderPath so the
   // first mount after a tab switch (folderPath unchanged) does NOT reset and
@@ -544,6 +586,7 @@ export function ClassificationView({
           className="cls-groups"
           ref={groupsRefCallback}
           onScroll={onGroupsScroll}
+          onKeyDown={onGroupsKeyDown}
         >
           {filteredGroups.map((g) => (
             <DirectoryGroup
