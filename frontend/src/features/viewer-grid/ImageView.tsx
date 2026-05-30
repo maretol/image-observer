@@ -162,13 +162,48 @@ export function ImageView({
         if (cancelled) return;
         originalSettled = true;
         setImageData(res);
-        const cur = tabRef.current;
-        if (cur.imageWidth !== res.width || cur.imageHeight !== res.height) {
-          updateRef.current(tabIndexRef.current, {
-            imageWidth: res.width,
-            imageHeight: res.height,
-          });
+        if (res.width > 0 && res.height > 0) {
+          const cur = tabRef.current;
+          if (cur.imageWidth !== res.width || cur.imageHeight !== res.height) {
+            updateRef.current(tabIndexRef.current, {
+              imageWidth: res.width,
+              imageHeight: res.height,
+            });
+          }
+          return;
         }
+        // 寸法 0 = Go 側でデコードできないフォーマット (avif。Go に in-tree
+        // デコーダが無く cgo 回避方針で依存も足さないため — spec-avif-support
+        // §4.3 A1)。WebView がデコードした bitmap の naturalWidth/Height を
+        // 表示実寸として tab state に流し、初期 fit / hasContent ゲートを既存
+        // どおり駆動する。本体 <img> は寸法 > 0 (hasContent) が立つまで描画
+        // されず onLoad で測れないため、独立した probe Image で測る。
+        const probe = new Image();
+        const probeUrl = URL.createObjectURL(
+          new Blob([toBytes(res.data)], { type: res.mimeType }),
+        );
+        probe.onload = () => {
+          URL.revokeObjectURL(probeUrl);
+          if (cancelled) return;
+          const w = probe.naturalWidth;
+          const h = probe.naturalHeight;
+          if (w <= 0 || h <= 0) return;
+          const cur = tabRef.current;
+          if (cur.imageWidth !== w || cur.imageHeight !== h) {
+            updateRef.current(tabIndexRef.current, {
+              imageWidth: w,
+              imageHeight: h,
+            });
+          }
+        };
+        probe.onerror = () => {
+          URL.revokeObjectURL(probeUrl);
+          if (cancelled) return;
+          logger.warn("viewer-grid", "image dimension probe failed", {
+            path: tab.path,
+          });
+        };
+        probe.src = probeUrl;
       })
       .catch((e) => {
         if (cancelled) return;
