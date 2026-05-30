@@ -2,7 +2,7 @@
 
 PR #109 (6 round) の post-mortem (#110) で残った action item **B (component/hook テスト基盤)** と **C (境界の責務リファクタ)** を実装するための仕様書。A (spec/着手プロトコル) / D (運用ルール) は PR #111 で反映済み。本 spec はそれらの「再発防止策を、実際に再発しうる SampleEditPane auto-save の配線部分へ適用する」フォローアップにあたる。
 
-> **ステータス**: §11 決定事項ユーザー合意済み (2026-05-30、D-1〜D-5 すべて推奨 A 案)。**Phase 1 (B) 完了 (PR #113)** / **Phase 2 (C) 実装済み (PR 準備中)** — `SaveContext = { folder }` (D-2 a)、`onSave(entry, ctx)` 化 + `saveEdit` の ctx.folder gate + `folderPathRef` guard 撤去。
+> **ステータス**: §11 決定事項ユーザー合意済み (2026-05-30、D-1〜D-5 すべて推奨 A 案)。**Phase 1 (B) 完了 (PR #113)** / **Phase 2 (C) 実装済み (PR #114)** — `SaveContext = { folder }` (D-2 a)、`onSave(entry, ctx)` 化 + `saveEdit` の ctx.folder gate + `folderPathRef` guard 撤去。
 > issue triage で先行合意済み: **テスト基盤 = happy-dom + @testing-library/react 最小構成** (§11 D-5) / **B+C を 1 spec で Phase 分割** (§12)。
 > §4 の同期モデル表が C の target 設計であり、CLAUDE.md「非同期処理の着手前ルール」に従い **C の最初の commit はこの表** にする。
 
