@@ -25,16 +25,18 @@ export type Touched = {
   note: boolean;
 };
 
-// Baseline used when no entry is active. Read-only by convention — callers
-// assign it to a ref but never mutate it in place (the touched flags, which
-// *are* mutated field-by-field, deliberately have no shared constant: see the
-// reset sites in SampleEditPane which always allocate a fresh literal).
-export const EMPTY_BASELINE: Baseline = {
+// Baseline used when no entry is active. Frozen so no importer can mutate the
+// shared instance (AGENTS B-1: never expose a mutable reference type — a stray
+// `EMPTY_BASELINE.folder = ...` would poison every later baseline reset that
+// assigns it to lastBaselineRef). The touched flags, which *are* mutated
+// field-by-field, deliberately have no shared constant: the reset sites in
+// SampleEditPane always allocate a fresh literal.
+export const EMPTY_BASELINE: Readonly<Baseline> = Object.freeze({
   filename: null,
   folder: "",
   confidence: "",
   note: "",
-};
+});
 
 export function baselineOf(entry: classification.Entry): Baseline {
   return {
