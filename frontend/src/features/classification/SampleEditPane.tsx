@@ -17,6 +17,7 @@ import {
   type Touched,
 } from "./sampleEditBaselineSync";
 import { computeEditDirty } from "./sampleEditDirty";
+import { editShortcutField, isTextEntryTarget } from "./modalEditShortcuts";
 import { useAutoSaveQueue, type Snapshot } from "./useAutoSaveQueue";
 import type { SaveContext } from "./useClassificationEdit";
 import { TagInput } from "./TagInput";
@@ -96,6 +97,14 @@ export function SampleEditPane({
   const tagsRef = useRef<string[]>(tags);
   const confidenceRef = useRef<string>(confidence);
   const noteRef = useRef<string>(note);
+
+  // DOM refs for the single-key focus shortcuts (#115). confidenceGroupRef
+  // points at the radiogroup container so the handler can focus the currently
+  // checked radio (falling back to the first); noteFieldRef is the textarea.
+  // Tags reuse the existing tagInputRef prop. Distinct from the string-valued
+  // noteRef above, which holds the field's *value* for the auto-save path.
+  const confidenceGroupRef = useRef<HTMLDivElement>(null);
+  const noteFieldRef = useRef<HTMLTextAreaElement>(null);
 
   // Prop refs synced at render time (AGENTS.md H-8 "state ref の同期タイミング").
   // The in-flight queue's finally callback (§5.3) and the save-on-unmount
@@ -368,6 +377,42 @@ export function SampleEditPane({
     performAutoSave({ note: noteRef.current });
   }, [performAutoSave]);
 
+  // Single-key focus shortcuts (#115): with the modal open and focus NOT in a
+  // free-text field, t / c / n jump focus to the tag input / confidence radios
+  // / note textarea. Bound at window — like the Ctrl+Enter save shortcut — so
+  // it works wherever focus currently sits in the modal (preview side, close
+  // button, a radio, …). Guards, in order: skip modifier combos (Ctrl+T etc.
+  // stay browser/global shortcuts); require an active entry; skip while typing
+  // in a text field so the letter is inserted normally (isTextEntryTarget
+  // deliberately treats radio/checkbox as non-text so "n" works while a
+  // confidence radio is focused). preventDefault stops the triggering letter
+  // from landing in the field we just focused. Refs are stable, so the
+  // listener is attached once for the pane's lifetime.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!entryRef.current) return;
+      if (isTextEntryTarget(e.target)) return;
+      const field = editShortcutField(e.key);
+      if (!field) return;
+      e.preventDefault();
+      if (field === "tags") {
+        tagInputRef?.current?.focus();
+      } else if (field === "confidence") {
+        const group = confidenceGroupRef.current;
+        const radio =
+          group?.querySelector<HTMLInputElement>(
+            'input[type="radio"]:checked',
+          ) ?? group?.querySelector<HTMLInputElement>('input[type="radio"]');
+        radio?.focus();
+      } else {
+        noteFieldRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tagInputRef]);
+
   const handleSave = useCallback(() => {
     // Gate on dirty so the Cmd/Ctrl+Enter shortcut matches the save
     // button's disabled state — without this, the shortcut would fire
@@ -454,6 +499,7 @@ export function SampleEditPane({
           className="cls-edit-radios"
           role="radiogroup"
           aria-labelledby={CONF_GROUP_LABEL_ID}
+          ref={confidenceGroupRef}
         >
           {CONF_OPTIONS.map((opt) => (
             <label key={opt.value} className="cls-edit-radio">
@@ -474,6 +520,7 @@ export function SampleEditPane({
           note
         </label>
         <textarea
+          ref={noteFieldRef}
           id="sample-edit-pane-note"
           className="cls-edit-textarea sample-edit-pane-note"
           value={note}
