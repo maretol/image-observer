@@ -1,3 +1,15 @@
+:root {
+  /* アクセント (アクティブ / 強調) の白系。色を整えるときはここだけ変更する */
+  --accent: #e6e6e6;        /* アクセント本体: active outline / background / border / accent-color */
+  --accent-hover: #ffffff;  /* hover 時の明るい変種 */
+  --accent-light: #f0f0f0;  /* 明るめ: border / 強調テキスト / hover */
+  --accent-fg: #ffffff;     /* 濃いツールバー上のテキスト色 */
+  --accent-on: #1e1e1e;     /* アクセント面 (--accent 背景) に乗るテキスト色 */
+  --accent-muted-bg: #3a3a40;     /* 選択中 / アクティブの控えめな塗り (旧: ブラウン地) */
+  --accent-muted-border: #52525a; /* 選択中 / アクティブの border (旧: ブラウン border) */
+  --accent-glow: rgba(230, 230, 230, 0.4); /* focus リングのグロー (--accent と同系) */
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
@@ -84,7 +96,7 @@ html, body, #root {
 }
 
 .top-tab:focus-visible {
-  outline: 1px solid #d97a3c;
+  outline: 1px solid var(--accent);
   outline-offset: -3px;
 }
 
@@ -158,7 +170,7 @@ html, body, #root {
 }
 
 .top-tab-viewer-name:focus-visible {
-  outline: 1px solid #d97a3c;
+  outline: 1px solid var(--accent);
   outline-offset: -3px;
 }
 
@@ -207,7 +219,7 @@ html, body, #root {
   display: inline-block;
   width: 2px;
   align-self: stretch;
-  background: #d97a3c;
+  background: var(--accent);
   flex-shrink: 0;
   /* 縦方向にだけ詰めて、タブ chrome の高さ (≒34px) より低い「すっと細く立った
      縦線」に見せるための調整。横方向の隙間は .top-tabs-viewers の gap: 2px が
@@ -218,7 +230,7 @@ html, body, #root {
 .top-tab-rename-input {
   background: #1e1e1e;
   color: #fff;
-  border: 1px solid #d97a3c;
+  border: 1px solid var(--accent);
   border-radius: 3px;
   font-size: 13px;
   padding: 2px 6px;
@@ -347,7 +359,7 @@ html, body, #root {
 }
 
 .tab:focus-visible {
-  outline: 2px solid #d97a3c;
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
@@ -511,7 +523,7 @@ html, body, #root {
 }
 
 .grid-splitter-col:hover {
-  background: #d97a3c;
+  background: var(--accent);
 }
 
 .grid-splitter-row {
@@ -524,7 +536,7 @@ html, body, #root {
 }
 
 .grid-splitter-row:hover {
-  background: #d97a3c;
+  background: var(--accent);
 }
 
 /* ── Tab DnD: drag ghost + drop zones (Phase 5) ───────────────────── */
@@ -571,18 +583,23 @@ html, body, #root {
   z-index: 5;
 }
 
+/* DnD ドロップ先のオーバーレイ。背景の画像は白系イラストから黒一色まで
+   何でも来るので、単色 tint では背景と同色化して消える。暗幕 (暗い面で
+   明るい画像を沈める) と白枠 (--accent: 暗い画像で立つ) を併用して、
+   どんな背景でも必ずどちらかが効くようにする。 */
 .drop-zone-center {
   position: absolute;
   inset: 20%;
-  background: rgba(217, 122, 60, 0.18);
-  border: 1px solid rgba(217, 122, 60, 0.70);
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--accent);
   border-radius: 2px;
   transition: opacity 100ms;
 }
 
 .drop-zone-edge {
   position: absolute;
-  background: rgba(217, 122, 60, 0.45);
+  background: rgba(0, 0, 0, 0.30);
+  box-shadow: inset 0 0 0 1px rgba(230, 230, 230, 0.55);
   transition: opacity 100ms;
 }
 
@@ -617,7 +634,7 @@ html, body, #root {
 .tab-insert-indicator {
   display: inline-block;
   width: 2px;
-  background: #d97a3c;
+  background: var(--accent);
   align-self: stretch;
   margin: 4px 0;
 }
@@ -649,7 +666,7 @@ html, body, #root {
 
 .ctx-item:hover:not(:disabled),
 .ctx-item:focus-visible:not(:disabled) {
-  background: #4a2a16;
+  background: var(--accent-muted-bg);
   color: #fff;
   outline: none;
 }
@@ -771,18 +788,18 @@ html, body, #root {
 }
 
 .confirm-dialog-btn:focus-visible {
-  outline: 1px solid #d97a3c;
+  outline: 1px solid var(--accent);
   outline-offset: 1px;
 }
 
 .confirm-dialog-btn-ok {
-  background: #d97a3c;
-  border-color: #d97a3c;
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
 }
 
 .confirm-dialog-btn-ok:hover {
-  background: #e88f4d;
+  background: var(--accent-hover);
 }
 
 /* Sample modal (#9) — image preview shown from a list-tab Card without
@@ -843,7 +860,7 @@ html, body, #root {
 .sample-modal-dirty-badge {
   display: inline-block;
   margin-left: 8px;
-  color: #d97a3c;
+  color: var(--accent);
   font-size: 14px;
   line-height: 1;
   vertical-align: middle;
@@ -884,7 +901,7 @@ html, body, #root {
 }
 
 .sample-modal-close:focus-visible {
-  outline: 1px solid #d97a3c;
+  outline: 1px solid var(--accent);
   outline-offset: 1px;
 }
 
@@ -964,7 +981,7 @@ html, body, #root {
 }
 
 .sample-modal-nav:focus-visible {
-  outline: 1px solid #d97a3c;
+  outline: 1px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -1006,7 +1023,7 @@ html, body, #root {
 }
 
 .sample-modal-open-viewer:focus-visible {
-  outline: 1px solid #d97a3c;
+  outline: 1px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -1015,13 +1032,13 @@ html, body, #root {
    the lone button always represents the active viewer. */
 .sample-modal-open-viewer-active,
 .sample-modal-footer > .sample-modal-open-viewer:only-child {
-  background: #d97a3c;
-  color: #fff;
-  border-color: #d97a3c;
+  background: var(--accent);
+  color: var(--accent-on);
+  border-color: var(--accent);
 }
 .sample-modal-open-viewer-active:hover,
 .sample-modal-footer > .sample-modal-open-viewer:only-child:hover {
-  background: #e88f4d;
+  background: var(--accent-hover);
 }
 
 /* Toast */
@@ -1063,15 +1080,15 @@ html, body, #root {
 }
 
 .toast-info {
-  border-left-color: #d97a3c;
+  border-left-color: #3b82f6;
 }
 
 .toast-warn {
-  border-left-color: #cc8400;
+  border-left-color: #e0a82e;
 }
 
 .toast-error {
-  border-left-color: #f48771;
+  border-left-color: #e5484d;
 }
 
 .toast-message {
@@ -1221,12 +1238,12 @@ html, body, #root {
 }
 
 .cls-chip-all {
-  border-color: #d97a3c;
+  border-color: var(--accent);
 }
 
 .cls-chip-all.active {
-  background: #d97a3c;
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-on);
 }
 
 .cls-chip-count {
@@ -1253,9 +1270,9 @@ html, body, #root {
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  background: #4a2a16;
-  color: #fbeadb;
-  border-bottom: 1px solid #2e1a0d;
+  background: var(--accent-muted-bg);
+  color: var(--accent-fg);
+  border-bottom: 1px solid #2d2d30;
   flex-shrink: 0;
   font-size: 12px;
 }
@@ -1269,13 +1286,13 @@ html, body, #root {
   gap: 6px;
 }
 .cls-bulk-viewer-label {
-  color: #fbeadb;
+  color: var(--accent-fg);
   font-size: 11px;
 }
 .cls-bulk-viewer-select {
-  background: #2d1b0e;
+  background: #2d2d30;
   color: #fff;
-  border: 1px solid #6f4225;
+  border: 1px solid var(--accent-muted-border);
   border-radius: 4px;
   padding: 3px 6px;
   font-size: 12px;
@@ -1288,9 +1305,9 @@ html, body, #root {
 }
 
 .cls-bulk-btn {
-  background: #d97a3c;
-  color: #fff;
-  border: 1px solid #f0a363;
+  background: var(--accent);
+  color: var(--accent-on);
+  border: 1px solid var(--accent-light);
   border-radius: 6px;
   padding: 3px 12px;
   font-size: 12px;
@@ -1298,7 +1315,7 @@ html, body, #root {
 }
 
 .cls-bulk-btn:hover:not(:disabled) {
-  background: #f0a363;
+  background: var(--accent-light);
 }
 
 .cls-bulk-btn:disabled {
@@ -1309,8 +1326,8 @@ html, body, #root {
 .cls-bulk-clear {
   margin-left: auto;
   background: transparent;
-  color: #f6dcc4;
-  border: 1px solid #7a5a40;
+  color: #ddd;
+  border: 1px solid var(--accent-muted-border);
   border-radius: 6px;
   padding: 3px 10px;
   font-size: 12px;
@@ -1318,7 +1335,7 @@ html, body, #root {
 }
 
 .cls-bulk-clear:hover {
-  background: #2e1a0d;
+  background: #37373a;
   color: #fff;
 }
 
@@ -1348,9 +1365,9 @@ html, body, #root {
 }
 
 .cls-segment-btn.active {
-  background: #d97a3c;
-  border-color: #d97a3c;
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
 }
 
 .cls-search {
@@ -1576,12 +1593,21 @@ html, body, #root {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
-/* Selected card: gentle accent tint + soft border, no high-contrast ring.
-   The checkbox (in checkbox / both modes) and the tinted body together
-   carry the "selected" semantics — we don't need a saturated frame for it. */
+/* Selected card: accent tint + crisp 1px ring so the selection reads at a
+   glance. The white-based accent has no hue contrast against the dark gray
+   chrome, so a low-alpha tint alone was too subtle (vs the old warm accent) —
+   the brighter tint (0.18) plus the 1px ring carry the "selected" semantics.
+   box-shadow is used for the ring (no layout shift; the 1px card border
+   stays). On hover the ring is combined with the lift shadow because
+   `.cls-card:hover` would otherwise override it. */
 .cls-card-selected {
-  border-color: rgba(217, 122, 60, 0.45);
-  background: rgba(217, 122, 60, 0.08);
+  border-color: rgba(230, 230, 230, 0.55);
+  background: rgba(230, 230, 230, 0.18);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.cls-card-selected:hover {
+  box-shadow: 0 0 0 1px var(--accent), 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 .cls-card-select {
@@ -1612,7 +1638,7 @@ html, body, #root {
   cursor: pointer;
   width: 14px;
   height: 14px;
-  accent-color: #d97a3c;
+  accent-color: var(--accent);
 }
 
 .cls-card-thumb {
@@ -1627,7 +1653,7 @@ html, body, #root {
 }
 
 .cls-card-thumb:focus-visible {
-  outline: 2px solid #d97a3c;
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
@@ -1788,7 +1814,7 @@ html, body, #root {
 
 .cls-edit-input:focus,
 .cls-edit-textarea:focus {
-  outline: 1px solid #d97a3c;
+  outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
 
@@ -1809,7 +1835,7 @@ html, body, #root {
 }
 
 .cls-tag-input:focus-within {
-  outline: 1px solid #d97a3c;
+  outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
 
@@ -1993,15 +2019,15 @@ html, body, #root {
 
 .settings-category-tab:focus-visible {
   outline: none;
-  border-color: #d97a3c;
-  box-shadow: 0 0 0 2px rgba(217, 122, 60, 0.4);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 .settings-category-tab-active,
 .settings-category-tab-active:hover {
-  background: #2a1e16;
-  border-color: #4a2a16;
-  color: #f0a363;
+  background: var(--accent-muted-bg);
+  border-color: var(--accent-muted-border);
+  color: var(--accent-light);
 }
 
 .settings-title {
@@ -2067,15 +2093,15 @@ html, body, #root {
  * doesn't surface "this is where I am" without a pointer. */
 .settings-nav-item:focus-visible {
   outline: none;
-  border-color: #d97a3c;
-  box-shadow: 0 0 0 2px rgba(217, 122, 60, 0.4);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 .settings-nav-item-active,
 .settings-nav-item-active:hover {
-  background: #2a1e16;
-  border-color: #4a2a16;
-  color: #f0a363;
+  background: var(--accent-muted-bg);
+  border-color: var(--accent-muted-border);
+  color: var(--accent-light);
 }
 
 .settings-nav-icon {
@@ -2176,8 +2202,8 @@ html, body, #root {
 
 .settings-select:focus-visible {
   outline: none;
-  border-color: #d97a3c;
-  box-shadow: 0 0 0 1px #d97a3c;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .settings-select option {
@@ -2186,7 +2212,7 @@ html, body, #root {
 }
 
 .settings-select option:checked {
-  background: #4a2a16;
+  background: var(--accent-muted-bg);
   color: #fff;
 }
 
@@ -2209,8 +2235,8 @@ html, body, #root {
 
 .settings-number:focus-visible {
   outline: none;
-  border-color: #d97a3c;
-  box-shadow: 0 0 0 1px #d97a3c;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .settings-number-suffix {
@@ -2263,9 +2289,9 @@ html, body, #root {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 8px;
-  background: #4a2a16;
-  color: #f0a363;
-  border: 1px solid #6b3a20;
+  background: var(--accent-muted-bg);
+  color: var(--accent-light);
+  border: 1px solid var(--accent-muted-border);
   white-space: nowrap;
 }
 
@@ -2301,14 +2327,14 @@ html, body, #root {
  * option is focused (Issue: a11y review). */
 .settings-segment-opt:focus-within {
   outline: none;
-  border-color: #d97a3c;
-  box-shadow: 0 0 0 2px rgba(217, 122, 60, 0.4);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 .settings-segment-opt-active,
 .settings-segment-opt-active:hover {
-  background: #4a2a16;
-  border-color: #d97a3c;
+  background: var(--accent-muted-bg);
+  border-color: var(--accent);
   color: #fff;
 }
 
@@ -2327,7 +2353,7 @@ html, body, #root {
   padding: 6px 8px;
   font-family: ui-monospace, monospace;
   font-size: 11px;
-  color: #f6dcc4;
+  color: #7f7f7f;
   word-break: break-all;
 }
 
@@ -2357,13 +2383,13 @@ html, body, #root {
 }
 
 .settings-btn-primary {
-  background: #d97a3c;
-  color: #fff;
-  border-color: #f0a363;
+  background: var(--accent);
+  color: var(--accent-on);
+  border-color: var(--accent-light);
 }
 
 .settings-btn-primary:hover {
-  background: #f0a363;
+  background: var(--accent-light);
 }
 
 .settings-btn:disabled {
@@ -2397,6 +2423,6 @@ html, body, #root {
   padding: 1px 6px;
   font-family: ui-monospace, monospace;
   font-size: 11px;
-  color: #f6dcc4;
+  color: #ddd;
   white-space: nowrap;
 }
