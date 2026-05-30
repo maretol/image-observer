@@ -38,6 +38,13 @@ describe("isTextEntryTarget", () => {
     // happy-dom reflects the attribute into isContentEditable.
     expect(isTextEntryTarget(el)).toBe(true);
   });
+  it("is true for other text-entry input types", () => {
+    for (const t of ["search", "url", "email", "tel", "password", "number"]) {
+      const el = document.createElement("input");
+      el.type = t;
+      expect(isTextEntryTarget(el), `type=${t}`).toBe(true);
+    }
+  });
   it("is false for radio / checkbox inputs", () => {
     const radio = document.createElement("input");
     radio.type = "radio";
@@ -45,6 +52,14 @@ describe("isTextEntryTarget", () => {
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     expect(isTextEntryTarget(checkbox)).toBe(false);
+  });
+  it("is false for non-text input types (range / button / color)", () => {
+    // The allowlist excludes these so t/c/n still focus-jump from them.
+    for (const t of ["range", "button", "color"]) {
+      const el = document.createElement("input");
+      el.type = t;
+      expect(isTextEntryTarget(el), `type=${t}`).toBe(false);
+    }
   });
   it("is false for a plain div / button", () => {
     expect(isTextEntryTarget(document.createElement("div"))).toBe(false);

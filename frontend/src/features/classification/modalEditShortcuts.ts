@@ -23,14 +23,32 @@ export function editShortcutField(key: string): EditField | null {
   }
 }
 
+// Input `type`s that accept free text — where a bare letter types a character.
+// Everything else (radio, checkbox, range, button, color, file, date, …) is
+// NOT text entry, so the t/c/n shortcuts stay live on those controls. An
+// <input> with a missing or unknown type reports `type === "text"`, so a plain
+// <input> is covered by this set.
+const TEXT_INPUT_TYPES = new Set([
+  "text",
+  "search",
+  "url",
+  "email",
+  "tel",
+  "password",
+  "number",
+]);
+
 // isTextEntryTarget reports whether the event target is a free-text field
-// (text-like input / textarea / contenteditable) where a bare letter should
-// type a character rather than trigger a focus shortcut.
+// (a text-entry <input> per TEXT_INPUT_TYPES, a <textarea>, or a
+// contenteditable element) where a bare letter should type a character rather
+// than trigger a focus shortcut.
 //
-// This is deliberately narrower than shared/utils/keybindings.isEditableTarget:
-// radio and checkbox inputs are NOT text entry, so a user sitting on a
-// confidence radio can still press "n" to jump to the note. Typing into the
-// tag input or the note textarea is still protected.
+// Deliberately narrower than shared/utils/keybindings.isEditableTarget: only
+// the input types above count, so a user sitting on a confidence radio (or any
+// other non-text control) can still press "n" to jump to the note, while
+// typing into the tag input or the note textarea stays protected. Using an
+// allowlist (rather than excluding radio/checkbox) keeps the intent explicit
+// and correct for future input types (Copilot review #117).
 export function isTextEntryTarget(target: EventTarget | null): boolean {
   // Guard so this module imports cleanly in a non-DOM (node) test env.
   if (typeof HTMLElement === "undefined") return false;
@@ -39,8 +57,7 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
   const tag = target.tagName;
   if (tag === "TEXTAREA") return true;
   if (tag === "INPUT") {
-    const type = (target as HTMLInputElement).type;
-    return type !== "radio" && type !== "checkbox";
+    return TEXT_INPUT_TYPES.has((target as HTMLInputElement).type);
   }
   return false;
 }
