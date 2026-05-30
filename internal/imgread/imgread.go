@@ -99,6 +99,8 @@ func mimeForInput(ext string) string {
 		return "image/gif"
 	case ".webp":
 		return "image/webp"
+	case ".avif":
+		return "image/avif"
 	}
 	return "application/octet-stream"
 }
@@ -134,6 +136,12 @@ func decodeImageDimensions(path, ext string) (int, int, error) {
 			return 0, 0, err
 		}
 		return cfg.Width, cfg.Height, nil
+	case ".avif":
+		// Go に in-tree avif デコーダが無く、cgo 回避方針 (context.md) のため
+		// デコーダ依存も追加しない (spec-avif-support §7 D1=A)。寸法は 0 を返し、
+		// フロントが <img>.naturalWidth/Height で補完する (§4.3 A1)。error に
+		// すると Read 全体が落ち、WebView が表示できる avif まで表示不能になる。
+		return 0, 0, nil
 	}
 	return 0, 0, fmt.Errorf("unsupported extension: %s", ext)
 }

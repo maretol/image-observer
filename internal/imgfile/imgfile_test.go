@@ -10,6 +10,8 @@ func TestIsImage(t *testing.T) {
 		"a.png":     true,
 		"a.gif":     true,
 		"a.WebP":    true,
+		"a.avif":    true,
+		"a.AVIF":    true,
 		"a.bmp":     false,
 		"a.txt":     false,
 		"noext":     false,

@@ -53,6 +53,19 @@ func Get(path string, size int, mode string) (Result, error) {
 	}
 
 	inputExt := strings.ToLower(filepath.Ext(abs))
+
+	// AVIF: Go に in-tree デコーダが無いため (spec-avif-support §7 D1=A) downscale
+	// したサムネイルを生成できない。元バイト列をそのまま返し、WebView 側に縮小
+	// 表示を委ねる (§4.4 / D3)。WebP→PNG フォールバックと同じく「エラーではなく
+	// 仕様上の正常動作」。元ファイルが実体なのでディスクキャッシュは行わない。
+	if inputExt == ".avif" {
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{Data: data, MimeType: "image/avif"}, nil
+	}
+
 	outputExt := outputExtFor(inputExt)
 
 	root, err := cacheRoot()

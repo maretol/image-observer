@@ -15,6 +15,7 @@ var imageExts = map[string]bool{
 	".png":  true,
 	".gif":  true,
 	".webp": true,
+	".avif": true,
 }
 
 // IsImage reports whether the given filename has a supported image extension.
