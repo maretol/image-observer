@@ -9,7 +9,15 @@ import {
 import { classification } from "../../../wailsjs/go/models";
 import { shouldAutoSave } from "./autoSaveTrigger";
 import { extractTags, serializeTags } from "./filters";
+import {
+  baselineOf,
+  computeBaselineSync,
+  EMPTY_BASELINE,
+  type Baseline,
+  type Touched,
+} from "./sampleEditBaselineSync";
 import { computeEditDirty } from "./sampleEditDirty";
+import { useAutoSaveQueue, type Snapshot } from "./useAutoSaveQueue";
 import { TagInput } from "./TagInput";
 
 const CONF_OPTIONS: Array<{ value: string; label: string }> = [
@@ -100,12 +108,7 @@ export function SampleEditPane({
   // clobbered. Any of (filename swap via prev/next, post-save baseline
   // refresh, external sidecar edit, entry → null) flips at least one
   // baseline field and triggers reset.
-  const lastBaselineRef = useRef<{
-    filename: string | null;
-    folder: string;
-    confidence: string;
-    note: string;
-  }>({ filename: null, folder: "", confidence: "", note: "" });
+  const lastBaselineRef = useRef<Baseline>(EMPTY_BASELINE);
 
   // Per-field "touched since last baseline observation" flags. Set true in
   // the input handlers; cleared in the baseline reset useEffect (both
@@ -118,20 +121,15 @@ export function SampleEditPane({
   // equality check (local [] == old baseline []) would resync local to
   // ["abc"], silently discarding the user's revert. The flag distinguishes
   // "never touched" from "touched then reverted".
-  const touchedAfterBaselineRef = useRef<{
-    tags: boolean;
-    confidence: boolean;
-    note: boolean;
-  }>({ tags: false, confidence: false, note: false });
+  const touchedAfterBaselineRef = useRef<Touched>({
+    tags: false,
+    confidence: false,
+    note: false,
+  });
 
   useEffect(() => {
     if (!entry) {
-      lastBaselineRef.current = {
-        filename: null,
-        folder: "",
-        confidence: "",
-        note: "",
-      };
+      lastBaselineRef.current = EMPTY_BASELINE;
       setTags([]);
       tagsRef.current = [];
       setConfidence("");
@@ -145,84 +143,38 @@ export function SampleEditPane({
       };
       return;
     }
-    const last = lastBaselineRef.current;
-    // filename change = entirely different entry (prev/next nav). Reset all
-    // three fields to the new baseline because the previous local edits do
-    // not belong to this entry. nav is blocked while dirty (#93 §5.4) so
-    // there are no unsaved edits to preserve here.
-    if (last.filename !== entry.filename) {
-      lastBaselineRef.current = {
-        filename: entry.filename,
-        folder: entry.folder,
-        confidence: entry.confidence,
-        note: entry.note,
-      };
+    // entry present: resetAll (different filename = prev/next nav to another
+    // entry) vs per-field sync (same entry, baseline patched by a partial
+    // auto-save success or external sidecar edit). computeBaselineSync encodes
+    // the round 2 (partial save must not clobber an untouched field that
+    // genuinely differs) and round 5 (touched-then-reverted stays local) rules.
+    const action = computeBaselineSync(
+      lastBaselineRef.current,
+      entry,
+      {
+        tags: tagsRef.current,
+        confidence: confidenceRef.current,
+        note: noteRef.current,
+      },
+      touchedAfterBaselineRef.current,
+    );
+    if (action.kind === "resetAll" || action.syncTags) {
       const nextTags = extractTags(entry.folder);
       setTags(nextTags);
       tagsRef.current = nextTags;
+    }
+    if (action.kind === "resetAll" || action.syncConfidence) {
       setConfidence(entry.confidence);
       confidenceRef.current = entry.confidence;
+    }
+    if (action.kind === "resetAll" || action.syncNote) {
       setNote(entry.note);
       noteRef.current = entry.note;
-      touchedAfterBaselineRef.current = {
-        tags: false,
-        confidence: false,
-        note: false,
-      };
-      return;
     }
-    // Same entry, baseline patched (auto-save success that only touched a
-    // subset of fields, or an external sidecar edit). Per-field sync: only
-    // overwrite a local field if it still matches the *previous* baseline
-    // AND the user has not touched it since the last baseline observation
-    // — touched fields are kept local even when their value coincidentally
-    // matches the previous baseline (Copilot review #109 round 5: user
-    // touching and reverting during an in-flight save would otherwise be
-    // overwritten by the post-save baseline patch).
-    if (last.folder !== entry.folder) {
-      const oldBaselineSerialized = serializeTags(extractTags(last.folder));
-      const localSerialized = serializeTags(tagsRef.current);
-      if (
-        localSerialized === oldBaselineSerialized &&
-        !touchedAfterBaselineRef.current.tags
-      ) {
-        const nextTags = extractTags(entry.folder);
-        setTags(nextTags);
-        tagsRef.current = nextTags;
-      }
-    }
-    if (last.confidence !== entry.confidence) {
-      if (
-        confidenceRef.current === last.confidence &&
-        !touchedAfterBaselineRef.current.confidence
-      ) {
-        setConfidence(entry.confidence);
-        confidenceRef.current = entry.confidence;
-      }
-    }
-    if (last.note !== entry.note) {
-      if (
-        noteRef.current === last.note &&
-        !touchedAfterBaselineRef.current.note
-      ) {
-        setNote(entry.note);
-        noteRef.current = entry.note;
-      }
-    }
-    // Always advance the baseline pointer so subsequent diff checks are
-    // against the latest entry, even for fields we just kept local. Without
-    // this, a field the user is editing would re-trigger the per-field sync
-    // on the next render once the user happens to match the *original*
-    // baseline again. Reset touched flags too — they are scoped to the
-    // window between two consecutive baseline observations, so post-patch
-    // future user input should be re-tracked from zero against the new
-    // baseline.
-    lastBaselineRef.current = {
-      filename: entry.filename,
-      folder: entry.folder,
-      confidence: entry.confidence,
-      note: entry.note,
-    };
+    // Always advance the baseline pointer (even for fields kept local) so the
+    // next diff is against the latest entry, and reset touched — the touched
+    // window is scoped between two consecutive baseline observations.
+    lastBaselineRef.current = baselineOf(entry);
     touchedAfterBaselineRef.current = {
       tags: false,
       confidence: false,
@@ -248,33 +200,9 @@ export function SampleEditPane({
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
-  // In-flight save serialization (§5.3). A blur on tag immediately followed
-  // by a blur on note (or radio change) would stack two saves at the same
-  // loadResult.mtime, and the second IPC would land as a CONFLICT: response
-  // until reload. We allow at most one in-flight; subsequent triggers
-  // overwrite a 1-slot queue with the latest snapshot and replay on
-  // completion. The queue is reset when the active entry switches (prev/
-  // next jumps, modal close) so stale snapshots cannot land on a new entry.
-  type Snapshot = {
-    filename: string;
-    tags: string[];
-    confidence: string;
-    note: string;
-  };
-  const saveInFlightRef = useRef(false);
-  const inFlightSnapshotRef = useRef<Snapshot | null>(null);
-  const queuedSnapshotRef = useRef<Snapshot | null>(null);
-
-  useEffect(() => {
-    // Discard any queued snapshot whenever the active entry (or its absence)
-    // changes — replaying an old filename's snapshot against a new entry
-    // would clobber the wrong record. inFlightSnapshotRef is cleared by the
-    // save's finally handler instead; the in-flight save itself is for the
-    // OLD filename and is allowed to complete on the OLD folder (saveEdit's
-    // folderRef check inside useClassificationEdit gates the state commit).
-    queuedSnapshotRef.current = null;
-  }, [entry?.filename]);
-
+  // In-flight save serialization (§5.3) lives in useAutoSaveQueue (#110 B).
+  // buildEntry below stays here because it shapes the Entry payload; the queue
+  // only ever sees opaque Snapshots.
   const buildEntry = useCallback((snap: Snapshot): classification.Entry => {
     return classification.Entry.createFrom({
       filename: snap.filename,
@@ -284,79 +212,27 @@ export function SampleEditPane({
     });
   }, []);
 
-  // Snapshot equality used by runSave to short-circuit redundant queue
-  // entries when the same content is already in-flight or queued. Without
-  // this, a × / backdrop click whose first effect is the input's blur
-  // (which fires the in-flight save) followed by the unmount cleanup would
-  // re-queue the same snapshot and double-save the user's edits on flush
-  // — wasting an IPC and bumping mtime / waking the watcher for no gain
-  // (PR #109 round 3 #7).
-  const snapshotsEqual = useCallback(
-    (a: Snapshot, b: Snapshot): boolean => {
-      if (a.filename !== b.filename) return false;
-      if (a.confidence !== b.confidence) return false;
-      if (a.note !== b.note) return false;
-      if (a.tags.length !== b.tags.length) return false;
-      for (let i = 0; i < a.tags.length; i++) {
-        if (a.tags[i] !== b.tags[i]) return false;
-      }
-      return true;
-    },
-    [],
+  // save wrapper passed to useAutoSaveQueue. Read onSave through the ref at
+  // call time (render-time synced above) so the queue's recursive dequeue
+  // picks up the *latest* handleSave — and the saveEdit it closes over, and
+  // that saveEdit's latest loadResult.mtime. Capturing onSave statically would
+  // freeze the mtime and the queued second save would always send a stale
+  // mtime → CONFLICT from Go's expectedMtime check (PR #109 round 1/2).
+  const save = useCallback(
+    (snap: Snapshot) => Promise.resolve(onSaveRef.current(buildEntry(snap))),
+    [buildEntry],
   );
 
-  const runSave = useCallback(
-    (snap: Snapshot) => {
-      if (saveInFlightRef.current) {
-        // Skip if the same content is already in flight: the existing IPC
-        // covers this exact state, queuing a duplicate would just re-fire
-        // the same write on flush (PR #109 round 3 #7).
-        if (
-          inFlightSnapshotRef.current &&
-          snapshotsEqual(snap, inFlightSnapshotRef.current)
-        ) {
-          return;
-        }
-        // Skip if the queued slot already holds the same snapshot —
-        // overwriting with an identical value is a no-op but keeps the
-        // queue-handling logic symmetric with the in-flight check.
-        if (
-          queuedSnapshotRef.current &&
-          snapshotsEqual(snap, queuedSnapshotRef.current)
-        ) {
-          return;
-        }
-        queuedSnapshotRef.current = snap;
-        return;
-      }
-      saveInFlightRef.current = true;
-      inFlightSnapshotRef.current = snap;
-      // Read onSave through the ref so the recursive dequeue below picks up
-      // the *latest* handleSave (and the saveEdit it closes over, and that
-      // saveEdit's latest loadResult.mtime). Capturing onSave from the
-      // useCallback dependency would freeze the mtime at runSave-creation
-      // time and the queued second save would always send a stale mtime →
-      // CONFLICT from Go's expectedMtime check (Copilot review thread #2).
-      Promise.resolve(onSaveRef.current(buildEntry(snap))).finally(() => {
-        saveInFlightRef.current = false;
-        inFlightSnapshotRef.current = null;
-        if (!queuedSnapshotRef.current) return;
-        // Defer the dequeue to a macrotask so React first commits any
-        // setState side-effects of the in-flight save (parent setLoadResult
-        // → new mtime → handleSave / saveEdit re-memo → onSaveRef updated
-        // via render-time sync above). Without setTimeout(0), the recursive
-        // runSave call would still see the pre-commit onSave snapshot and
-        // race the same mtime conflict we just solved upstream.
-        setTimeout(() => {
-          const next = queuedSnapshotRef.current;
-          if (!next) return;
-          queuedSnapshotRef.current = null;
-          runSave(next);
-        }, 0);
-      });
-    },
-    [buildEntry, snapshotsEqual],
-  );
+  const { runSave, resetQueue } = useAutoSaveQueue({ save });
+
+  useEffect(() => {
+    // Discard any queued snapshot whenever the active entry (or its absence)
+    // changes — replaying an old filename's snapshot against a new entry would
+    // clobber the wrong record. The in-flight save itself is for the OLD
+    // filename and is allowed to complete on the OLD folder (saveEdit's
+    // folderRef check inside useClassificationEdit gates the state commit).
+    resetQueue();
+  }, [entry?.filename, resetQueue]);
 
   // performAutoSave is the gate for #105 blur / radio handlers. It reads
   // the freshest field values from refs (post-commit tags, just-set radio
@@ -433,8 +309,9 @@ export function SampleEditPane({
   // the user's edits (Copilot review thread #3). Refs read at fire time
   // give us the latest entry / autoSave; the dirty check is against the
   // latest baseline so a just-saved entry sees refs == baseline → false →
-  // no spurious save. runSave / saveInFlightRef are component-scoped and
-  // still callable after unmount (parent ClassificationView still mounts).
+  // no spurious save. runSave (from useAutoSaveQueue) closes over the queue's
+  // refs — created per pane instance — so it stays callable after unmount and
+  // the cleanup save still drains (parent ClassificationView stays mounted).
   // The eslint hook-deps rule would push autoSave / entry / runSave back
   // into deps; the empty-deps shape is intentional and a lint suppression
   // would be appropriate if a linter were configured.
