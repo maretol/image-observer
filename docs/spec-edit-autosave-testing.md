@@ -2,7 +2,7 @@
 
 PR #109 (6 round) の post-mortem (#110) で残った action item **B (component/hook テスト基盤)** と **C (境界の責務リファクタ)** を実装するための仕様書。A (spec/着手プロトコル) / D (運用ルール) は PR #111 で反映済み。本 spec はそれらの「再発防止策を、実際に再発しうる SampleEditPane auto-save の配線部分へ適用する」フォローアップにあたる。
 
-> **ステータス**: §11 決定事項ユーザー合意済み (2026-05-30、D-1〜D-5 すべて推奨 A 案)。**Phase 1 (B) 完了 (PR #113)** / **Phase 2 (C) 着手中** — `SaveContext = { folder }` (D-2 a)、`onSave(entry, ctx)` 化 + `folderPathRef` guard 撤去。
+> **ステータス**: §11 決定事項ユーザー合意済み (2026-05-30、D-1〜D-5 すべて推奨 A 案)。**Phase 1 (B) 完了 (PR #113)** / **Phase 2 (C) 実装済み (PR 準備中)** — `SaveContext = { folder }` (D-2 a)、`onSave(entry, ctx)` 化 + `saveEdit` の ctx.folder gate + `folderPathRef` guard 撤去。
 > issue triage で先行合意済み: **テスト基盤 = happy-dom + @testing-library/react 最小構成** (§11 D-5) / **B+C を 1 spec で Phase 分割** (§12)。
 > §4 の同期モデル表が C の target 設計であり、CLAUDE.md「非同期処理の着手前ルール」に従い **C の最初の commit はこの表** にする。
 
@@ -286,14 +286,21 @@ onSave: (next: classification.Entry, ctx: SaveContext) => void | Promise<void>;
 - `handleSave` は `ctx` を `saveEdit` に素通しするだけになる (folder/mtime の保持責務は SampleEditPane の capture へ移譲)。
 - `folderPathRef` が他で使われていないことを grep 確認してから ref 宣言ごと撤去 (H-7 波及確認)。
 
-### 6.5 同期モデル表の更新
+### 6.5 同期モデル表の更新 (実施済み)
 
-C 実装後、§4.1 の「現状 gate」列を削除し「target gate」列が実装最終形と一致することを確認 (H-6)。cleanup 行 / queue replay 行の脚注 (応急処置・follow-up 予定) を解消済みに更新する。AGENTS.md H-8 の同表脚注「† context struct を渡す は #110 action C として follow-up 予定」も「実装済み (本 spec)」へ追従させる。
+C 実装に合わせて §4.1 の cleanup 行 / queue replay 行を「実装済み」へ更新し、AGENTS.md H-8 の同表脚注「† context struct を渡す は #110 action C として follow-up 予定」も「実装済み (#110 C)」へ追従済み (H-6)。
 
-### 6.6 Phase 2 で追加する renderHook / 純関数テスト
+### 6.6 Phase 2 で追加した renderHook テスト (`useClassificationEdit.test.ts`)
 
-- `saveEdit` の pre-IPC / post-IPC folder gate を `ctx.folder` 違いで分岐させ、cross-folder 時に **IPC を撃たない / 撃つが local commit skip** を pin (saveEdit を testable な形にできるか、または `shouldCommitSave(ctx, currentFolder)` 純関数を切り出して単体テスト)。
-- Phase 1 の queue テストに `ctx` を載せ、folder 切替後 replay が `ctx.folder` を保ったまま走ることを確認。
+`UpdateClassificationEntry` を mock し `saveEdit(entry, ctx)` の folder gate を pin:
+
+1. `ctx.folder` 上 → `ctx.folder` + `loadResultRef` の fresh mtime で IPC を撃ち、local commit + gen bump。
+2. **pre-IPC skip**: 現 folder が `ctx.folder` と異なれば IPC を撃たない (round 6 の cleanup-after-switch を guard 無しで再現)。
+3. 空 `ctx.folder` は保存しない。
+4. **post-IPC skip**: await 中に folder を切り替えると local commit を抑止 (OLD folder の disk write は実施)。
+5. `CONFLICT:` 応答 → `setConflict`。
+
+> SampleEditPane の `save` wrapper が ctx を stamp する配線は **typecheck で担保** (onSave の 2 引数シグネチャにより ctx 無し呼び出しは型エラー) し、別途 DOM テストは追加しない (full DOM render テスト未導入の方針を維持、§5.6)。
 
 ---
 
