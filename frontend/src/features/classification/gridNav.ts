@@ -8,8 +8,8 @@
 export type Direction = "left" | "right" | "up" | "down";
 
 // Minimal shape of a card's on-screen box. DOMRect (from
-// getBoundingClientRect) is structurally compatible, so callers pass rects
-// straight through.
+// getBoundingClientRect) is structurally compatible, so a getRect accessor can
+// return getBoundingClientRect() results directly.
 export type CardRect = {
   left: number;
   right: number;
@@ -41,57 +41,65 @@ const ROW_TOLERANCE = 4;
 // pickGridNeighbor returns the index of the card focus should move to, or null
 // when there is no neighbor in that direction.
 //
-// left/right move in reading (DOM) order so the focus flows across row and
-// group boundaries exactly the way the cards are laid out — they need only the
-// card `count` and the current index. up/down move by visual row: among the
-// cards in the nearest row above/below, the one whose horizontal center is
-// closest to the current card's center wins. Row membership is geometric, so
-// this works regardless of the responsive column count or the fact that each
-// directory group is its own grid.
+// left/right move in reading (DOM) order, so they need only `count` and the
+// current index. up/down move by visual row: pick the card in the adjacent row
+// whose horizontal center is closest to the current card's.
 //
-// `rects` is therefore optional and only consulted for up/down. The caller
-// skips the (reflow-inducing) getBoundingClientRect sweep on horizontal moves
-// and omits it; when omitted, up/down resolve to null. When provided, rects
-// must have `count` entries aligned with the same card order.
+// `getRect(i)` returns card i's box and is called LAZILY — only for the cards
+// up/down actually examines, never the whole grid. Horizontal moves never call
+// it; when it is omitted, up/down resolve to null. The caller's getRect reads
+// getBoundingClientRect, so limiting the calls keeps key-repeat off the O(n)
+// forced-reflow path the full sweep would cost (Copilot review #117 round 3).
+//
+// up/down rely on cards being in DOM (reading) order == visual order — i.e. a
+// card's `top` is monotonic non-decreasing in index. That holds while the list
+// is a vertical stack of `grid-auto-flow: row` grids (.cls-groups is a flex
+// column of per-group .cls-group-grid). If the grid ever adopts `order` or
+// `grid-auto-flow: dense`, this assumption — and the early-exit scan — break.
 export function pickGridNeighbor(
   count: number,
   current: number,
   dir: Direction,
-  rects?: readonly CardRect[],
+  getRect?: (index: number) => CardRect,
 ): number | null {
   if (current < 0 || current >= count) return null;
 
   if (dir === "left") return current > 0 ? current - 1 : null;
   if (dir === "right") return current < count - 1 ? current + 1 : null;
 
-  // up / down need geometry — bail if the caller didn't collect rects.
-  if (!rects) return null;
-  const cur = rects[current];
+  // up / down need geometry — bail if the caller didn't provide an accessor.
+  if (!getRect) return null;
+  const cur = getRect(current);
   const curCx = (cur.left + cur.right) / 2;
+  const step = dir === "up" ? -1 : 1;
 
-  let best: number | null = null;
-  let bestRowDelta = Infinity; // vertical distance to the candidate's row
-  let bestCxDelta = Infinity; // horizontal distance to the candidate's center
+  // Phase 1: walk outward from `current` past the rest of its row (tops within
+  // tolerance) to the first card of the adjacent row. Because `top` is
+  // monotonic in index, the first card whose row differs IS the adjacent row.
+  let i = current + step;
+  while (i >= 0 && i < count) {
+    const t = getRect(i).top;
+    const rowDelta = dir === "up" ? cur.top - t : t - cur.top;
+    if (rowDelta > ROW_TOLERANCE) break; // reached the adjacent row
+    i += step;
+  }
+  if (i < 0 || i >= count) return null; // no row in that direction
 
-  for (let i = 0; i < count; i++) {
-    if (i === current) continue;
-    const r = rects[i];
-    // Positive rowDelta = the candidate is in the requested direction.
-    const rowDelta = dir === "up" ? cur.top - r.top : r.top - cur.top;
-    if (rowDelta <= ROW_TOLERANCE) continue; // same row or wrong direction
-
+  // Phase 2: scan just the adjacent row (tops within tolerance of its first
+  // card) and keep the nearest horizontal center.
+  const rowTop = getRect(i).top;
+  let best = i;
+  let bestCxDelta = Infinity;
+  while (i >= 0 && i < count) {
+    const r = getRect(i);
+    if (Math.abs(r.top - rowTop) > ROW_TOLERANCE) break; // past the adjacent row
     const cx = (r.left + r.right) / 2;
     const cxDelta = Math.abs(cx - curCx);
-
-    const isNearerRow = rowDelta < bestRowDelta - ROW_TOLERANCE;
-    const isSameRowCloserCx =
-      Math.abs(rowDelta - bestRowDelta) <= ROW_TOLERANCE && cxDelta < bestCxDelta;
-    if (isNearerRow || isSameRowCloserCx) {
+    if (cxDelta < bestCxDelta) {
       best = i;
-      bestRowDelta = rowDelta;
       bestCxDelta = cxDelta;
     }
+    i += step;
   }
-
   return best;
 }

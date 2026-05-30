@@ -194,13 +194,12 @@ export function ClassificationView({
       );
       const current = cards.indexOf(thumb);
       if (current < 0) return;
-      // Only ↑/↓ need geometry; ←/→ step in DOM order (current±1). Skip the
-      // getBoundingClientRect sweep (a forced reflow) on horizontal moves.
-      const rects =
-        dir === "up" || dir === "down"
-          ? cards.map((c) => c.getBoundingClientRect())
-          : undefined;
-      const next = pickGridNeighbor(cards.length, current, dir, rects);
+      // Pass a lazy getRect accessor: ←/→ never call it, and ↑/↓ measure only
+      // the cards near the cursor (pickGridNeighbor early-exits at the adjacent
+      // row), so key-repeat stays off the O(n) getBoundingClientRect sweep.
+      const next = pickGridNeighbor(cards.length, current, dir, (i) =>
+        cards[i].getBoundingClientRect(),
+      );
       if (next === null) return;
       e.preventDefault();
       cards[next].focus({ preventScroll: true });
