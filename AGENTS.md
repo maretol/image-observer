@@ -406,9 +406,51 @@ Copilot は diff 中心に見るので「同じ問題が別ファイルにもあ
 
 ### H-8. 非同期 / IPC 経路の race 検証マトリクス
 
+> **このマトリクスは「着手前」に書く** (PR #75 / PR #109 の反省 = issue #110)。H 章は
+> 本来「PR 投稿前」チェックリストだが、H-8 だけは例外で **実装に入る前** に
+> `docs/spec-*.md` の「同期モデル」セクション (下記テンプレ) として書き起こす。PR 直前に
+> 初めて書くと、1 経路ずつ穴が顕在化して何 round も回る (PR #75 = 16 round / PR #109 =
+> 6 round がいずれもこのパターン。PR #109 では folder 列を round 6 で初めて意識した =
+> 着手前にマトリクスを書かなかった証拠そのもの)。CLAUDE.md「非同期処理の着手前ルール」
+> (複数 async source が同一 state を mutate する機能は最初の commit が同期モデル表) と対。
+
 新しい非同期処理 (await IPC / Promise / EventsOn ハンドラ / setTimeout) を **複数経路** で
 追加するとき、各経路が以下のレース変数を **個別に検証しているか** マトリクスで
 列挙する。1 経路を直しても他経路に同じ穴があるとレビューが何 round もかかる。
+
+#### spec に書く「同期モデル」セクションのテンプレ (着手前に埋める)
+
+機能着手前に、まず各非同期 event source を以下の **5 列の表**で列挙する。これが下の
+詳細マトリクス (gen check / folder check / mode entry-post / ...) の前提になる。
+下表は PR #109 SampleEditPane (multi-source mutation queue) を題材にした **着手前に
+書くべき理想形の記入例** — gate 方針列は「こう gate すべきだった」を書く欄であり、
+PR #109 の最終実装そのものではない (下の ※ 参照):
+
+| event source | trigger | capture したい値 | stale 化リスク | gate 方針 (理想形) |
+|---|---|---|---|---|
+| tag blur | TagInput onBlur | tagsRef (post-commit) | onSave closure の mtime | render-time ref sync + mtime guard |
+| note blur | textarea onBlur | noteRef | onSave closure の mtime | 同上 |
+| radio change | onChange | 引数 override | onSave closure の mtime | 引数で override してから save |
+| unmount cleanup | useEffect cleanup | entryRef / autoSaveRef | mtime + **folderPath** | folder/mtime を context struct として onSave に渡す †|
+| save success cascade | parent setLoadResult | new entry (per-field) | baseline reset の touched 判定 | per-field touched flag |
+
+> **※ gate 方針列は「着手前に立てる理想の gate」を書く** (= 最初に書いていれば round 6
+> の folder race を防げた設計)。実装が iterate しても表は target を保持する。
+> **† unmount cleanup 行の「context struct を渡す」は #110 action C として follow-up 予定**
+> で、PR #109 の**現状実装は応急処置の `folderPathRef` guard** (`ClassificationView.handleSave`
+> の pre-IPC folder check, round 6)。現状 guard と target API を混同しないこと — この表は
+> 「現状こうなっている」ではなく「着手前にこう書くべきだった」を示すためのもの。
+
+列の意味:
+- **capture したい値**: その source が「正」とする最新値 (どの ref / 引数から取るか)
+- **stale 化リスク**: closure / ref が古くなる軸 — **mtime / folder / dirty / touched / inflight**
+  を毎回列に立てる (1 軸でも書き漏らすとその経路が round 遅れで顕在化する)
+- **gate 方針**: その軸をどう防ぐか (render-time sync / generation guard / context struct /
+  per-field flag / in-flight 直列化)
+
+この 5 列表を **全 event source 分**埋めてから下の詳細マトリクスに進むと、
+「folder 列を round 6 で初めて意識する」(PR #109 の実際の失敗) を構造的に防げる。
+「該当軸なし」も明示する (検討した記録)。
 
 検証すべきレース変数 (例):
 - **世代トークン** (`requestGenRef` / version counter): 自分の await 中に新しい要求が
@@ -615,6 +657,31 @@ intent reconcile 列 + **gen check は snapshot/bump 区別** + pending gen chec
 勘違いすると Round 11 thread A のように silent recheck が他経路を巻き戻す逆方向の
 リグレッションを生む。
 
+## I. レビュー対応ラウンドの運用
+
+### I-1. レビュー対応が 3 round を超えたら一度立ち止まる
+
+同じ PR でレビュー往復が **3 round** に達したら、4 round 目の小手先修正に入る前に
+**一度手を止めて** 以下を強制する:
+
+1. **H-7 の波及確認を全リポジトリで** — 今 round までに指摘された全パターンを `git grep`
+   で洗い出し、同種の穴を残らず列挙する (「今回だけ直して残りは次回」を禁止)
+2. **H-8 マトリクスの再構築** — 非同期 / state ref / cleanup 系の指摘が続いているなら、
+   spec の同期モデル表 (H-8 テンプレ) を **白紙から引き直し**、各 event source × race 変数を
+   横並びで埋め直す。round を重ねて場当たりで潰した結果、表と実装がズレている前提で疑う
+3. 立ち止まった結果 (何を再 audit し、何を予防的に潰したか) を PR コメント or commit
+   message に残す
+
+理由: PR #75 (16 round) / PR #109 (6 round) はいずれも「1 round 1 経路ずつ穴が顕在化」
+する同じパターンだった。3 round 時点で matrix を引き直していれば、PR #109 の folder race
+(round 6) は予防的に潰せた。round を重ねるほど「次の 1 経路だけ」を場当たりで潰す誘惑が
+強くなるので、明示的なブレーキを置く。
+
+関連: 着手前マトリクスは H-8、波及確認は H-7。レビュー対応の実行フローは
+[.claude/commands/pr-review-handle.md](.claude/commands/pr-review-handle.md)。
+
+---
+
 ## まとめ
 
 実装着手前に該当する節を再読する。特に:
@@ -624,12 +691,17 @@ intent reconcile 列 + **gen check は snapshot/bump 区別** + pending gen chec
 - export 公開の追加 (B-1, B-2) → 参照型なら必ず clone
 - ドキュメント更新 (A-1, A-2) → 実体と突き合わせる
 - 実装 iterate / レビュー対応 (A-3) → 変更後に context.md / コメントが追従しているか再確認
+- 複数 async event source が同一 state を mutate する change → **着手前に H-8 同期モデル表**
+  を spec に書く (CLAUDE.md「非同期処理の着手前ルール」と対。PR 直前では手遅れ)
 - commit 段階 (G-1) → SSH 署名で Claude が直接 commit して構わない。署名バイパス (`--no-verify` / `--no-gpg-sign`) は依然禁止
 
 PR を作る直前には:
 
 - **H 章のチェックリスト全項目** を通読し、自分の変更に該当する箇所を確認
-- 複数の非同期 / IPC 経路を新規追加するなら **H-8 のマトリクス**を書く
+- 複数の非同期 / IPC 経路を新規追加した PR は、**着手前に書いた H-8 マトリクスを
+  実装最終形と再照合** (iterate で表がズレていないか。新規に書くのは着手前)
 - 大きい spec を書いた PR では **H-6 の spec ↔ 実装 diff 照合**を必ず実施
 - レビューが返ってきたら **H-7 の波及確認** を必ず実施 (D-1 ハードコードは 1 件目
   発見時に全部潰す)
+- レビュー往復が **3 round を超えたら I-1 に従って一度立ち止まる** (波及確認 +
+  マトリクス再構築を強制)
