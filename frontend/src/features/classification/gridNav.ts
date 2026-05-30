@@ -42,23 +42,30 @@ const ROW_TOLERANCE = 4;
 // when there is no neighbor in that direction.
 //
 // left/right move in reading (DOM) order so the focus flows across row and
-// group boundaries exactly the way the cards are laid out. up/down move by
-// visual row: among the cards in the nearest row above/below, the one whose
-// horizontal center is closest to the current card's center wins. Row
-// membership is geometric, so this works regardless of the responsive column
-// count or the fact that each directory group is its own grid.
+// group boundaries exactly the way the cards are laid out — they need only the
+// card `count` and the current index. up/down move by visual row: among the
+// cards in the nearest row above/below, the one whose horizontal center is
+// closest to the current card's center wins. Row membership is geometric, so
+// this works regardless of the responsive column count or the fact that each
+// directory group is its own grid.
+//
+// `rects` is therefore optional and only consulted for up/down. The caller
+// skips the (reflow-inducing) getBoundingClientRect sweep on horizontal moves
+// and omits it; when omitted, up/down resolve to null. When provided, rects
+// must have `count` entries aligned with the same card order.
 export function pickGridNeighbor(
-  rects: readonly CardRect[],
+  count: number,
   current: number,
   dir: Direction,
+  rects?: readonly CardRect[],
 ): number | null {
-  if (current < 0 || current >= rects.length) return null;
+  if (current < 0 || current >= count) return null;
 
   if (dir === "left") return current > 0 ? current - 1 : null;
-  if (dir === "right") return current < rects.length - 1 ? current + 1 : null;
+  if (dir === "right") return current < count - 1 ? current + 1 : null;
 
-  // up / down: pick the nearest row in the requested vertical direction, then
-  // the closest horizontal center within it.
+  // up / down need geometry — bail if the caller didn't collect rects.
+  if (!rects) return null;
   const cur = rects[current];
   const curCx = (cur.left + cur.right) / 2;
 
@@ -66,7 +73,7 @@ export function pickGridNeighbor(
   let bestRowDelta = Infinity; // vertical distance to the candidate's row
   let bestCxDelta = Infinity; // horizontal distance to the candidate's center
 
-  for (let i = 0; i < rects.length; i++) {
+  for (let i = 0; i < count; i++) {
     if (i === current) continue;
     const r = rects[i];
     // Positive rowDelta = the candidate is in the requested direction.
