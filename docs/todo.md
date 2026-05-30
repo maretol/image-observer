@@ -27,6 +27,7 @@
 - [x] **リサイズ品質**: 速度重視。
 - [x] **並行生成数**: ユーザー設定で指定。既定は `runtime.NumCPU() / 2` (最低 1)。
 - [x] **生成失敗時**: エラーアイコン表示 (プレースホルダ画像はなし)。
+- [ ] **avif 対応 (#118)**: Go に in-tree avif デコーダが無く cgo 回避方針 (context.md L63) とも衝突するため、デコーダ依存追加 (Option B) ではなく **Go 側 decode を回避し WebView に委ねる案 (Option A)** を spec ドラフトで推奨。寸法はフロント `naturalWidth` 補完 (A1)、サムネは元バイト列を返す (WebP→PNG と同種の「仕様上の正常動作」)。デコーダ依存の可否 (D1) はレビュー合意待ち。 → [spec-avif-support.md](spec-avif-support.md)
 
 ## D. キャッシュ 🟡
 
