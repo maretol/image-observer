@@ -164,16 +164,15 @@ export function ClassificationView({
     [scrollTopRef],
   );
 
-  // Arrow-key grid navigation (#115). When a card thumb is focused, ←/→ move
-  // through cards in reading (DOM) order — flowing across row and directory-
-  // group boundaries — and ↑/↓ move by visual row, picking the card whose
-  // horizontal center is nearest. Geometry is read from getBoundingClientRect
-  // at keypress time so it stays correct under the responsive column count and
-  // the per-group grids; pickGridNeighbor owns the (testable) decision.
-  // Collapsed groups render no cards, so they're skipped automatically. Enter/
-  // Space activation already lives on the Card thumb itself, so we only move
-  // focus here. The handler is bound on the scroll container and reacts to the
-  // keydown bubbling up from the focused thumb.
+  // Arrow-key grid navigation (#115). When a card thumb (or a control inside
+  // it) is focused, ←/→ move through cards in reading (DOM) order — flowing
+  // across row and directory-group boundaries — and ↑/↓ move by visual row,
+  // picking the card whose horizontal center is nearest. pickGridNeighbor owns
+  // the (testable) decision; collapsed groups render no cards so they're
+  // skipped automatically. Enter/Space activation already lives on the Card
+  // thumb itself, so we only move focus here. The handler is bound on the
+  // scroll container and reacts to the keydown bubbling up from the focused
+  // element.
   const onGroupsKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       const dir = arrowDirection(e.key);
@@ -181,22 +180,27 @@ export function ClassificationView({
       const container = groupsElRef.current;
       if (!container) return;
       const active = document.activeElement;
-      // Only hijack arrows while a card thumb has focus — leave them alone for
-      // any other focusable (filter inputs etc. live outside .cls-groups, but
-      // guard defensively).
-      if (
-        !(active instanceof HTMLElement) ||
-        !active.classList.contains("cls-card-thumb")
-      ) {
-        return;
-      }
+      if (!(active instanceof HTMLElement)) return;
+      // Resolve the card thumb from the focused element. Focus may sit on a
+      // control *inside* the thumb — the selection checkbox and the edit
+      // button both live within .cls-card-thumb — so match the nearest
+      // ancestor instead of requiring the thumb itself to be the active
+      // element. Returns null for focus outside any card (filter inputs live
+      // outside .cls-groups), leaving arrows to their default behavior.
+      const thumb = active.closest<HTMLElement>(".cls-card-thumb");
+      if (!thumb) return;
       const cards = Array.from(
         container.querySelectorAll<HTMLElement>(".cls-card-thumb"),
       );
-      const current = cards.indexOf(active);
+      const current = cards.indexOf(thumb);
       if (current < 0) return;
-      const rects = cards.map((c) => c.getBoundingClientRect());
-      const next = pickGridNeighbor(rects, current, dir);
+      // Only ↑/↓ need geometry; ←/→ step in DOM order (current±1). Skip the
+      // getBoundingClientRect sweep (a forced reflow) on horizontal moves.
+      const rects =
+        dir === "up" || dir === "down"
+          ? cards.map((c) => c.getBoundingClientRect())
+          : undefined;
+      const next = pickGridNeighbor(cards.length, current, dir, rects);
       if (next === null) return;
       e.preventDefault();
       cards[next].focus({ preventScroll: true });
