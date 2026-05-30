@@ -96,8 +96,9 @@ export function useClassificationEdit(props: Props): UseClassificationEditReturn
       // save-on-unmount cleanup firing after a folder change, whose snapshot
       // belongs to the OLD folder), skip without touching disk. This replaces
       // ClassificationView.handleSave's folderPathRef band-aid (PR #109 round 6)
-      // with an explicit context check, and also covers the empty-folder case
-      // the old `if (!cur)` guarded (ctx.folder is never "" while a save fires).
+      // with an explicit context check. The leading `!ctx.folder` keeps the old
+      // `if (!cur)` guard: a save normally fires only with an active folder, but
+      // the gate stays defensive and does not rely on that.
       if (!ctx.folder || folderRef.current !== ctx.folder) return;
       // Read the live mtime from the ref so a saveEdit closure captured by an
       // unmounted SampleEditPane (queued auto-save replay after in-flight
