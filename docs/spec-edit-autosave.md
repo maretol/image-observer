@@ -18,6 +18,7 @@
 | 2026-05-29 | PR #109 レビュー対応 round 4 | `applyFieldDefaults` の probe 判定を `*bool` 再 decode に拡張し、`editAutoSave: null` を「キー存在だが unparseable」として true に補填 (§7.2 補足)。これで JSON null が壊れた手動モードとして読み込まれる経路を塞ぐ。 |
 | 2026-05-30 | PR #109 レビュー対応 round 5 | per-field baseline reset に `touchedAfterBaselineRef` を追加。in-flight 中にユーザーが当該フィールドを旧 baseline と同じ値へ戻した場合に、保存完了時の新 baseline で local 入力を上書きする問題を修正 (§6.0 補足)。 |
 | 2026-05-30 | PR #109 レビュー対応 round 6 | `ClassificationView.handleSave` に pre-IPC folder check を追加。folder 切替で SampleEditPane が unmount される際、save-on-unmount cleanup が stale onSaveRef 経由で OLD entry を NEW folder の sidecar に書き込もうとする race を塞いだ (§5.6 補足)。 |
+| 2026-05-30 | #110 B フォローアップ | §8.2.3 を更新。「DOM テスト基盤は別 issue / 今回は導入しない」を、#110 B で happy-dom + @testing-library/react を導入し auto-save キュー (`useAutoSaveQueue`) / baseline reset (`sampleEditBaselineSync`) の race を renderHook + 純関数テストで担保した実態に追従。詳細は [spec-edit-autosave-testing.md](spec-edit-autosave-testing.md)。 |
 
 ---
 
@@ -462,9 +463,9 @@ export function shouldAutoSave(
 
 #### 8.2.3 SampleEditPane 統合テスト
 
-vitest + Testing Library を使う場合に限り (現状リポジトリは DOM テスト未導入。CLAUDE.md §5 参照)。
+vitest + Testing Library を使う場合に限り (本 spec の Phase 1 時点ではリポジトリに DOM テスト未導入。CLAUDE.md §5 参照)。
 
-**今回は導入しない方針**: 既存と同様、純関数 (`shouldAutoSave` / `computeEditDirty`) をユニットテストで担保し、UI 統合は手動確認に任せる。DOM テスト基盤 (happy-dom / RTL) の追加は別 issue で扱う。
+**Phase 1 時点では導入しない方針だった**: 純関数 (`shouldAutoSave` / `computeEditDirty`) をユニットテストで担保し、UI 統合は手動確認に任せた。**その後 #110 B で DOM テスト基盤 (happy-dom + @testing-library/react) を導入済み**。auto-save キュー / baseline reset の race は `useAutoSaveQueue` / `sampleEditBaselineSync` に抽出し、`renderHook` + 純関数テストで担保する形に移行した。詳細は [spec-edit-autosave-testing.md](spec-edit-autosave-testing.md)。
 
 ### 8.3 手動確認 (wails dev)
 
