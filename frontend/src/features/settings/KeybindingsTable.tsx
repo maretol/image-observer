@@ -35,6 +35,16 @@ const KEYBINDINGS: Array<{ keys: string; action: string; scope: string }> = [
     action: "アンカーから現在位置まで範囲選択 (修飾キー / 両方モード)",
     scope: "一覧",
   },
+  {
+    keys: "← / → / ↑ / ↓",
+    action: "カードを移動 (カードにフォーカス時)",
+    scope: "一覧",
+  },
+  {
+    keys: "T / C / N",
+    action: "プレビューでタグ / confidence / note 編集にフォーカス",
+    scope: "一覧 (プレビュー)",
+  },
 ];
 
 export function KeybindingsTable() {
