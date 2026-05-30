@@ -160,6 +160,24 @@ describe("useAutoSaveQueue", () => {
     expect(t.calls).toEqual([A, C]); // B never dispatched
   });
 
+  it("a save arriving in the dequeue gap overwrites the queued one (no older-overwrites-newer reorder)", async () => {
+    const t = setup();
+    t.result.current.runSave(A); // A in-flight
+    t.result.current.runSave(B); // B queued
+    t.resolveAt(0); // A completes
+    await tick(); // finally ran: in-flight latch held, dequeue scheduled (not yet run)
+    expect(t.pendingCount()).toBe(1);
+    expect(t.calls).toEqual([A]);
+    // A new save arrives in the gap between in-flight completion and the
+    // deferred dequeue. The latch is still held, so it must overwrite the
+    // queued slot rather than dispatch immediately — otherwise the dequeue
+    // would replay the older B on top of the newer C.
+    t.result.current.runSave(C);
+    expect(t.calls).toEqual([A]); // not dispatched immediately
+    t.flush(); // dequeue drains the latest (C), never the stale B
+    expect(t.calls).toEqual([A, C]);
+  });
+
   it("resetQueue drops the queued snapshot so it never replays", async () => {
     const t = setup();
     t.result.current.runSave(A); // in-flight

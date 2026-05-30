@@ -105,19 +105,32 @@ export function useAutoSaveQueue({
       saveInFlightRef.current = true;
       inFlightSnapshotRef.current = snap;
       Promise.resolve(save(snap)).finally(() => {
-        saveInFlightRef.current = false;
         inFlightSnapshotRef.current = null;
-        if (!queuedSnapshotRef.current) return;
+        if (!queuedSnapshotRef.current) {
+          // Nothing queued — release the in-flight latch immediately.
+          saveInFlightRef.current = false;
+          return;
+        }
         // Defer the dequeue to a macrotask so React first commits any setState
         // side-effects of the in-flight save (parent setLoadResult → new mtime
         // → the save wrapper reads the latest saveEdit). Without this hop, the
         // recursive runSave would still see the pre-commit onSave and race the
         // same mtime conflict we just solved upstream (PR #109 round 1).
+        //
+        // CRUCIALLY, keep saveInFlightRef = true across that gap. If we released
+        // it here, a runSave() arriving before the deferred dequeue fires would
+        // see "not in flight", dispatch immediately, and then the dequeue would
+        // replay the *older* queued snapshot on top of it — older overwrites
+        // newer (PR #109-era latent reorder, surfaced by #110 B review). Holding
+        // the latch routes that runSave into the queued slot instead, so the
+        // dequeue always drains the latest snapshot.
         scheduleDequeue(() => {
           const next = queuedSnapshotRef.current;
-          if (!next) return;
           queuedSnapshotRef.current = null;
-          runSave(next);
+          // Release the latch just before re-dispatching. Synchronous, so no
+          // gap: runSave reads the latch down and re-raises it in the same tick.
+          saveInFlightRef.current = false;
+          if (next) runSave(next);
         });
       });
     },

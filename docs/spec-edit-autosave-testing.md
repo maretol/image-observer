@@ -15,6 +15,7 @@ PR #109 (6 round) の post-mortem (#110) で残った action item **B (component
 | 2026-05-30 | 初版 | #110 B+C の要件整理。§4 同期モデル表 (C の target) / §5 Phase 1 (B: happy-dom + RTL + `useAutoSaveQueue` 抽出 + renderHook テスト) / §6 Phase 2 (C: `onSave` context API 化 + `folderPathRef` guard 撤去) / §11 決定事項を提示。 |
 | 2026-05-30 | ユーザー合意 | §11 D-1〜D-5 すべて推奨 (A) 案で確定。Phase 1 (B) 着手。D-2 は (a) 案 = ctx は folder のみ意味付け / mtime は fresh read 温存 / `setTimeout(0)` dequeue 据え置き。 |
 | 2026-05-30 | PR #113 レビュー対応 | Copilot 指摘を反映。(1) §5.4 にテスト項目 8 を追加 — in-flight へ revert した際に queued を破棄する実在バグ (round 5 のキュー版) を `useAutoSaveQueue` で修正し pin。(2) §5.5 の `computeBaselineSync` シグネチャを実装最終形 (非 null entry 専用 / `BaselineSyncAction` discriminated union) に追従。(3) ステータスを Phase 1 完了 / Phase 2 未着手に更新。 |
+| 2026-05-30 | PR #113 レビュー round 4 (I-1) | dequeue gap の reorder race (in-flight 解放と macrotask dequeue の間に来た新 snapshot が古い queued に後着上書きされる) を修正 — queued がある間はラッチを維持。2 件目のキュー race のため I-1 に従い §5.3.1「キュー状態機械の不変条件 (interleaving matrix)」を新設し全遷移を表で固定。§5.4 にテスト項目 9 を追加。 |
 
 ---
 
@@ -188,6 +189,22 @@ export function useAutoSaveQueue(args: UseAutoSaveQueueArgs): UseAutoSaveQueueRe
 - SampleEditPane 側に残すもの: `onSaveRef` の render-time sync、`buildEntry`、`performAutoSave` の dirty gate、cleanup の発火条件。**hook はキューの状態機械だけを担う** (関心の分離)。
 - `entry?.filename` 変化で `resetQueue()` を呼ぶ既存 effect は SampleEditPane に残す (entry 監視は pane の責務)。
 
+#### 5.3.1 キュー状態機械の不変条件 (AGENTS I-1 interleaving matrix)
+
+`useAutoSaveQueue` は 3 つの ref (`saveInFlightRef` ラッチ / `inFlightSnapshotRef` / `queuedSnapshotRef`) と下表の遷移点を持つ小さな状態機械。PR #109 から潜在し #110 B レビューで **2 件の上書き / reorder race** が顕在化した (round 1 の revert / round 4 の dequeue gap) ため、I-1 に従い遷移を白紙から表に引き直して固定する:
+
+| 遷移点 | ref への作用 | 守る不変条件 / 防ぐ race |
+|---|---|---|
+| `runSave` (ラッチ下) | `latch=true` / `inFlightSnap=snap` / save 発射 | 単一 in-flight |
+| `runSave` (ラッチ上, `snap == inFlightSnap`) | `queuedSnap=null` | revert 救済 — 古い queued を捨てる (round 1) |
+| `runSave` (ラッチ上, `snap == queuedSnap`) | no-op | 同値の二重保存抑止 (round 3) |
+| `runSave` (ラッチ上, それ以外) | `queuedSnap=snap` (最新で上書き) | `queuedSnap` は常に最新意図 |
+| save 完了 `finally` (queued なし) | `latch=false` / `inFlightSnap=null` | 即ラッチ解放 |
+| save 完了 `finally` (queued あり) | `inFlightSnap=null` / **`latch=true` 維持** / dequeue を macrotask 予約 | **dequeue gap reorder 防止 (round 4)** — ラッチを下げると gap に来た新 snap が即発射し、古い queued が後着で上書きする |
+| dequeue callback | `queuedSnap=null` / `latch=false` / `runSave(next)` | macrotask 後に最新を再発射 (round 1 の mtime fresh read 前提を維持) |
+
+不変条件: **(1)** in-flight は最大 1 本、**(2)** `queuedSnap` は常に「最新の保存意図」のみを保持し古い値で上書きしない、**(3)** ラッチは「次に発射すべき queued が無くなる」まで下りない。各遷移は §5.4 のテストで pin する。
+
 ### 5.4 renderHook テスト項目 (`useAutoSaveQueue.test.ts`)
 
 `save` に **手動解決できる deferred Promise** を、`scheduleDequeue` に **手動 flush** を注入し、実 timer / 実 IPC なしで race を決定論的に検証する:
@@ -200,6 +217,7 @@ export function useAutoSaveQueue(args: UseAutoSaveQueueArgs): UseAutoSaveQueueRe
 6. dequeue が `setTimeout(0)` 相当の macrotask 後である (flush 前は replay が走らない)。
 7. `resetQueue()` 後は queued snapshot が破棄され replay されない (entry 切替時の stale 着地防止)。
 8. in-flight=A・queued=B のとき `runSave(A)` (in-flight へ revert) → **queued B を破棄**。A 解決後 B は replay されず最終状態は A に留まる (round 5 のキュー版。#110 B の Copilot レビューで顕在化した実在バグの修正)。
+9. in-flight=A・queued=B で A 解決後、dequeue が走る前に `runSave(C)` → C が queued B を**上書き** (即発射しない)。flush 後に C が発射され、古い B は発射されない (round 4 の dequeue gap reorder 修正。ラッチ保持の検証)。
 
 ### 5.5 baseline reset の純 reducer 抽出 (round 2 / round 5)
 
