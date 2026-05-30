@@ -422,15 +422,24 @@ Copilot は diff 中心に見るので「同じ問題が別ファイルにもあ
 
 機能着手前に、まず各非同期 event source を以下の **5 列の表**で列挙する。これが下の
 詳細マトリクス (gen check / folder check / mode entry-post / ...) の前提になる。
-下表は PR #109 SampleEditPane (multi-source mutation queue) の例:
+下表は PR #109 SampleEditPane (multi-source mutation queue) を題材にした **着手前に
+書くべき理想形の記入例** — gate 方針列は「こう gate すべきだった」を書く欄であり、
+PR #109 の最終実装そのものではない (下の ※ 参照):
 
-| event source | trigger | capture したい値 | stale 化リスク | gate 方針 |
+| event source | trigger | capture したい値 | stale 化リスク | gate 方針 (理想形) |
 |---|---|---|---|---|
 | tag blur | TagInput onBlur | tagsRef (post-commit) | onSave closure の mtime | render-time ref sync + mtime guard |
 | note blur | textarea onBlur | noteRef | onSave closure の mtime | 同上 |
 | radio change | onChange | 引数 override | onSave closure の mtime | 引数で override してから save |
-| unmount cleanup | useEffect cleanup | entryRef / autoSaveRef | mtime + **folderPath** | folder/mtime を context として onSave に渡す |
+| unmount cleanup | useEffect cleanup | entryRef / autoSaveRef | mtime + **folderPath** | folder/mtime を context struct として onSave に渡す †|
 | save success cascade | parent setLoadResult | new entry (per-field) | baseline reset の touched 判定 | per-field touched flag |
+
+> **※ gate 方針列は「着手前に立てる理想の gate」を書く** (= 最初に書いていれば round 6
+> の folder race を防げた設計)。実装が iterate しても表は target を保持する。
+> **† unmount cleanup 行の「context struct を渡す」は #110 action C として follow-up 予定**
+> で、PR #109 の**現状実装は応急処置の `folderPathRef` guard** (`ClassificationView.handleSave`
+> の pre-IPC folder check, round 6)。現状 guard と target API を混同しないこと — この表は
+> 「現状こうなっている」ではなく「着手前にこう書くべきだった」を示すためのもの。
 
 列の意味:
 - **capture したい値**: その source が「正」とする最新値 (どの ref / 引数から取るか)
