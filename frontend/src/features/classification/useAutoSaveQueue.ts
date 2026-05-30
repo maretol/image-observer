@@ -78,13 +78,16 @@ export function useAutoSaveQueue({
   const runSave = useCallback(
     (snap: Snapshot) => {
       if (saveInFlightRef.current) {
-        // Skip if the same content is already in flight: the existing IPC
-        // covers this exact state, queuing a duplicate would just re-fire the
-        // same write on flush (PR #109 round 3).
+        // Same content as the in-flight save: the running IPC already covers
+        // this exact state. Drop any queued intermediate — reaching the
+        // in-flight snapshot again means the user reverted to it, so replaying
+        // a stale queued snapshot on flush would overwrite that revert (a
+        // queue-level version of PR #109 round 5; surfaced by #110 B review).
         if (
           inFlightSnapshotRef.current &&
           snapshotsEqual(snap, inFlightSnapshotRef.current)
         ) {
+          queuedSnapshotRef.current = null;
           return;
         }
         // Skip if the queued slot already holds the same snapshot —

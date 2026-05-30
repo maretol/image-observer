@@ -121,6 +121,19 @@ describe("useAutoSaveQueue", () => {
     expect(t.calls).toEqual([A]);
   });
 
+  it("drops a stale queued snapshot when a later save reverts to the in-flight one (round 5, queue level)", async () => {
+    const t = setup();
+    t.result.current.runSave(A); // A in-flight
+    t.result.current.runSave(B); // B queued
+    t.result.current.runSave(clone(A)); // user reverted to A (== in-flight)
+    t.resolveAt(0);
+    await tick();
+    // The revert means A (already in-flight) is the final desired state, so the
+    // now-stale queued B must be dropped — replaying it would clobber the revert.
+    expect(t.pendingCount()).toBe(0);
+    expect(t.calls).toEqual([A]);
+  });
+
   it("does not double-queue a snapshot identical to the queued one (round 3)", async () => {
     const t = setup();
     t.result.current.runSave(A);
