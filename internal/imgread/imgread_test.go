@@ -142,6 +142,49 @@ func TestReadInfo_BrokenHeader(t *testing.T) {
 	}
 }
 
+// AVIF: Go に in-tree デコーダが無く decode を回避するため (spec-avif-support
+// §4.3 A1)、Read はバイト列をそのまま返し寸法 0 / mime image/avif を返す。
+// テストは実 avif を必要としない (decode しないので中身は任意)。
+func TestRead_AVIF_PassThroughNoDecode(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.avif")
+	raw := []byte("not-decoded-avif-bytes")
+	if err := os.WriteFile(src, raw, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	res, err := Read(src)
+	if err != nil {
+		t.Fatalf("Read should not error for avif (no decode): %v", err)
+	}
+	if !bytes.Equal(res.Data, raw) {
+		t.Errorf("data should match disk bytes")
+	}
+	if res.MimeType != "image/avif" {
+		t.Errorf("mime: got %q, want image/avif", res.MimeType)
+	}
+	if res.Width != 0 || res.Height != 0 {
+		t.Errorf("dims: got %dx%d, want 0x0 (frontend backfills via naturalWidth)", res.Width, res.Height)
+	}
+}
+
+func TestReadInfo_AVIF_ZeroDims(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.avif")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	info, err := ReadInfo(src)
+	if err != nil {
+		t.Fatalf("ReadInfo should not error for avif: %v", err)
+	}
+	if info.Width != 0 || info.Height != 0 {
+		t.Errorf("dims: got %dx%d, want 0x0", info.Width, info.Height)
+	}
+	if info.MimeType != "image/avif" {
+		t.Errorf("mime: got %q, want image/avif", info.MimeType)
+	}
+}
+
 func TestMimeForInput(t *testing.T) {
 	cases := map[string]string{
 		".jpg":  "image/jpeg",
@@ -149,6 +192,7 @@ func TestMimeForInput(t *testing.T) {
 		".png":  "image/png",
 		".gif":  "image/gif",
 		".webp": "image/webp",
+		".avif": "image/avif",
 		".bmp":  "application/octet-stream",
 	}
 	for ext, want := range cases {

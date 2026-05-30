@@ -172,6 +172,37 @@ func TestGetThumbnail_RoundTripGIF(t *testing.T) {
 	}
 }
 
+// AVIF: Go に in-tree デコーダが無いため downscale サムネを作れない
+// (spec-avif-support §4.4 / D3)。Get は元バイト列をそのまま image/avif で
+// 返し、ディスクキャッシュは行わない。WebP→PNG フォールバックと同種の
+// 「仕様上の正常動作」。テストは decode しないので実 avif を必要としない。
+func TestGetThumbnail_AVIF_PassThroughNoCache(t *testing.T) {
+	dir := t.TempDir()
+	cacheRootOverride = filepath.Join(dir, "cache")
+	defer func() { cacheRootOverride = "" }()
+
+	src := filepath.Join(dir, "a.avif")
+	raw := []byte("not-decoded-avif-bytes")
+	if err := os.WriteFile(src, raw, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	res, err := Get(src, 64, "letterbox")
+	if err != nil {
+		t.Fatalf("Get should not error for avif (no decode): %v", err)
+	}
+	if res.MimeType != "image/avif" {
+		t.Errorf("MimeType: got %q, want image/avif", res.MimeType)
+	}
+	if !bytes.Equal(res.Data, raw) {
+		t.Errorf("data should match original disk bytes (passthrough)")
+	}
+	// avif は disk cache を書かない (元ファイルが実体)。cache root が空のまま。
+	if globCount(t, filepath.Join(cacheRootOverride, "*", "*", "*", "*")) != 0 {
+		t.Errorf("avif passthrough should not write a cache file")
+	}
+}
+
 func TestGetThumbnail_CacheHitDoesNotReDecode(t *testing.T) {
 	dir := t.TempDir()
 	cacheRootOverride = filepath.Join(dir, "cache")
