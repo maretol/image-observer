@@ -18,6 +18,7 @@ import {
 } from "./sampleEditBaselineSync";
 import { computeEditDirty } from "./sampleEditDirty";
 import { useAutoSaveQueue, type Snapshot } from "./useAutoSaveQueue";
+import type { SaveContext } from "./useClassificationEdit";
 import { TagInput } from "./TagInput";
 
 const CONF_OPTIONS: Array<{ value: string; label: string }> = [
@@ -47,11 +48,21 @@ export type SampleEditPaneProps = {
   // the first focusable element, which would be a chip × button or the
   // modal close icon — bypassing the tag input even with autoFocus set).
   tagInputRef?: RefObject<HTMLInputElement | null>;
+  // Current folder (#110 C). Render-synced into folderPropRef and read by the
+  // save wrapper at dispatch time so each save carries SaveContext.folder = the
+  // folder the edit belongs to. A folder switch unmounts the pane (so this prop
+  // stops updating, staying OLD), which is exactly what lets a save-on-unmount
+  // cleanup stamp the OLD folder and have saveEdit skip it (spec §6.2 / §4.2).
+  folder: string;
   // Returning a Promise lets the pane serialize in-flight saves so a rapid
   // tag-blur → note-blur chain does not stack two IPC calls with the same
-  // stale loadResult.mtime (spec-edit-autosave.md §5.3). Manual-mode callers
-  // may still return void; the pane wraps via Promise.resolve.
-  onSave: (next: classification.Entry) => void | Promise<void>;
+  // stale loadResult.mtime (spec-edit-autosave.md §5.3). ctx carries the folder
+  // the save was captured for (#110 C). Manual-mode callers may still return
+  // void; the pane wraps via Promise.resolve.
+  onSave: (
+    next: classification.Entry,
+    ctx: SaveContext,
+  ) => void | Promise<void>;
   // Bubble dirty up so the parent (SampleModal) can disable prev/next
   // navigation while there are unsaved edits (spec §5.4).
   onDirtyChange?: (dirty: boolean) => void;
@@ -65,6 +76,7 @@ export function SampleEditPane({
   entry,
   knownTags,
   tagInputRef,
+  folder,
   onSave,
   onDirtyChange,
   autoSave,
@@ -96,9 +108,15 @@ export function SampleEditPane({
   const onSaveRef = useRef(onSave);
   const autoSaveRef = useRef(autoSave);
   const entryRef = useRef(entry);
+  // folderPropRef (#110 C): the save wrapper reads this at dispatch time to
+  // stamp SaveContext.folder. Synced at render time like the others — a folder
+  // switch unmounts the pane, so this ref stops updating and stays on the OLD
+  // folder, which is what makes a stale cleanup save carry the OLD folder.
+  const folderPropRef = useRef(folder);
   onSaveRef.current = onSave;
   autoSaveRef.current = autoSave;
   entryRef.current = entry;
+  folderPropRef.current = folder;
 
   // Reset local form whenever the *baseline* the entry exposes changes —
   // baseline = (filename, folder, confidence, note). Storing the previous
@@ -219,7 +237,10 @@ export function SampleEditPane({
   // freeze the mtime and the queued second save would always send a stale
   // mtime → CONFLICT from Go's expectedMtime check (PR #109 round 1/2).
   const save = useCallback(
-    (snap: Snapshot) => Promise.resolve(onSaveRef.current(buildEntry(snap))),
+    (snap: Snapshot) =>
+      Promise.resolve(
+        onSaveRef.current(buildEntry(snap), { folder: folderPropRef.current }),
+      ),
     [buildEntry],
   );
 

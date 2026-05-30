@@ -436,10 +436,12 @@ PR #109 の最終実装そのものではない (下の ※ 参照):
 
 > **※ gate 方針列は「着手前に立てる理想の gate」を書く** (= 最初に書いていれば round 6
 > の folder race を防げた設計)。実装が iterate しても表は target を保持する。
-> **† unmount cleanup 行の「context struct を渡す」は #110 action C として follow-up 予定**
-> で、PR #109 の**現状実装は応急処置の `folderPathRef` guard** (`ClassificationView.handleSave`
-> の pre-IPC folder check, round 6)。現状 guard と target API を混同しないこと — この表は
-> 「現状こうなっている」ではなく「着手前にこう書くべきだった」を示すためのもの。
+> **† unmount cleanup 行の「context struct を渡す」は #110 action C で実装済み** (PR で
+> `SaveContext = { folder }` を `onSave(entry, ctx)` に渡し、`saveEdit` が `ctx.folder` で
+> pre/post-IPC gate。mtime は ctx に載せず `loadResultRef` から fresh read = D-2 a。
+> 応急処置だった `ClassificationView.handleSave` の `folderPathRef` guard (PR #109 round 6)
+> は撤去)。この表自体は「着手前にこう書くべきだった理想形」を示すためのもの — 実装が
+> 追いついた後も target として温存する。詳細は [docs/spec-edit-autosave-testing.md](docs/spec-edit-autosave-testing.md) §4/§6。
 
 列の意味:
 - **capture したい値**: その source が「正」とする最新値 (どの ref / 引数から取るか)
