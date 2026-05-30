@@ -13,10 +13,19 @@ import type { ConflictPrompt, EditingState } from "./useClassification";
 // callers / logs.
 const CONFLICT_PREFIX = "CONFLICT:";
 
+// SaveContext carries the folder a save was captured for (#110 C). saveEdit
+// gates on ctx.folder instead of a live folderRef so a save-on-unmount cleanup
+// firing after a folder switch (its snapshot belongs to the OLD folder) is
+// skipped without ClassificationView.handleSave's folderPathRef band-aid
+// (PR #109 round 6). mtime is intentionally NOT carried — saveEdit reads it
+// fresh from loadResultRef so queued replays use the advanced value
+// (spec-edit-autosave-testing.md §4.2 / §11 D-2 a).
+export type SaveContext = { folder: string };
+
 export type UseClassificationEditReturn = {
   openEdit: (filename: string) => void;
   closeEdit: () => void;
-  saveEdit: (entry: classification.Entry) => Promise<void>;
+  saveEdit: (entry: classification.Entry, ctx: SaveContext) => Promise<void>;
   resolveConflictReload: () => Promise<void>;
   resolveConflictForce: () => Promise<void>;
   resolveConflictCancel: () => void;
@@ -80,29 +89,38 @@ export function useClassificationEdit(props: Props): UseClassificationEditReturn
   }, [setEditing]);
 
   const saveEdit = useCallback(
-    async (entry: classification.Entry) => {
-      const cur = folderRef.current;
+    async (entry: classification.Entry, ctx: SaveContext) => {
+      // Pre-IPC folder gate (#110 C). The save targets ctx.folder — the folder
+      // active when the snapshot was captured, carried explicitly instead of
+      // via a stale onSave closure. If the user has since switched away (the
+      // save-on-unmount cleanup firing after a folder change, whose snapshot
+      // belongs to the OLD folder), skip without touching disk. This replaces
+      // ClassificationView.handleSave's folderPathRef band-aid (PR #109 round 6)
+      // with an explicit context check, and also covers the empty-folder case
+      // the old `if (!cur)` guarded (ctx.folder is never "" while a save fires).
+      if (!ctx.folder || folderRef.current !== ctx.folder) return;
       // Read the live mtime from the ref so a saveEdit closure captured by an
       // unmounted SampleEditPane (queued auto-save replay after in-flight
       // success) still sends the latest mtime. Without this, the queued IPC
       // would carry the pre-save mtime and trip Go's expectedMtime CONFLICT
-      // path (PR #109 round 2 #6).
+      // path (PR #109 round 2 #6). Having passed the gate, loadResultRef tracks
+      // ctx.folder.
       const lr = loadResultRef.current;
-      if (!cur || !lr) return;
+      if (!lr) return;
       try {
         const out = await UpdateClassificationEntry(
-          cur,
+          ctx.folder,
           entry,
           lr.mtime,
         );
         // Folder check before any state commit — the UpdateEntry disk
-        // write itself is fine to complete against `cur`, but patching
+        // write itself is fine to complete against ctx.folder, but patching
         // the NEW folder's loadResult with OLD folder's mtime / entry
         // would corrupt it. If the user switched folders mid-await we
         // skip the local commit entirely; the OLD folder's save did
         // succeed on disk, and any next openFolder of it will Load the
         // updated entry via the normal path (PR #75 14th, thread C).
-        if (folderRef.current !== cur) return;
+        if (folderRef.current !== ctx.folder) return;
         // Bump the shared generation BEFORE patching local state so any
         // watcher / replay / silent-recheck / manual reload whose
         // LoadClassification started before our save returned is now
@@ -135,7 +153,7 @@ export function useClassificationEdit(props: Props): UseClassificationEditReturn
         // Same folder check as the success path — surfacing a conflict
         // dialog or error toast for the OLD folder while the user is
         // on a NEW folder is confusing UX (PR #75 14th, thread C).
-        if (folderRef.current !== cur) return;
+        if (folderRef.current !== ctx.folder) return;
         const msg = errorMessage(e);
         if (msg.startsWith(CONFLICT_PREFIX)) {
           setConflict({ filename: entry.filename, draft: entry });

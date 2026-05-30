@@ -7,6 +7,7 @@ import { errorMessage } from "../../shared/utils/error";
 import { logger } from "../../shared/utils/logger";
 import { getPreview } from "../../shared/utils/thumbnailDefaults";
 import { SampleEditPane } from "./SampleEditPane";
+import type { SaveContext } from "./useClassificationEdit";
 
 // Tooltip used on prev/next while editing pane has unsaved changes (#93,
 // spec §5.4). Surfaced via `title` only — `aria-label` stays on the
@@ -53,10 +54,19 @@ type SampleModalProps = {
   entry: classification.Entry | null;
   knownTags: string[];
   openSource: SampleModalOpenSource;
+  // Current folder (#110 C). Forwarded to SampleEditPane so its save wrapper
+  // can stamp each save's SaveContext.folder — letting saveEdit gate on the
+  // folder the edit belongs to instead of a live ref (replaces the round 6
+  // folderPathRef band-aid).
+  folder: string;
   // Pre-#105 manual mode returns void; #105 auto mode awaits the resulting
   // Promise inside SampleEditPane to serialize in-flight saves (spec §5.3).
-  // Callers may pass either signature; the pane wraps with Promise.resolve.
-  onSave: (next: classification.Entry) => void | Promise<void>;
+  // ctx carries the folder the save was captured for (#110 C). Callers may
+  // return either void or Promise; the pane wraps with Promise.resolve.
+  onSave: (
+    next: classification.Entry,
+    ctx: SaveContext,
+  ) => void | Promise<void>;
   // #105: drives whether SampleEditPane is in auto (true) or manual (false)
   // save mode. Forwarded straight to the pane.
   autoSave: boolean;
@@ -75,6 +85,7 @@ export function SampleModal({
   entry,
   knownTags,
   openSource,
+  folder,
   onSave,
   autoSave,
 }: SampleModalProps) {
@@ -307,6 +318,7 @@ export function SampleModal({
           entry={entry}
           knownTags={knownTags}
           tagInputRef={tagInputRef}
+          folder={folder}
           onSave={onSave}
           onDirtyChange={setEditDirty}
           autoSave={autoSave}

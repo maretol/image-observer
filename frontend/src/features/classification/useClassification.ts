@@ -5,7 +5,10 @@ import { useToastFn } from "../../shared/components/Toast";
 import type { ConfirmFn } from "../viewer-grid/useViewerSet";
 import { type ListTabFilter } from "./filters";
 import { useClassificationDelete } from "./useClassificationDelete";
-import { useClassificationEdit } from "./useClassificationEdit";
+import {
+  useClassificationEdit,
+  type SaveContext,
+} from "./useClassificationEdit";
 import { useClassificationFilter } from "./useClassificationFilter";
 import { useClassificationLoad } from "./useClassificationLoad";
 import { useClassificationMerge } from "./useClassificationMerge";
@@ -85,7 +88,7 @@ export type UseClassificationReturn = {
   clearTags: () => void;
   openEdit: (filename: string) => void;
   closeEdit: () => void;
-  saveEdit: (entry: classification.Entry) => Promise<void>;
+  saveEdit: (entry: classification.Entry, ctx: SaveContext) => Promise<void>;
   resolveConflictReload: () => Promise<void>;
   resolveConflictForce: () => Promise<void>;
   resolveConflictCancel: () => void;
