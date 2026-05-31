@@ -4,6 +4,11 @@ export type Confidence = "high" | "mid" | "low" | "";
 
 export type ListTabFilter = {
   tags: string[]; // OR; empty = no tag filter
+  // untaggedOnly: when true, show only entries with no tags (extractTags empty).
+  // Mutually exclusive with `tags` at the UI layer (the toggle handlers clear
+  // one when the other is set) — applyFilter still treats it as taking
+  // precedence so the function stays well-defined even if both arrive set.
+  untaggedOnly: boolean;
   confidence: Confidence | "all";
   query: string;
 };
@@ -62,17 +67,31 @@ export function tagSummary(
   return out;
 }
 
+// untaggedCount returns how many entries have no tags at all (extractTags
+// empty). Drives the count badge on the "未分類" chip (#116).
+export function untaggedCount(entries: classification.Entry[]): number {
+  let n = 0;
+  for (const e of entries) {
+    if (extractTags(e.folder).length === 0) n++;
+  }
+  return n;
+}
+
 // applyFilter returns the subset of entries matching the filter.
-// Tags are OR-combined (entry passes if any selected tag matches).
-// Confidence is single-select. Query is case-insensitive substring match
-// against filename and note. All three are AND-combined.
+// untaggedOnly (when set) keeps only entries with no tags and takes precedence
+// over the tag set (the two are mutually exclusive in the UI). Otherwise tags
+// are OR-combined (entry passes if any selected tag matches). Confidence is
+// single-select. Query is case-insensitive substring match against filename
+// and note. All active conditions are AND-combined.
 export function applyFilter(
   entries: classification.Entry[],
   f: ListTabFilter,
 ): classification.Entry[] {
   const q = f.query.trim().toLowerCase();
   return entries.filter((e) => {
-    if (f.tags.length > 0) {
+    if (f.untaggedOnly) {
+      if (extractTags(e.folder).length > 0) return false;
+    } else if (f.tags.length > 0) {
       const tags = extractTags(e.folder);
       if (!f.tags.some((t) => tags.includes(t))) return false;
     }

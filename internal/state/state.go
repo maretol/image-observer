@@ -63,10 +63,17 @@ type ListTabState struct {
 
 // ListFilterState mirrors the frontend filter store. Tags are an OR set;
 // Confidence is one of "all" | "high" | "mid" | "low".
+//
+// UntaggedOnly (#116) shows only entries with no tags and is mutually exclusive
+// with Tags at the UI layer. It was added additively without a schema bump:
+// pre-#116 v6 payloads lack the key and unmarshal to false (lossless), and an
+// older binary reading a newer payload simply ignores the unknown field — so
+// v6 stays forward/backward compatible (see docs/spec-untagged-filter.md §5.3).
 type ListFilterState struct {
-	Tags       []string `json:"tags"`
-	Confidence string   `json:"confidence"`
-	Query      string   `json:"query"`
+	Tags         []string `json:"tags"`
+	UntaggedOnly bool     `json:"untaggedOnly"`
+	Confidence   string   `json:"confidence"`
+	Query        string   `json:"query"`
 }
 
 // WindowState holds the persisted window geometry.

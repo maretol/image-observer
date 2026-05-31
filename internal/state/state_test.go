@@ -763,9 +763,10 @@ func TestSaveLoadState_TopTabAndFilterRoundTrip(t *testing.T) {
 	in.TopTab = "viewer"
 	in.List.FolderPath = "/img/folder"
 	in.List.Filter = ListFilterState{
-		Tags:       []string{"iroha", "kaguya"},
-		Confidence: "high",
-		Query:      "フグ",
+		Tags:         []string{"iroha", "kaguya"},
+		UntaggedOnly: true,
+		Confidence:   "high",
+		Query:        "フグ",
 	}
 	if err := Save(in); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -780,7 +781,42 @@ func TestSaveLoadState_TopTabAndFilterRoundTrip(t *testing.T) {
 	if len(out.List.Filter.Tags) != 2 || out.List.Filter.Tags[0] != "iroha" {
 		t.Errorf("Tags roundtrip: %v", out.List.Filter.Tags)
 	}
+	if !out.List.Filter.UntaggedOnly {
+		t.Errorf("UntaggedOnly roundtrip: got %v, want true", out.List.Filter.UntaggedOnly)
+	}
 	if out.List.Filter.Query != "フグ" {
 		t.Errorf("Query roundtrip: %q", out.List.Filter.Query)
+	}
+}
+
+func TestLoadState_LegacyV6_NoUntaggedOnlyField_DefaultsToFalse(t *testing.T) {
+	// v6 payloads written before issue #116 do not have the `untaggedOnly`
+	// field. JSON unmarshal must leave it at the zero value (false) — this is
+	// the additive-without-bump compatibility guarantee (spec-untagged-filter
+	// §5.3): the schema version stays 6 and existing sessions load lossless.
+	p := setStateFile(t)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	payload := []byte(`{
+		"version": 6,
+		"window": {"width":1024,"height":768,"x":-1,"y":-1},
+		"viewers": [
+			{"id":"v1","name":"V","layout":{"root":{"kind":"leaf","id":"L1","tabs":[],"activeIndex":-1},"activeId":"L1"}}
+		],
+		"activeViewerId": "v1",
+		"topTab": "list",
+		"list": {"folderPath":"/img","filter":{"tags":["iroha"],"confidence":"all","query":""},"collapsedGroups":[]}
+	}`)
+	if err := os.WriteFile(p, payload, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.List.Filter.UntaggedOnly {
+		t.Errorf("legacy v6 payload without `untaggedOnly` should load as false, got true")
+	}
+	// The rest of the filter must survive untouched (no version bump / fallback).
+	if len(s.List.Filter.Tags) != 1 || s.List.Filter.Tags[0] != "iroha" {
+		t.Errorf("legacy v6 filter Tags not preserved: %v", s.List.Filter.Tags)
 	}
 }

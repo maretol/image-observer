@@ -85,6 +85,7 @@ export type UseClassificationReturn = {
   reload: () => Promise<void>;
   setFilter: (patch: Partial<ListTabFilter>) => void;
   toggleTag: (tag: string) => void;
+  toggleUntagged: () => void;
   clearTags: () => void;
   openEdit: (filename: string) => void;
   closeEdit: () => void;
@@ -103,7 +104,12 @@ export type UseClassificationReturn = {
   deleteOne: (filename: string) => Promise<boolean>;
   persistableState: {
     folderPath: string;
-    filter: { tags: string[]; confidence: string; query: string };
+    filter: {
+      tags: string[];
+      untaggedOnly: boolean;
+      confidence: string;
+      query: string;
+    };
     collapsedGroups: string[];
   };
 };
@@ -153,11 +159,17 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     useState<classification.LoadResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { filter, filteredEntries, setFilter, toggleTag, clearTags } =
-    useClassificationFilter({
-      initial: opts.initialList?.filter ?? null,
-      loadResult,
-    });
+  const {
+    filter,
+    filteredEntries,
+    setFilter,
+    toggleTag,
+    toggleUntagged,
+    clearTags,
+  } = useClassificationFilter({
+    initial: opts.initialList?.filter ?? null,
+    loadResult,
+  });
   const [editing, setEditing] = useState<EditingState>({
     open: false,
     filename: null,
@@ -476,6 +488,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       folderPath,
       filter: {
         tags: filter.tags,
+        untaggedOnly: filter.untaggedOnly,
         confidence: filter.confidence,
         query: filter.query,
       },
@@ -511,6 +524,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       reload,
       setFilter,
       toggleTag,
+      toggleUntagged,
       clearTags,
       openEdit,
       closeEdit,
@@ -548,6 +562,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       reload,
       setFilter,
       toggleTag,
+      toggleUntagged,
       clearTags,
       openEdit,
       closeEdit,

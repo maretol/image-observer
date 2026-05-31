@@ -11,6 +11,7 @@ export type ListPersist = {
   folderPath: string;
   filter: {
     tags: string[];
+    untaggedOnly: boolean; // show only entries with no tags (#116)
     confidence: string; // "all" | "high" | "mid" | "low"
     query: string;
   };
@@ -104,6 +105,7 @@ function buildStateData(input: {
       folderPath: input.list.folderPath,
       filter: {
         tags: input.list.filter.tags,
+        untaggedOnly: input.list.filter.untaggedOnly,
         confidence: input.list.filter.confidence,
         query: input.list.filter.query,
       },

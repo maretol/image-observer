@@ -305,6 +305,7 @@ export namespace state {
 	}
 	export class ListFilterState {
 	    tags: string[];
+	    untaggedOnly: boolean;
 	    confidence: string;
 	    query: string;
 	
@@ -315,6 +316,7 @@ export namespace state {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.tags = source["tags"];
+	        this.untaggedOnly = source["untaggedOnly"];
 	        this.confidence = source["confidence"];
 	        this.query = source["query"];
 	    }

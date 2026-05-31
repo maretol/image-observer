@@ -8,6 +8,7 @@ export type UseClassificationFilterReturn = {
   filteredEntries: classification.Entry[];
   setFilter: (patch: Partial<ListTabFilter>) => void;
   toggleTag: (tag: string) => void;
+  toggleUntagged: () => void;
   clearTags: () => void;
 };
 
@@ -24,6 +25,7 @@ type Opts = {
 export function useClassificationFilter(opts: Opts): UseClassificationFilterReturn {
   const initial: ListTabFilter = {
     tags: opts.initial?.tags ?? [],
+    untaggedOnly: opts.initial?.untaggedOnly ?? false,
     confidence: normalizeConfidence(opts.initial?.confidence ?? "all"),
     query: opts.initial?.query ?? "",
   };
@@ -34,18 +36,31 @@ export function useClassificationFilter(opts: Opts): UseClassificationFilterRetu
     setFilterState((cur) => ({ ...cur, ...patch }));
   }, []);
 
+  // Selecting a real tag leaves the untagged-only mode (they are mutually
+  // exclusive — see ListTabFilter doc / spec-untagged-filter.md §4.4).
   const toggleTag = useCallback((tag: string) => {
     setFilterState((cur) => {
       const has = cur.tags.includes(tag);
       return {
         ...cur,
+        untaggedOnly: false,
         tags: has ? cur.tags.filter((t) => t !== tag) : [...cur.tags, tag],
       };
     });
   }, []);
 
+  // Toggling the "未分類" chip flips untaggedOnly; turning it on clears any
+  // selected tags so the two never co-exist.
+  const toggleUntagged = useCallback(() => {
+    setFilterState((cur) =>
+      cur.untaggedOnly
+        ? { ...cur, untaggedOnly: false }
+        : { ...cur, untaggedOnly: true, tags: [] },
+    );
+  }, []);
+
   const clearTags = useCallback(() => {
-    setFilterState((cur) => ({ ...cur, tags: [] }));
+    setFilterState((cur) => ({ ...cur, tags: [], untaggedOnly: false }));
   }, []);
 
   const filteredEntries = useMemo(
@@ -53,7 +68,14 @@ export function useClassificationFilter(opts: Opts): UseClassificationFilterRetu
     [opts.loadResult, filter],
   );
 
-  return { filter, filteredEntries, setFilter, toggleTag, clearTags };
+  return {
+    filter,
+    filteredEntries,
+    setFilter,
+    toggleTag,
+    toggleUntagged,
+    clearTags,
+  };
 }
 
 // normalizeConfidence is filter-local: it coerces the session-restored

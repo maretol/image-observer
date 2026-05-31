@@ -90,6 +90,7 @@ export function ClassificationView({
     reload,
     setFilter,
     toggleTag,
+    toggleUntagged,
     clearTags,
     openEdit,
     closeEdit,
@@ -489,7 +490,9 @@ export function ClassificationView({
       <TagChips
         entries={allEntries}
         selected={filter.tags}
+        untaggedActive={filter.untaggedOnly}
         onToggle={toggleTag}
+        onToggleUntagged={toggleUntagged}
         onClear={clearTags}
       />
       <div className="cls-subtoolbar">
