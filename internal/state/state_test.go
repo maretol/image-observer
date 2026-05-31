@@ -762,9 +762,11 @@ func TestSaveLoadState_TopTabAndFilterRoundTrip(t *testing.T) {
 	in := DefaultData()
 	in.TopTab = "viewer"
 	in.List.FolderPath = "/img/folder"
+	// Tag-filter mode (the realistic state the app persists when tags are
+	// selected): untaggedOnly is false and exclusive with the tag set.
 	in.List.Filter = ListFilterState{
 		Tags:         []string{"iroha", "kaguya"},
-		UntaggedOnly: true,
+		UntaggedOnly: false,
 		Confidence:   "high",
 		Query:        "フグ",
 	}
@@ -781,11 +783,35 @@ func TestSaveLoadState_TopTabAndFilterRoundTrip(t *testing.T) {
 	if len(out.List.Filter.Tags) != 2 || out.List.Filter.Tags[0] != "iroha" {
 		t.Errorf("Tags roundtrip: %v", out.List.Filter.Tags)
 	}
-	if !out.List.Filter.UntaggedOnly {
-		t.Errorf("UntaggedOnly roundtrip: got %v, want true", out.List.Filter.UntaggedOnly)
+	if out.List.Filter.UntaggedOnly {
+		t.Errorf("UntaggedOnly roundtrip (tag mode): got true, want false")
 	}
 	if out.List.Filter.Query != "フグ" {
 		t.Errorf("Query roundtrip: %q", out.List.Filter.Query)
+	}
+}
+
+func TestSaveLoadState_UntaggedOnlyModeRoundTrip(t *testing.T) {
+	// Untagged-filter mode (#116) is exclusive with tags, so the realistic
+	// persisted shape is tags=[] & untaggedOnly=true — verify that round-trips.
+	setStateFile(t)
+	in := DefaultData()
+	in.List.FolderPath = "/img"
+	in.List.Filter = ListFilterState{
+		Tags:         []string{},
+		UntaggedOnly: true,
+		Confidence:   "all",
+		Query:        "",
+	}
+	if err := Save(in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out := Load()
+	if !out.List.Filter.UntaggedOnly {
+		t.Errorf("UntaggedOnly roundtrip: got false, want true")
+	}
+	if len(out.List.Filter.Tags) != 0 {
+		t.Errorf("untagged mode should persist empty Tags, got %v", out.List.Filter.Tags)
 	}
 }
 
