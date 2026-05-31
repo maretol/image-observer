@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { t } from "../messages";
 import { ModalShell } from "./ModalShell";
 
 type DialogState = {
@@ -62,7 +63,7 @@ function ConfirmDialog({ open, message, onConfirm, onCancel }: ConfirmDialogProp
       initialFocusRef={cancelRef}
       // alertdialog requires an accessible name; the message body is exposed
       // via aria-describedby (not aria-labelledby).
-      ariaLabel="確認"
+      ariaLabel={t("common.confirm.aria")}
       ariaDescribedBy="confirm-dialog-message"
       overlayClassName="confirm-dialog-overlay"
       dialogClassName="confirm-dialog"
@@ -77,14 +78,14 @@ function ConfirmDialog({ open, message, onConfirm, onCancel }: ConfirmDialogProp
           className="confirm-dialog-btn confirm-dialog-btn-cancel"
           onClick={onCancel}
         >
-          キャンセル
+          {t("common.cancel")}
         </button>
         <button
           type="button"
           className="confirm-dialog-btn confirm-dialog-btn-ok"
           onClick={onConfirm}
         >
-          OK
+          {t("common.ok")}
         </button>
       </div>
     </ModalShell>

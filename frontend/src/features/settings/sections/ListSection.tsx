@@ -1,3 +1,4 @@
+import { t } from "../../../shared/messages";
 import type { Settings } from "../useSettings";
 import { Field, Segment } from "../SettingsFields";
 import { WATCH_MODE_AUTO, WATCH_MODE_OFF } from "../watchMode";
@@ -7,16 +8,20 @@ const MULTI_SELECT_MODES: Array<{
   label: string;
   hint: string;
 }> = [
-  { value: "checkbox", label: "チェックボックス", hint: "Card 左上のチェックで選択" },
+  {
+    value: "checkbox",
+    label: t("settings.list.multiSelect.checkbox.label"),
+    hint: t("settings.list.multiSelect.checkbox.hint"),
+  },
   {
     value: "modifier",
-    label: "修飾キー",
-    hint: "Ctrl+クリックでトグル / Shift+クリックで範囲選択",
+    label: t("settings.list.multiSelect.modifier.label"),
+    hint: t("settings.list.multiSelect.modifier.hint"),
   },
   {
     value: "both",
-    label: "両方",
-    hint: "チェックボックス + Ctrl/Shift+クリック",
+    label: t("settings.list.multiSelect.both.label"),
+    hint: t("settings.list.multiSelect.both.hint"),
   },
 ];
 
@@ -27,13 +32,13 @@ const WATCH_MODES: Array<{
 }> = [
   {
     value: WATCH_MODE_AUTO,
-    label: "自動",
-    hint: "外部で追加 / 削除された画像と分類データの変更を自動反映",
+    label: t("settings.list.watch.auto.label"),
+    hint: t("settings.list.watch.auto.hint"),
   },
   {
     value: WATCH_MODE_OFF,
-    label: "オフ",
-    hint: "再読み込みボタンを押した時だけ更新",
+    label: t("settings.list.watch.off.label"),
+    hint: t("settings.list.watch.off.hint"),
   },
 ];
 
@@ -48,13 +53,13 @@ const EDIT_AUTO_SAVE_MODES: Array<{
 }> = [
   {
     value: 1,
-    label: "自動 (フォーカス離脱時)",
-    hint: "タグ・note の入力からフォーカスが外れたとき、または confidence を変更したときに即保存",
+    label: t("settings.list.autoSave.auto.label"),
+    hint: t("settings.list.autoSave.auto.hint"),
   },
   {
     value: 0,
-    label: "手動 (保存ボタン)",
-    hint: "保存ボタンまたは Cmd/Ctrl+Enter で明示的に保存",
+    label: t("settings.list.autoSave.manual.label"),
+    hint: t("settings.list.autoSave.manual.hint"),
   },
 ];
 
@@ -68,8 +73,8 @@ export function ListSection({
   return (
     <>
       <Field
-        label="複数選択 UI"
-        hint="チェックボックスは Card 左上のチェックで操作、修飾キーは Ctrl+クリック (トグル) と Shift+クリック (範囲選択) で操作します"
+        label={t("settings.list.multiSelect.label")}
+        hint={t("settings.list.multiSelect.fieldHint")}
       >
         <Segment
           name="multiSelectMode"
@@ -79,8 +84,8 @@ export function ListSection({
         />
       </Field>
       <Field
-        label="フォルダ自動監視"
-        hint="自動: 外部で画像が追加 / 削除されたり _classification.json が書き換えられると、短い遅延の後に一覧へ反映されます。オフ: 自動更新を行わず、再読み込みボタンを押した時のみ最新化します"
+        label={t("settings.list.watch.label")}
+        hint={t("settings.list.watch.fieldHint")}
       >
         <Segment
           name="watchMode"
@@ -90,8 +95,8 @@ export function ListSection({
         />
       </Field>
       <Field
-        label="タグ・note の保存方法"
-        hint="自動: 各入力からフォーカスが外れたとき / confidence を変更したときに保存。手動: 保存ボタンまたは Cmd/Ctrl+Enter で保存します"
+        label={t("settings.list.autoSave.label")}
+        hint={t("settings.list.autoSave.fieldHint")}
       >
         <Segment
           name="editAutoSave"

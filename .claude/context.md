@@ -118,6 +118,7 @@ image-observer/
 │       └── shared/
 │           ├── components/                  # ModalShell / ConfirmDialog / ConflictDialog / MergePromptDialog / Toast
 │           ├── icons/                       # インライン SVG
+│           ├── messages/                    # UI 文字列カタログ (ja.ts) + t(key, params?) 純関数 (#83, i18n 前段)
 │           └── utils/                       # base64 / bodyStyles / debounce / error / path / keybindings / logger
 └── build/                                   # Wails アイコン / Windows manifest / ビルド成果物
 ```
@@ -171,6 +172,6 @@ image-observer/
 - **`features/viewer-grid/`** ↔ `internal/imgread`: ビューア (BSP ツリー / DnD / 画像表示)。`layout/` (`types` / `tree` / `validation` / `serialization` / `active` / `operations` の機能別モジュール群、表面 import は `./layout` バレル経由) は vitest 対象。`useDnD.ts` は pointer events 自前 + `elementFromPoint`。`viewers.ts` は複数ビューア対応の純関数群 (`hydrateInitialViewerSet` / `countLeafTabs` 含む)、`useViewerSet.ts` が hook 統合。`ViewerTab.tsx` (top-tab UI per viewer) / `useViewerRename.ts` (inline rename state) / `useListToViewerHandlers.ts` (list→viewer wiring)
 - **`features/session/`** ↔ `internal/state`: 保存 / 復元グルー (`useSessionLoad` / `useSessionSave`) + `useWindowGeometryPolling` (window geometry / maximized polling, #86)。`useSessionSave` のみ `viewer-grid/layout` の型を import するクロス feature 依存を持つ (永続化は各 feature 状態を集約するため許容)
 - **`features/settings/`** ↔ `internal/settings`: `useSettings` フック + `SettingsDialog` + セクション群 + `watchMode.ts` 定数 (Go 側との D-1 同値テストで pin)
-- **`shared/components/` / `icons/` / `utils/`**: 機能横断 UI 部品 / アイコン / ユーティリティ。どの feature からも import 可。逆に shared から features を import しない
+- **`shared/components/` / `icons/` / `utils/` / `messages/`**: 機能横断 UI 部品 / アイコン / ユーティリティ / UI 文字列カタログ。どの feature からも import 可。逆に shared から features を import しない。`messages/` は `ja.ts` (フラットなドット区切りキーの `as const` カタログ) + `t(key, params?)` 純関数 (`MessageKey = keyof typeof ja` で型保証、`{placeholder}` 補間)。ja 固定 = i18n 前段 (#83、locale 切替は #16)。Phase 1 で shared dialogs + 設定ダイアログを移行、KeybindingsTable / 各 feature view は Phase 2 (#83) で追従。`<code>`/`<strong>` を文中に挟む文は flat catalog で表現できないため据え置き
 - **`App.tsx`**: 唯一の複数 feature オーケストレーション層。永続状態の hydration + 子フック (`useWindowGeometryPolling` / `useGlobalKeybindings` / `useViewerRename` / `useListToViewerHandlers` / `useViewerTabReorder` / `useSessionSave`) 組み立て + 子コンポーネント (`TopTabsBar` / `ClassificationView` / `ViewerGrid` / `SettingsDialog`) への配線 + ToastProvider / useConfirm 境界。`TopTabsBar.tsx` (上部タブ列) と `useGlobalKeybindings.ts` (Ctrl+Shift+1 が list、Ctrl+Shift+2..9 が viewer のため feature を跨ぐ) は App-level として `src/` 直下に同居。`TopTab` 型 (`"list" | "viewer"`) は `src/topTab.ts` に独立
 - **フロントテスト**: `frontend/` で `npm run test` (vitest)。純関数ユニットテスト中心。auto-save キューの race は `useAutoSaveQueue` を renderHook で、baseline reset 判定は `sampleEditBaselineSync` を純関数テストで検証 (#110 B)。`saveEdit` の folder gate (`SaveContext` で cross-folder save を skip) は `useClassificationEdit` を renderHook + IPC mock で検証 (#110 C)。デフォルト env は node、renderHook など DOM が要るファイルのみ `// @vitest-environment happy-dom`

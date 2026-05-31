@@ -1,15 +1,17 @@
+import { t } from "../../../shared/messages";
 import type { Settings } from "../useSettings";
 import { Field, Segment } from "../SettingsFields";
 
 // UI scale tiers exposed by the segment control. Any value within the Go-side
 // validated range is still accepted via settings.json; the UI just surfaces
 // these standard tiers. The actual numeric bounds live in `internal/settings`
-// (single source of truth) so we don't duplicate them in this file.
+// (single source of truth) so we don't duplicate them in this file. The `hint`
+// percentages are plain numbers (not localizable), so they stay as literals.
 const UI_SCALES: Array<{ value: number; label: string; hint: string }> = [
-  { value: 90, label: "小", hint: "90%" },
-  { value: 100, label: "標準", hint: "100%" },
-  { value: 115, label: "大", hint: "115%" },
-  { value: 130, label: "特大", hint: "130%" },
+  { value: 90, label: t("settings.appearance.scale.small"), hint: "90%" },
+  { value: 100, label: t("settings.appearance.scale.standard"), hint: "100%" },
+  { value: 115, label: t("settings.appearance.scale.large"), hint: "115%" },
+  { value: 130, label: t("settings.appearance.scale.xlarge"), hint: "130%" },
 ];
 
 export function AppearanceSection({
@@ -28,11 +30,13 @@ export function AppearanceSection({
   const matchedStandard = UI_SCALES.some((o) => o.value === data.uiScalePercent);
   return (
     <Field
-      label="UI スケール"
+      label={t("settings.appearance.scale.label")}
       hint={
         matchedStandard
-          ? "文字 / ボタン / 入力欄 / 画像表示を含むアプリ全体を均一に拡大縮小します。"
-          : `現在 ${data.uiScalePercent}% (settings.json で個別指定中)。標準のタイル以外を使いたい場合は settings.json の uiScalePercent を編集してください (範囲外は読み込み時に既定値へ戻ります)。`
+          ? t("settings.appearance.scale.hint.matched")
+          : t("settings.appearance.scale.hint.custom", {
+              percent: data.uiScalePercent,
+            })
       }
     >
       <Segment

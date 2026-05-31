@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { t } from "../messages";
 import { ModalShell } from "./ModalShell";
 
 export type ConflictDialogProps = {
@@ -30,12 +31,10 @@ export function ConflictDialog({
       dialogClassName="confirm-dialog conflict-dialog"
     >
       <div className="conflict-dialog-title" id="conflict-dialog-title">
-        ⚠ 外部編集を検出しました
+        {t("dialog.conflict.title")}
       </div>
       <div className="confirm-dialog-message" id="conflict-dialog-message">
-        このファイルを開いてからの間に、別のプロセス
-        (AI ツールやテキストエディタ) が _classification.json を編集しました。
-        どうしますか?
+        {t("dialog.conflict.message")}
       </div>
       <div className="confirm-dialog-buttons conflict-dialog-buttons">
         <button
@@ -43,14 +42,14 @@ export function ConflictDialog({
           className="confirm-dialog-btn"
           onClick={onCancel}
         >
-          キャンセル
+          {t("common.cancel")}
         </button>
         <button
           type="button"
           className="confirm-dialog-btn"
           onClick={onForce}
         >
-          強制上書き
+          {t("dialog.conflict.force")}
         </button>
         <button
           ref={reloadRef}
@@ -58,7 +57,7 @@ export function ConflictDialog({
           className="confirm-dialog-btn confirm-dialog-btn-ok"
           onClick={onReload}
         >
-          再読み込み (推奨)
+          {t("dialog.conflict.reload")}
         </button>
       </div>
     </ModalShell>

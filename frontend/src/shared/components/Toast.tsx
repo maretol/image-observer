@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { t } from "../messages";
 
 export type ToastSeverity = "info" | "warn" | "error";
 export type ToastFn = (message: string, severity?: ToastSeverity) => void;
@@ -147,7 +148,7 @@ function ToastView({ item, onClose }: ToastViewProps) {
           type="button"
           className="toast-close"
           onClick={onClose}
-          aria-label="閉じる"
+          aria-label={t("common.close")}
         >
           ×
         </button>

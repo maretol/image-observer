@@ -1,9 +1,18 @@
+import { t } from "../../../shared/messages";
 import type { Settings } from "../useSettings";
 import { Field, NumberInput, Segment } from "../SettingsFields";
 
 const THUMBNAIL_MODES: Array<{ value: string; label: string; hint: string }> = [
-  { value: "letterbox", label: "レターボックス", hint: "縦横比を保ち余白を入れる (推奨)" },
-  { value: "crop", label: "クロップ", hint: "枠いっぱいに切り出す (はみ出し部分は捨てる)" },
+  {
+    value: "letterbox",
+    label: t("settings.thumbnail.mode.letterbox.label"),
+    hint: t("settings.thumbnail.mode.letterbox.hint"),
+  },
+  {
+    value: "crop",
+    label: t("settings.thumbnail.mode.crop.label"),
+    hint: t("settings.thumbnail.mode.crop.hint"),
+  },
 ];
 
 const THUMBNAIL_SIZES: Array<{ value: number; label: string }> = [
@@ -24,8 +33,8 @@ export function ThumbnailSection({
   return (
     <>
       <Field
-        label="表示サイズ"
-        hint="新しく読み込むサムネイルから反映されます。既に読み込まれた画像はキャッシュ生存中は旧サイズのまま (256px が既定)。"
+        label={t("settings.thumbnail.size.label")}
+        hint={t("settings.thumbnail.size.hint")}
       >
         <Segment
           name="thumbnailSize"
@@ -35,8 +44,8 @@ export function ThumbnailSection({
         />
       </Field>
       <Field
-        label="アスペクト処理"
-        hint="新しく読み込むサムネイルから反映されます。"
+        label={t("settings.thumbnail.mode.label")}
+        hint={t("settings.thumbnail.mode.hint")}
       >
         <Segment
           name="thumbnailMode"
@@ -46,15 +55,19 @@ export function ThumbnailSection({
         />
       </Field>
       <Field
-        label="生成ワーカー数"
-        hint="0 で自動 (CPU 数 / 2、最低 1)。変更はアプリ再起動後に反映されます。"
+        label={t("settings.thumbnail.worker.label")}
+        hint={t("settings.thumbnail.worker.hint")}
       >
         <NumberInput
           value={data.thumbnailWorkerCount}
           min={0}
           max={64}
           step={1}
-          suffix={data.thumbnailWorkerCount === 0 ? "(自動)" : "本"}
+          suffix={
+            data.thumbnailWorkerCount === 0
+              ? t("settings.thumbnail.worker.suffixAuto")
+              : t("settings.thumbnail.worker.suffixManual")
+          }
           onChange={(n) => onChange({ thumbnailWorkerCount: n })}
         />
       </Field>
