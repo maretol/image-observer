@@ -55,4 +55,22 @@ describe("useClassificationFilter untagged exclusivity", () => {
     );
     expect(result.current.filter.untaggedOnly).toBe(true);
   });
+
+  it("drops tags at hydration when initial state has both set (invariant)", () => {
+    // A persisted / hand-edited session could violate exclusivity; the hook
+    // normalizes it so untagged mode wins and no tag chip shows active.
+    const { result } = renderHook(() =>
+      useClassificationFilter({
+        initial: {
+          tags: ["iroha", "kaguya"],
+          untaggedOnly: true,
+          confidence: "all",
+          query: "",
+        },
+        loadResult: null,
+      }),
+    );
+    expect(result.current.filter.untaggedOnly).toBe(true);
+    expect(result.current.filter.tags).toEqual([]);
+  });
 });

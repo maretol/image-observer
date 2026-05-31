@@ -23,9 +23,15 @@ type Opts = {
 // purely client-side — no IPC, no race window — and recompute is driven only
 // by loadResult identity + filter identity.
 export function useClassificationFilter(opts: Opts): UseClassificationFilterReturn {
+  // untaggedOnly and tags are mutually exclusive (#116). A persisted or
+  // hand-edited session could restore both set; normalize at hydration so the
+  // untagged mode wins and the tag set is dropped — otherwise the UI would show
+  // both the "未分類" chip and tag chips active at once (storage form → display
+  // form, AGENTS.md E-1).
+  const initialUntaggedOnly = opts.initial?.untaggedOnly ?? false;
   const initial: ListTabFilter = {
-    tags: opts.initial?.tags ?? [],
-    untaggedOnly: opts.initial?.untaggedOnly ?? false,
+    tags: initialUntaggedOnly ? [] : (opts.initial?.tags ?? []),
+    untaggedOnly: initialUntaggedOnly,
     confidence: normalizeConfidence(opts.initial?.confidence ?? "all"),
     query: opts.initial?.query ?? "",
   };
