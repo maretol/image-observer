@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { classification } from "../../../wailsjs/go/models";
-import { applyFilter, extractTags, serializeTags, tagSummary } from "./filters";
+import {
+  applyFilter,
+  extractTags,
+  serializeTags,
+  summarizeTags,
+  tagSummary,
+  untaggedCount,
+} from "./filters";
 
 const entry = (
   filename: string,
@@ -169,6 +176,7 @@ describe("applyFilter", () => {
   it("returns all entries when filter is empty", () => {
     const out = applyFilter(entries, {
       tags: [],
+      untaggedOnly: false,
       confidence: "all",
       query: "",
     });
@@ -178,6 +186,7 @@ describe("applyFilter", () => {
   it("OR-combines selected tags (both forms recognized)", () => {
     const out = applyFilter(entries, {
       tags: ["iroha", "kaguya"],
+      untaggedOnly: false,
       confidence: "all",
       query: "",
     });
@@ -192,6 +201,7 @@ describe("applyFilter", () => {
   it("filters by confidence single-select", () => {
     const out = applyFilter(entries, {
       tags: [],
+      untaggedOnly: false,
       confidence: "high",
       query: "",
     });
@@ -200,13 +210,17 @@ describe("applyFilter", () => {
 
   it("filters by case-insensitive substring against filename and note", () => {
     expect(
-      applyFilter(entries, { tags: [], confidence: "all", query: "ALPHA" }).map(
-        (e) => e.filename,
-      ),
+      applyFilter(entries, {
+        tags: [],
+        untaggedOnly: false,
+        confidence: "all",
+        query: "ALPHA",
+      }).map((e) => e.filename),
     ).toEqual(["alpha.jpg"]);
     expect(
       applyFilter(entries, {
         tags: [],
+        untaggedOnly: false,
         confidence: "all",
         query: "third",
       }).map((e) => e.filename),
@@ -216,6 +230,7 @@ describe("applyFilter", () => {
   it("AND-combines tag, confidence, and query filters", () => {
     const out = applyFilter(entries, {
       tags: ["iroha"],
+      untaggedOnly: false,
       confidence: "mid",
       query: "second",
     });
@@ -225,9 +240,84 @@ describe("applyFilter", () => {
   it("trims whitespace-only query so it does not exclude all entries", () => {
     const out = applyFilter(entries, {
       tags: [],
+      untaggedOnly: false,
       confidence: "all",
       query: "   ",
     });
     expect(out).toHaveLength(5);
+  });
+
+  it("untaggedOnly keeps only entries with no tags", () => {
+    const out = applyFilter(entries, {
+      tags: [],
+      untaggedOnly: true,
+      confidence: "all",
+      query: "",
+    });
+    expect(out.map((e) => e.filename)).toEqual(["delta.jpg"]);
+  });
+
+  it("untaggedOnly takes precedence over a non-empty tag set", () => {
+    // Defensive: the UI keeps these mutually exclusive, but applyFilter must
+    // stay well-defined if both arrive set — untagged wins.
+    const out = applyFilter(entries, {
+      tags: ["iroha", "kaguya"],
+      untaggedOnly: true,
+      confidence: "all",
+      query: "",
+    });
+    expect(out.map((e) => e.filename)).toEqual(["delta.jpg"]);
+  });
+
+  it("AND-combines untaggedOnly with confidence and query", () => {
+    const taggedHigh = entry("zeta.jpg", "", "high", "needs-tag");
+    const out = applyFilter([...entries, taggedHigh], {
+      tags: [],
+      untaggedOnly: true,
+      confidence: "high",
+      query: "needs",
+    });
+    expect(out.map((e) => e.filename)).toEqual(["zeta.jpg"]);
+  });
+});
+
+describe("untaggedCount", () => {
+  it("counts only entries whose folder yields no tags", () => {
+    const entries = [
+      entry("a.jpg", "iroha"),
+      entry("b.jpg", ""),
+      entry("c.jpg", "shugo (iroha + kaguya)"),
+      entry("d.jpg", ""),
+      entry("e.jpg", "shugo, kaguya"),
+    ];
+    expect(untaggedCount(entries)).toBe(2);
+  });
+
+  it("returns 0 when every entry is tagged", () => {
+    expect(untaggedCount([entry("a.jpg", "iroha")])).toBe(0);
+  });
+});
+
+describe("summarizeTags", () => {
+  const entries = [
+    entry("a.jpg", "iroha"),
+    entry("b.jpg", ""),
+    entry("c.jpg", "shugo (iroha + kaguya)"),
+    entry("d.jpg", ""),
+    entry("e.jpg", "shugo, kaguya"),
+  ];
+
+  it("produces per-tag counts and the untagged total in one pass", () => {
+    const { counts, untagged } = summarizeTags(entries);
+    expect(counts.get("iroha")).toBe(2);
+    expect(counts.get("kaguya")).toBe(2);
+    expect(counts.get("shugo")).toBe(2);
+    expect(untagged).toBe(2);
+  });
+
+  it("agrees with the standalone tagSummary / untaggedCount wrappers", () => {
+    const { counts, untagged } = summarizeTags(entries);
+    expect(counts).toEqual(tagSummary(entries));
+    expect(untagged).toBe(untaggedCount(entries));
   });
 });

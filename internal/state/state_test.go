@@ -762,10 +762,13 @@ func TestSaveLoadState_TopTabAndFilterRoundTrip(t *testing.T) {
 	in := DefaultData()
 	in.TopTab = "viewer"
 	in.List.FolderPath = "/img/folder"
+	// Tag-filter mode (the realistic state the app persists when tags are
+	// selected): untaggedOnly is false and exclusive with the tag set.
 	in.List.Filter = ListFilterState{
-		Tags:       []string{"iroha", "kaguya"},
-		Confidence: "high",
-		Query:      "フグ",
+		Tags:         []string{"iroha", "kaguya"},
+		UntaggedOnly: false,
+		Confidence:   "high",
+		Query:        "フグ",
 	}
 	if err := Save(in); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -780,7 +783,66 @@ func TestSaveLoadState_TopTabAndFilterRoundTrip(t *testing.T) {
 	if len(out.List.Filter.Tags) != 2 || out.List.Filter.Tags[0] != "iroha" {
 		t.Errorf("Tags roundtrip: %v", out.List.Filter.Tags)
 	}
+	if out.List.Filter.UntaggedOnly {
+		t.Errorf("UntaggedOnly roundtrip (tag mode): got true, want false")
+	}
 	if out.List.Filter.Query != "フグ" {
 		t.Errorf("Query roundtrip: %q", out.List.Filter.Query)
+	}
+}
+
+func TestSaveLoadState_UntaggedOnlyModeRoundTrip(t *testing.T) {
+	// Untagged-filter mode (#116) is exclusive with tags, so the realistic
+	// persisted shape is tags=[] & untaggedOnly=true — verify that round-trips.
+	setStateFile(t)
+	in := DefaultData()
+	in.List.FolderPath = "/img"
+	in.List.Filter = ListFilterState{
+		Tags:         []string{},
+		UntaggedOnly: true,
+		Confidence:   "all",
+		Query:        "",
+	}
+	if err := Save(in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out := Load()
+	if !out.List.Filter.UntaggedOnly {
+		t.Errorf("UntaggedOnly roundtrip: got false, want true")
+	}
+	if len(out.List.Filter.Tags) != 0 {
+		t.Errorf("untagged mode should persist empty Tags, got %v", out.List.Filter.Tags)
+	}
+}
+
+func TestLoadState_LegacyV6_NoUntaggedOnlyField_DefaultsToFalse(t *testing.T) {
+	// v6 payloads written before issue #116 do not have the `untaggedOnly`
+	// field. JSON unmarshal must leave it at the zero value (false) — this is
+	// the additive-without-bump compatibility guarantee (spec-untagged-filter
+	// §5.3): the schema version stays 6 and existing sessions load lossless.
+	p := setStateFile(t)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	payload := []byte(`{
+		"version": 6,
+		"window": {"width":1024,"height":768,"x":-1,"y":-1},
+		"viewers": [
+			{"id":"v1","name":"V","layout":{"root":{"kind":"leaf","id":"L1","tabs":[],"activeIndex":-1},"activeId":"L1"}}
+		],
+		"activeViewerId": "v1",
+		"topTab": "list",
+		"list": {"folderPath":"/img","filter":{"tags":["iroha"],"confidence":"all","query":""},"collapsedGroups":[]}
+	}`)
+	if err := os.WriteFile(p, payload, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.List.Filter.UntaggedOnly {
+		t.Errorf("legacy v6 payload without `untaggedOnly` should load as false, got true")
+	}
+	// The rest of the filter must survive untouched (no version bump / fallback).
+	if len(s.List.Filter.Tags) != 1 || s.List.Filter.Tags[0] != "iroha" {
+		t.Errorf("legacy v6 filter Tags not preserved: %v", s.List.Filter.Tags)
 	}
 }

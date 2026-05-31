@@ -1,39 +1,59 @@
 import { useMemo } from "react";
 import type { classification } from "../../../wailsjs/go/models";
-import { tagSummary } from "./filters";
+import { summarizeTags } from "./filters";
 import { readableTextColor, tagColor } from "./colors";
 
 export type TagChipsProps = {
   entries: classification.Entry[];
   selected: string[];
+  // untaggedActive: the "未分類" chip is the active filter (mutually exclusive
+  // with `selected`). #116.
+  untaggedActive: boolean;
   onToggle: (tag: string) => void;
+  onToggleUntagged: () => void;
   onClear: () => void;
 };
 
 export function TagChips({
   entries,
   selected,
+  untaggedActive,
   onToggle,
+  onToggleUntagged,
   onClear,
 }: TagChipsProps) {
-  const sorted = useMemo(() => {
-    const summary = tagSummary(entries);
-    return Array.from(summary.entries()).sort((a, b) => {
+  // One pass over entries yields both the per-tag counts and the untagged
+  // total (avoids running extractTags twice — #120 review).
+  const { sorted, untagged } = useMemo(() => {
+    const { counts, untagged } = summarizeTags(entries);
+    const sorted = Array.from(counts.entries()).sort((a, b) => {
       // Most-used first; tie-break by tag name.
       if (b[1] !== a[1]) return b[1] - a[1];
       return a[0].localeCompare(b[0]);
     });
+    return { sorted, untagged };
   }, [entries]);
+
+  // "すべて" is active only when neither a tag nor the untagged filter is set.
+  const allActive = selected.length === 0 && !untaggedActive;
 
   return (
     <div className="cls-tagchips">
       <button
         type="button"
-        className={`cls-chip cls-chip-all ${selected.length === 0 ? "active" : ""}`}
+        className={`cls-chip cls-chip-all ${allActive ? "active" : ""}`}
         onClick={onClear}
       >
         すべて
         <span className="cls-chip-count">{entries.length}</span>
+      </button>
+      <button
+        type="button"
+        className={`cls-chip cls-chip-untagged ${untaggedActive ? "active" : ""}`}
+        onClick={onToggleUntagged}
+      >
+        未分類
+        <span className="cls-chip-count">{untagged}</span>
       </button>
       {sorted.map(([tag, count]) => {
         const bg = tagColor(tag);
