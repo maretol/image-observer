@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { classification } from "../../../wailsjs/go/models";
-import { tagSummary, untaggedCount } from "./filters";
+import { summarizeTags } from "./filters";
 import { readableTextColor, tagColor } from "./colors";
 
 export type TagChipsProps = {
@@ -22,15 +22,17 @@ export function TagChips({
   onToggleUntagged,
   onClear,
 }: TagChipsProps) {
-  const sorted = useMemo(() => {
-    const summary = tagSummary(entries);
-    return Array.from(summary.entries()).sort((a, b) => {
+  // One pass over entries yields both the per-tag counts and the untagged
+  // total (avoids running extractTags twice — #120 review).
+  const { sorted, untagged } = useMemo(() => {
+    const { counts, untagged } = summarizeTags(entries);
+    const sorted = Array.from(counts.entries()).sort((a, b) => {
       // Most-used first; tie-break by tag name.
       if (b[1] !== a[1]) return b[1] - a[1];
       return a[0].localeCompare(b[0]);
     });
+    return { sorted, untagged };
   }, [entries]);
-  const untagged = useMemo(() => untaggedCount(entries), [entries]);
 
   // "すべて" is active only when neither a tag nor the untagged filter is set.
   const allActive = selected.length === 0 && !untaggedActive;

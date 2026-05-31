@@ -4,6 +4,7 @@ import {
   applyFilter,
   extractTags,
   serializeTags,
+  summarizeTags,
   tagSummary,
   untaggedCount,
 } from "./filters";
@@ -294,5 +295,29 @@ describe("untaggedCount", () => {
 
   it("returns 0 when every entry is tagged", () => {
     expect(untaggedCount([entry("a.jpg", "iroha")])).toBe(0);
+  });
+});
+
+describe("summarizeTags", () => {
+  const entries = [
+    entry("a.jpg", "iroha"),
+    entry("b.jpg", ""),
+    entry("c.jpg", "shugo (iroha + kaguya)"),
+    entry("d.jpg", ""),
+    entry("e.jpg", "shugo, kaguya"),
+  ];
+
+  it("produces per-tag counts and the untagged total in one pass", () => {
+    const { counts, untagged } = summarizeTags(entries);
+    expect(counts.get("iroha")).toBe(2);
+    expect(counts.get("kaguya")).toBe(2);
+    expect(counts.get("shugo")).toBe(2);
+    expect(untagged).toBe(2);
+  });
+
+  it("agrees with the standalone tagSummary / untaggedCount wrappers", () => {
+    const { counts, untagged } = summarizeTags(entries);
+    expect(counts).toEqual(tagSummary(entries));
+    expect(untagged).toBe(untaggedCount(entries));
   });
 });
