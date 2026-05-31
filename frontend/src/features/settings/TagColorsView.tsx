@@ -1,3 +1,4 @@
+import { t } from "../../shared/messages";
 import { getKnownTagColors } from "../classification/colors";
 import { DEFAULT_PALETTE } from "../classification/defaultPalette";
 
@@ -34,8 +35,8 @@ export function TagColorsView({ colors }: { colors: Record<string, string> }) {
     <div className="settings-tag-colors">
       <div className="settings-field-hint">
         {overrideCount > 0
-          ? `現在のパレット (${overrideCount} 件の上書きを適用済み)。`
-          : "既定パレット使用中 (settings.json の tagColors に既定と異なる値の指定はありません)。"}
+          ? t("settings.tagColors.summary.override", { count: overrideCount })
+          : t("settings.tagColors.summary.default")}
       </div>
       {entries.length > 0 ? (
         <ul className="settings-tag-colors-list">
@@ -53,9 +54,9 @@ export function TagColorsView({ colors }: { colors: Record<string, string> }) {
                 {isOverride ? (
                   <span
                     className="settings-tag-override-pill"
-                    title="settings.json の tagColors で既定とは違う色に上書きされています"
+                    title={t("settings.tagColors.override.title")}
                   >
-                    上書き
+                    {t("settings.tagColors.override.pill")}
                   </span>
                 ) : null}
               </li>
@@ -63,6 +64,8 @@ export function TagColorsView({ colors }: { colors: Record<string, string> }) {
           })}
         </ul>
       ) : null}
+      {/* Mixed-markup sentence (embeds two <code> spans) — left inline; a flat
+          string catalog can't represent the <code> spans. Deferred to Phase 2 (#83). */}
       <div className="settings-field-hint">
         編集は <code>settings.json</code> の <code>tagColors</code> を直接書き換えてください
         (アプリ再起動後に反映 / 不正な値は読み込み時に除外されます)。指定したタグだけが既定パレットに重ね書きされ、未指定のタグは既定色のまま残ります。「既定値に戻す」で全上書きをクリアします。

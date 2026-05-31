@@ -1,11 +1,28 @@
+import { t } from "../../../shared/messages";
 import type { Settings } from "../useSettings";
 import { Field, Segment } from "../SettingsFields";
 
 const LOG_LEVELS: Array<{ value: string; label: string; hint: string }> = [
-  { value: "debug", label: "DEBUG", hint: "詳細 (高頻度イベント含む)" },
-  { value: "info", label: "INFO", hint: "標準 (推奨)" },
-  { value: "warn", label: "WARN", hint: "警告以上のみ" },
-  { value: "error", label: "ERROR", hint: "エラーのみ" },
+  {
+    value: "debug",
+    label: t("settings.logging.logLevel.debug.label"),
+    hint: t("settings.logging.logLevel.debug.hint"),
+  },
+  {
+    value: "info",
+    label: t("settings.logging.logLevel.info.label"),
+    hint: t("settings.logging.logLevel.info.hint"),
+  },
+  {
+    value: "warn",
+    label: t("settings.logging.logLevel.warn.label"),
+    hint: t("settings.logging.logLevel.warn.hint"),
+  },
+  {
+    value: "error",
+    label: t("settings.logging.logLevel.error.label"),
+    hint: t("settings.logging.logLevel.error.hint"),
+  },
 ];
 
 export function LoggingSection({
@@ -22,8 +39,8 @@ export function LoggingSection({
   return (
     <>
       <Field
-        label="ログレベル"
-        hint={`現在: ${activeLogLevelHint}。DEBUG は高頻度イベントも記録するためトラブルシュート時のみ推奨。`}
+        label={t("settings.logging.level.label")}
+        hint={t("settings.logging.level.hint", { hint: activeLogLevelHint })}
       >
         <Segment
           name="logLevel"
@@ -32,8 +49,13 @@ export function LoggingSection({
           onChange={(v) => onChange({ logLevel: v })}
         />
       </Field>
-      <Field label="ログファイル" hint="不具合報告時はこのファイルを共有してください">
-        <code className="settings-code">{logPath || "(未初期化)"}</code>
+      <Field
+        label={t("settings.logging.file.label")}
+        hint={t("settings.logging.file.hint")}
+      >
+        <code className="settings-code">
+          {logPath || t("settings.logging.file.uninitialized")}
+        </code>
       </Field>
     </>
   );

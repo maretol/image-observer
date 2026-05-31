@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import type { classification } from "../../../wailsjs/go/models";
+import { t } from "../messages";
 import { ModalShell } from "./ModalShell";
 
 export type MergePromptDialogProps = {
@@ -37,12 +38,14 @@ export function MergePromptDialog({
       // mean to click" with a real decision to ignore the children.
       closeOnBackdrop={false}
       initialFocusRef={mergeRef}
-      ariaLabel="子フォルダのサイドカーをマージ"
+      ariaLabel={t("dialog.merge.aria")}
       overlayClassName="confirm-dialog-overlay"
       dialogClassName="confirm-dialog cls-merge-dialog"
     >
       <div className="confirm-message">
-        <strong>子フォルダのサイドカーが見つかりました</strong>
+        <strong>{t("dialog.merge.heading")}</strong>
+        {/* Mixed-markup sentence (embeds <code>) — left inline; a flat string
+            catalog can't represent the <code> span. Deferred to Phase 2 (#83). */}
         <p>
           以下の子フォルダの分類データを親 (
           <code>_classification.json</code>) に取り込めます。
@@ -54,7 +57,10 @@ export function MergePromptDialog({
             <span className="cls-merge-folder">{c.subfolder}/</span>
             <span className="cls-merge-source">{c.source}</span>
             <span className="cls-merge-counts">
-              {c.nonEmptyCount} / {c.entryCount} 件
+              {t("dialog.merge.count", {
+                nonEmpty: c.nonEmptyCount,
+                total: c.entryCount,
+              })}
             </span>
           </li>
         ))}
@@ -65,14 +71,14 @@ export function MergePromptDialog({
           className="confirm-btn confirm-btn-cancel"
           onClick={onCancel}
         >
-          キャンセル
+          {t("common.cancel")}
         </button>
         <button
           type="button"
           className="confirm-btn confirm-btn-secondary"
           onClick={onSkip}
         >
-          無視して空の親サイドカーを作成
+          {t("dialog.merge.skip")}
         </button>
         <button
           ref={mergeRef}
@@ -80,7 +86,7 @@ export function MergePromptDialog({
           className="confirm-btn confirm-btn-primary"
           onClick={onMerge}
         >
-          マージして親に取込
+          {t("dialog.merge.merge")}
         </button>
       </div>
     </ModalShell>

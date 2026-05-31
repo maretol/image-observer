@@ -1,12 +1,17 @@
+import { t } from "../../../shared/messages";
 import type { Settings } from "../useSettings";
 import { Field, NumberInput, Segment } from "../SettingsFields";
 
 const WHEEL_MODES: Array<{ value: string; label: string; hint: string }> = [
-  { value: "zoom", label: "ホイールで拡大縮小", hint: "従来通り (推奨)" },
+  {
+    value: "zoom",
+    label: t("settings.viewer.wheel.zoom.label"),
+    hint: t("settings.viewer.wheel.zoom.hint"),
+  },
   {
     value: "shift-zoom",
-    label: "Shift / Ctrl + ホイールで拡大縮小",
-    hint: "通常のホイールは画像を上下にスクロール、横方向は trackpad 等の deltaX に追従",
+    label: t("settings.viewer.wheel.shiftZoom.label"),
+    hint: t("settings.viewer.wheel.shiftZoom.hint"),
   },
 ];
 
@@ -20,8 +25,8 @@ export function ViewerSection({
   return (
     <>
       <Field
-        label="マウスホイールの動作"
-        hint="どちらのモードでも、ホイールでズーム / パンするのは画像領域だけです。タブバー上では常にタブ列の横スクロールに使われ、ズームしません。Shift / Ctrl + ホイール モードでは画像領域の通常スクロールがパン (移動) になります。ドラッグでのパンは引き続き利用できます。"
+        label={t("settings.viewer.wheel.label")}
+        hint={t("settings.viewer.wheel.fieldHint")}
       >
         <Segment
           name="wheelMode"
@@ -31,8 +36,8 @@ export function ViewerSection({
         />
       </Field>
       <Field
-        label="開ける画像サイズの上限"
-        hint="画像のピクセル数が上限を超える場合は警告して開きません。次回画像を開く操作から有効。"
+        label={t("settings.viewer.maxPixels.label")}
+        hint={t("settings.viewer.maxPixels.hint")}
       >
         <NumberInput
           value={data.maxImagePixelsMP}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "../../shared/messages";
 import { KeybindingsTable } from "./KeybindingsTable";
 import {
   NavIconAppearance,
@@ -50,38 +51,38 @@ type SectionDef = {
 const SECTIONS: SectionDef[] = [
   {
     id: "logging",
-    label: "ロギング",
-    description: "ログレベルと、不具合報告に使うログファイルの場所。",
+    label: t("settings.section.logging.label"),
+    description: t("settings.section.logging.desc"),
     icon: <NavIconLog />,
   },
   {
     id: "appearance",
-    label: "外観",
-    description: "アプリ全体の表示倍率 (文字 / ボタン / 入力欄を一括スケール)。",
+    label: t("settings.section.appearance.label"),
+    description: t("settings.section.appearance.desc"),
     icon: <NavIconAppearance />,
   },
   {
     id: "viewer",
-    label: "ビューア",
-    description: "画像表示の操作とパフォーマンス上限。",
+    label: t("settings.section.viewer.label"),
+    description: t("settings.section.viewer.desc"),
     icon: <NavIconViewer />,
   },
   {
     id: "thumbnail",
-    label: "サムネイル",
-    description: "一覧タブのサムネイル生成パラメータ。",
+    label: t("settings.section.thumbnail.label"),
+    description: t("settings.section.thumbnail.desc"),
     icon: <NavIconThumb />,
   },
   {
     id: "list",
-    label: "一覧タブ",
-    description: "分類ビューでの選択操作の挙動。",
+    label: t("settings.section.list.label"),
+    description: t("settings.section.list.desc"),
     icon: <NavIconList />,
   },
   {
     id: "tag-colors",
-    label: "タグ色",
-    description: "既知タグのバッジ色マッピング (settings.json で編集)。",
+    label: t("settings.section.tagColors.label"),
+    description: t("settings.section.tagColors.desc"),
     icon: <NavIconPalette />,
   },
 ];
@@ -141,7 +142,7 @@ export function SettingsDialog({
       <div className="settings-dialog" onClick={(e) => e.stopPropagation()}>
         <header className="settings-header">
           <h2 id="settings-title" className="settings-title">
-            設定
+            {t("settings.title")}
           </h2>
           {/* Plain toggle-buttons rather than role="tablist" — we don't ship
             * the full WAI-ARIA tabs contract (arrow-key nav, roving tabindex,
@@ -155,7 +156,7 @@ export function SettingsDialog({
           <div
             className="settings-category-bar"
             role="group"
-            aria-label="カテゴリ"
+            aria-label={t("settings.category.aria")}
           >
             <button
               type="button"
@@ -165,7 +166,7 @@ export function SettingsDialog({
               }`}
               onClick={() => setCategory("settings")}
             >
-              設定
+              {t("settings.category.settings")}
             </button>
             <button
               type="button"
@@ -175,13 +176,13 @@ export function SettingsDialog({
               }`}
               onClick={() => setCategory("shortcuts")}
             >
-              ショートカット
+              {t("settings.category.shortcuts")}
             </button>
           </div>
           <button
             type="button"
             className="settings-close"
-            aria-label="閉じる"
+            aria-label={t("common.close")}
             onClick={onClose}
           >
             ×
@@ -189,10 +190,10 @@ export function SettingsDialog({
         </header>
         <div className="settings-body">
           {loading ? (
-            <div className="settings-loading">読み込み中…</div>
+            <div className="settings-loading">{t("common.loading")}</div>
           ) : !data ? (
             <div className="settings-error">
-              設定の読み込みに失敗しました
+              {t("settings.loadError")}
               {error ? `: ${error}` : null}
             </div>
           ) : category === "shortcuts" ? (
@@ -200,9 +201,11 @@ export function SettingsDialog({
             // the body — `.settings-content` already has `flex: 1`.
             <div className="settings-content">
               <div className="settings-content-header">
-                <h3 className="settings-content-title">ショートカット</h3>
+                <h3 className="settings-content-title">
+                  {t("settings.shortcuts.title")}
+                </h3>
                 <p className="settings-content-description">
-                  現在のキーバインド一覧 (再バインドは未対応)。
+                  {t("settings.shortcuts.description")}
                 </p>
               </div>
               <div className="settings-content-body">
@@ -211,7 +214,7 @@ export function SettingsDialog({
             </div>
           ) : (
             <>
-              <nav className="settings-nav" aria-label="設定セクション">
+              <nav className="settings-nav" aria-label={t("settings.nav.aria")}>
                 {SECTIONS.map((s) => (
                   <button
                     key={s.id}
@@ -274,14 +277,14 @@ export function SettingsDialog({
             onClick={onReset}
             disabled={loading || !data}
           >
-            既定値に戻す
+            {t("settings.reset")}
           </button>
           <button
             type="button"
             className="settings-btn settings-btn-primary"
             onClick={onClose}
           >
-            閉じる
+            {t("common.close")}
           </button>
         </footer>
       </div>
