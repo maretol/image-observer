@@ -81,7 +81,7 @@ func main() {
 	}
 
 	err := wails.Run(&options.App{
-		Title:     "image-observer",
+		Title:     "Imago",
 		Width:     width,
 		Height:    height,
 		MinWidth:  400,
