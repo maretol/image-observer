@@ -92,10 +92,16 @@ jobs:
         shell: bash
         env:
           PFX_B64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+          PFX_PASS: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
         run: |
-          if [ -n "$PFX_B64" ]; then
+          # Require BOTH secrets — signing with the .pfx but no password just
+          # throws later, so a half-configured setup must skip (and say why).
+          if [ -n "$PFX_B64" ] && [ -n "$PFX_PASS" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "Signing secret present -> artifacts will be self-signed."
+            echo "Signing secrets present -> artifacts will be self-signed."
+          elif [ -n "$PFX_B64" ] && [ -z "$PFX_PASS" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::WINDOWS_SIGN_PFX_BASE64 is set but WINDOWS_SIGN_PFX_PASSWORD is missing -> skipping signing."
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "No signing secret -> artifacts will be left unsigned."
@@ -110,44 +116,60 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $pfxPath = Join-Path $env:RUNNER_TEMP 'signing.pfx'
-          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:PFX_B64))
-          $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]'PersistKeySet,Exportable'
-          $cert  = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($pfxPath, $env:PFX_PASS, $flags)
+          # Strip any whitespace/newlines that may have crept into the secret
+          # (wrapped base64 or a trailing newline) before decoding.
+          $b64 = $env:PFX_B64 -replace '\s', ''
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($b64))
+          try {
+            # PersistKeySet lets Set-AuthenticodeSignature reach the private key
+            # reliably; the runner is ephemeral and torn down after the job, so
+            # the key never outlives this run. Exportable keeps it loadable.
+            $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]'PersistKeySet,Exportable'
+            $cert  = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($pfxPath, $env:PFX_PASS, $flags)
 
-          # CI runners don't trust our self-signed cert, so the verification
-          # Status is never 'Valid' here. Treat "signer thumbprint matches +
-          # timestamp applied" as success instead.
-          $timestampServers = @(
-            'http://timestamp.digicert.com',
-            'http://timestamp.sectigo.com',
-            'http://time.certum.pl'
-          )
-          $targets = @(Get-ChildItem -Path build/bin -Filter *.exe)
-          if ($targets.Count -eq 0) { throw 'No .exe artifacts found under build/bin to sign.' }
+            # CI runners don't trust our self-signed cert, so the verification
+            # Status is never 'Valid' here. Treat "signer thumbprint matches +
+            # timestamp applied" as success instead.
+            # RFC3161 timestamp tokens are signed by the TSA (tamper-evident), so
+            # http is the protocol norm; prefer https where offered and fall back
+            # to http. A non-RFC3161 endpoint just fails and the loop moves on.
+            $timestampServers = @(
+              'https://timestamp.digicert.com',
+              'https://timestamp.sectigo.com',
+              'https://time.certum.pl',
+              'http://timestamp.digicert.com',
+              'http://timestamp.sectigo.com',
+              'http://time.certum.pl'
+            )
+            $targets = @(Get-ChildItem -Path build/bin -Filter *.exe)
+            if ($targets.Count -eq 0) { throw 'No .exe artifacts found under build/bin to sign.' }
 
-          foreach ($exe in $targets) {
-            $ok = $false
-            foreach ($ts in $timestampServers) {
-              try {
-                Set-AuthenticodeSignature -FilePath $exe.FullName -Certificate $cert `
-                  -HashAlgorithm SHA256 -TimestampServer $ts -ErrorAction Stop | Out-Null
-              } catch {
-                Write-Host "::warning::Sign via $ts failed for $($exe.Name): $($_.Exception.Message)"
-                continue
+            foreach ($exe in $targets) {
+              $ok = $false
+              foreach ($ts in $timestampServers) {
+                try {
+                  Set-AuthenticodeSignature -FilePath $exe.FullName -Certificate $cert `
+                    -HashAlgorithm SHA256 -TimestampServer $ts -ErrorAction Stop | Out-Null
+                } catch {
+                  Write-Host "::warning::Sign via $ts failed for $($exe.Name): $($_.Exception.Message)"
+                  continue
+                }
+                $sig = Get-AuthenticodeSignature -FilePath $exe.FullName
+                if ($sig.SignerCertificate -and `
+                    $sig.SignerCertificate.Thumbprint -eq $cert.Thumbprint -and `
+                    $sig.TimeStamperCertificate) {
+                  Write-Host "Signed $($exe.Name) (timestamp: $ts)"
+                  $ok = $true
+                  break
+                }
+                Write-Host "::warning::Signature not verified for $($exe.Name) via $ts; trying next."
               }
-              $sig = Get-AuthenticodeSignature -FilePath $exe.FullName
-              if ($sig.SignerCertificate -and `
-                  $sig.SignerCertificate.Thumbprint -eq $cert.Thumbprint -and `
-                  $sig.TimeStamperCertificate) {
-                Write-Host "Signed $($exe.Name) (timestamp: $ts)"
-                $ok = $true
-                break
-              }
-              Write-Host "::warning::Signature not verified for $($exe.Name) via $ts; trying next."
+              if (-not $ok) { throw "Failed to sign $($exe.Name)" }
             }
-            if (-not $ok) { throw "Failed to sign $($exe.Name)" }
           }
-          Remove-Item $pfxPath -Force
+          finally {
+            Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
+          }
 
       - name: List artifacts
         shell: bash

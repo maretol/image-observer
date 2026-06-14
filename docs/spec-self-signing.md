@@ -60,12 +60,16 @@ scripts/new-signing-cert.ps1                wails build → build/bin/*.exe
 
 ## 5. CI 署名ステップ (release.yml)
 
-- `Detect signing secret` ステップで `WINDOWS_SIGN_PFX_BASE64` の有無を判定し、
-  `signcheck.outputs.enabled` に反映。
+- `Detect signing secret` ステップで `WINDOWS_SIGN_PFX_BASE64` **と** `WINDOWS_SIGN_PFX_PASSWORD`
+  の両方が揃っているかを判定し、`signcheck.outputs.enabled` に反映。base64 だけ設定され
+  パスワードが欠けている場合は warning を出して署名をスキップする (後段の例外回避)。
 - `Sign Windows artifacts` ステップは `enabled == 'true'` のときだけ実行。
-  - base64 → `.pfx` を復元し、`X509Certificate2` で読み込む。
+  - base64 から空白/改行を除去 (`-replace '\s',''`) してから `.pfx` を復元し、
+    `X509Certificate2` で読み込む。`.pfx` は `try/finally` で必ず削除する。
   - `build/bin/*.exe` を `Set-AuthenticodeSignature -HashAlgorithm SHA256` で署名。
-  - タイムスタンプサーバは複数を順に試行 (1 つ失敗しても次へ)。
+  - タイムスタンプサーバは **https を優先し http にフォールバック**して順に試行
+    (1 つ失敗しても次へ)。RFC3161 のタイムスタンプトークンは TSA 署名済みで
+    改ざん検知可能なため http も許容。
   - 署名の成否は **署名者証明書の thumbprint 一致 + タイムスタンプ付与**で検証
     (CI ランナーは自己署名証明書を信頼していないため `Status` は当てにしない)。
 - **Secrets 未設定なら署名ステップはスキップ**され、未署名のままリリースは継続する
