@@ -38,6 +38,7 @@ export type CardContextMenuProps = {
 
   // Single-mode actions.
   onOpenInViewer: (viewerId: string) => void;
+  onCopy: () => void;
   onEnterSelectionMode: () => void;
   onDelete: () => void;
 
@@ -78,6 +79,7 @@ export function CardContextMenu({
   selectedCount,
   bulkDstViewerId,
   onOpenInViewer,
+  onCopy,
   onEnterSelectionMode,
   onDelete,
   onOpenManyInTabs,
@@ -91,6 +93,7 @@ export function CardContextMenu({
           viewers,
           activeViewerId,
           onOpenInViewer,
+          onCopy,
           onEnterSelectionMode,
           onDelete,
         )
@@ -266,6 +269,7 @@ function buildSingleEntries(
   viewers: Viewer[],
   activeViewerId: string,
   onOpenInViewer: (viewerId: string) => void,
+  onCopy: () => void,
   onEnterSelectionMode: () => void,
   onDelete: () => void,
 ): MenuEntry[] {
@@ -284,9 +288,16 @@ function buildSingleEntries(
       onClick: () => onOpenInViewer(v.id),
     });
   }
-  if (viewers.length > 0) {
-    entries.push({ kind: "divider", key: "div-after-viewers" });
-  }
+  // Copy the image to the clipboard (#127) — grouped with the open actions
+  // since both act on this one image. Always present, so the divider below is
+  // always valid even when there are no viewers.
+  entries.push({
+    kind: "item",
+    key: "copy",
+    label: "コピー",
+    onClick: onCopy,
+  });
+  entries.push({ kind: "divider", key: "div-after-image-actions" });
   entries.push({
     kind: "item",
     key: "enter-selection-mode",

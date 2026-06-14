@@ -11,6 +11,10 @@ import {
 import type { classification } from "../../../wailsjs/go/models";
 import { ConflictDialog } from "../../shared/components/ConflictDialog";
 import { MergePromptDialog } from "../../shared/components/MergePromptDialog";
+import { useToastFn } from "../../shared/components/Toast";
+import { copyImageToClipboard } from "../../shared/utils/clipboard";
+import { errorMessage } from "../../shared/utils/error";
+import { logger } from "../../shared/utils/logger";
 import { CardContextMenu } from "./CardContextMenu";
 import { ClassificationHeader } from "./ClassificationHeader";
 import { ConfidenceSegment } from "./ConfidenceSegment";
@@ -384,6 +388,8 @@ export function ClassificationView({
     }
   }, [viewers, activeViewerId, bulkDstViewerId]);
 
+  const toast = useToastFn();
+
   const onContextMenuDelete = useCallback(() => {
     if (!cardCtxMenu) return;
     const filename = cardCtxMenu.filename;
@@ -396,6 +402,24 @@ export function ClassificationView({
       if (ok) onAfterDelete(`${folderPath}/${filename}`);
     })();
   }, [cardCtxMenu, deleteOne, folderPath, onAfterDelete]);
+
+  // Single-mode "コピー" — copy the right-clicked card's full-resolution image
+  // to the clipboard (#127). Build the absolute path the same way the delete
+  // flow does, close the menu, then fire from this user gesture.
+  const onContextMenuCopy = useCallback(() => {
+    if (!cardCtxMenu) return;
+    const absPath = `${folderPath}/${cardCtxMenu.filename}`;
+    setCardCtxMenu(null);
+    void copyImageToClipboard(absPath)
+      .then(() => toast("画像をクリップボードにコピーしました", "info"))
+      .catch((e) => {
+        logger.error("clipboard", "copy failed", {
+          path: absPath,
+          err: errorMessage(e),
+        });
+        toast("クリップボードへのコピーに失敗しました (詳細はログ)", "error");
+      });
+  }, [cardCtxMenu, folderPath, toast]);
 
   // Single-mode "ビューア「{name}」で開く" — close menu first, then open.
   // Closing before the async open avoids a stale menu sitting on top of the
@@ -670,6 +694,7 @@ export function ClassificationView({
           selectedCount={selectedFilenames.length}
           bulkDstViewerId={bulkDstViewerId}
           onOpenInViewer={onContextMenuOpenInViewer}
+          onCopy={onContextMenuCopy}
           onEnterSelectionMode={onContextMenuEnterSelectionMode}
           onDelete={onContextMenuDelete}
           onOpenManyInTabs={onContextMenuOpenManyInTabs}
