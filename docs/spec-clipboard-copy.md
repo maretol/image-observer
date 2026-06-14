@@ -135,6 +135,10 @@ export async function copyImageToClipboard(absPath: string): Promise<void> {
   (`SampleModal.tsx` / `useGridThumbnail.ts` / `ImageView.tsx` と同一) を踏襲。
 - クリップボード形式は **`image/png` のみ** (D4)。Chromium 系 `ClipboardItem` は実用上
   png が最も安定して貼り付け先で解釈されるため。
+- `copyImageToClipboard` 冒頭で `navigator.clipboard` / `ClipboardItem` の存在を
+  **feature-detect** し、未サポート環境 (dev = WebKitGTK 等, D9) では明示的な Error を投げる。
+  呼び出し側はこれを catch して読みやすいログ + error トーストに落とす (生の TypeError /
+  ReferenceError を避ける。PR #128 Copilot レビュー対応)。
 
 ### 5.2 ビューア側 (`TabContextMenu` / `ViewerGrid`)
 

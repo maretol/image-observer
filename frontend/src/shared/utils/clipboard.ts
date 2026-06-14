@@ -43,6 +43,19 @@ export async function toPngBlob(src: Blob): Promise<Blob> {
 // don't consume the activation window before write() is reached (Chromium
 // supports deferred ClipboardItem blobs).
 export async function copyImageToClipboard(absPath: string): Promise<void> {
+  // Feature-detect up front so environments without the async image clipboard
+  // (e.g. dev = WebKitGTK, §D9) fail with a clear message the caller can log,
+  // instead of a raw TypeError / ReferenceError deep in the promise chain.
+  if (
+    typeof navigator === "undefined" ||
+    !navigator.clipboard ||
+    typeof navigator.clipboard.write !== "function" ||
+    typeof ClipboardItem === "undefined"
+  ) {
+    throw new Error(
+      "image clipboard copy is unsupported in this environment (navigator.clipboard / ClipboardItem unavailable)",
+    );
+  }
   const pngPromise = (async () => {
     const res = await ReadImage(absPath);
     const src = new Blob([toBytes(res.data)], { type: res.mimeType });
