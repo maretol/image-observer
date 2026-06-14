@@ -14,6 +14,7 @@ type Props = {
   viewers: Viewer[];
   currentViewerId: string;
   onClose: () => void;
+  onCopy: () => void;
   onCloseTab: () => void;
   onSplit: (direction: "col" | "row") => void;
   onMoveToViewer: (dstViewerId: string) => void;
@@ -36,6 +37,7 @@ export function TabContextMenu({
   viewers,
   currentViewerId,
   onClose,
+  onCopy,
   onCloseTab,
   onSplit,
   onMoveToViewer,
@@ -108,14 +110,15 @@ export function TabContextMenu({
     }
   };
 
-  // Initial position seed from a per-item-count estimate. 3 fixed items
-  // (閉じる / split×2), 1 divider always, + (1 divider + N viewer items) when
-  // other viewers exist. This is only the *seed* — useLayoutEffect below
-  // measures the actual rendered size and re-clamps before paint, so this
-  // estimate doesn't have to perfectly match the rendered size (which depends
-  // on browser default line-height / font metrics).
-  const itemCount = 3 + otherViewers.length;
-  const dividerCount = 1 + (hasMoveItems ? 1 : 0);
+  // Initial position seed from a per-item-count estimate. 4 fixed items
+  // (コピー / 閉じる / split×2), 2 dividers always (after コピー + before split),
+  // + (1 divider + N viewer items) when other viewers exist. This is only the
+  // *seed* — useLayoutEffect below measures the actual rendered size and
+  // re-clamps before paint, so this estimate doesn't have to perfectly match
+  // the rendered size (which depends on browser default line-height / font
+  // metrics).
+  const itemCount = 4 + otherViewers.length;
+  const dividerCount = 2 + (hasMoveItems ? 1 : 0);
   const approxHeight =
     CTX_MENU_CHROME_HEIGHT +
     itemCount * CTX_ITEM_HEIGHT +
@@ -155,11 +158,13 @@ export function TabContextMenu({
   }, []);
 
   // Build menuitems in a single flat array so itemsRef indices stay stable
-  // regardless of how many other viewers exist. Order: 閉じる → split×2 →
-  // (divider) → viewer×N. Each index is captured in render (not inside the
-  // ref callback) so itemsRef positions don't drift if React re-invokes the
-  // ref callback during StrictMode double-invoke / unmount-null cleanup.
+  // regardless of how many other viewers exist. Order: コピー → 閉じる →
+  // split×2 → (divider) → viewer×N. コピー is index 0 so it gets the initial
+  // focus. Each index is captured in render (not inside the ref callback) so
+  // itemsRef positions don't drift if React re-invokes the ref callback during
+  // StrictMode double-invoke / unmount-null cleanup.
   let refIdx = 0;
+  const copyIdx = refIdx++;
   const closeIdx = refIdx++;
   const splitColIdx = refIdx++;
   const splitRowIdx = refIdx++;
@@ -181,6 +186,16 @@ export function TabContextMenu({
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onMenuKeyDown}
       >
+        <button
+          ref={(el) => assignRef(el, copyIdx)}
+          type="button"
+          role="menuitem"
+          className="ctx-item"
+          onClick={onCopy}
+        >
+          コピー
+        </button>
+        <div className="ctx-divider" role="separator" />
         <button
           ref={(el) => assignRef(el, closeIdx)}
           type="button"

@@ -1,9 +1,14 @@
 import { useRef, useState } from "react";
+import { useToastFn } from "../../shared/components/Toast";
+import { copyImageToClipboard } from "../../shared/utils/clipboard";
+import { errorMessage } from "../../shared/utils/error";
+import { logger } from "../../shared/utils/logger";
 import { Panel } from "./Panel";
 import { GridSplitter } from "./GridSplitter";
 import { TabContextMenu } from "./TabContextMenu";
 import { TabDragGhost } from "./TabDragGhost";
 import { useDnD, type DnDState } from "./useDnD";
+import { findLeaf } from "./layout";
 import type {
   Edge,
   Layout,
@@ -63,6 +68,7 @@ type ContextState = {
 export function ViewerGrid(props: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [ctx, setCtx] = useState<ContextState | null>(null);
+  const toast = useToastFn();
 
   const { dnd, startDrag } = useDnD({
     moveTab: props.onMoveTab,
@@ -76,6 +82,24 @@ export function ViewerGrid(props: Props) {
     e: React.MouseEvent,
   ) => {
     setCtx({ leafId, tabIndex, x: e.clientX, y: e.clientY });
+  };
+
+  // Copy the right-clicked tab's image to the clipboard (#127). Resolve the
+  // path from the layout before closing the menu (which clears `ctx`). Fired
+  // from the menu-item onClick so the Clipboard API has a user gesture.
+  const onCopy = (leafId: string, tabIndex: number) => {
+    const path = findLeaf(props.layout.root, leafId)?.tabs[tabIndex]?.path;
+    setCtx(null);
+    if (!path) return;
+    void copyImageToClipboard(path)
+      .then(() => toast("画像をクリップボードにコピーしました", "info"))
+      .catch((e) => {
+        logger.error("clipboard", "copy failed", {
+          path,
+          err: errorMessage(e),
+        });
+        toast("クリップボードへのコピーに失敗しました (詳細はログ)", "error");
+      });
   };
 
   return (
@@ -105,6 +129,7 @@ export function ViewerGrid(props: Props) {
           viewers={props.viewers}
           currentViewerId={props.currentViewerId}
           onClose={() => setCtx(null)}
+          onCopy={() => onCopy(ctx.leafId, ctx.tabIndex)}
           onCloseTab={() => {
             props.onCloseTab(ctx.leafId, ctx.tabIndex);
             setCtx(null);
