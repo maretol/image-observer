@@ -82,6 +82,73 @@ jobs:
           wails build -platform windows/amd64 -nsis \
             -ldflags "-X main.Version=${{ steps.version.outputs.tag }}"
 
+      # Self-signing (#61): if a self-signed code-signing cert is configured via
+      # secrets, sign the produced EXEs so the app launches without warnings on
+      # machines that trust the cert (the dev's own PC). Absent the secret the
+      # step is skipped and artifacts ship unsigned — release never breaks.
+      # Setup runbook + caveats: docs/spec-self-signing.md.
+      - name: Detect signing secret
+        id: signcheck
+        shell: bash
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+        run: |
+          if [ -n "$PFX_B64" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Signing secret present -> artifacts will be self-signed."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "No signing secret -> artifacts will be left unsigned."
+          fi
+
+      - name: Sign Windows artifacts (self-signed)
+        if: steps.signcheck.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+          PFX_PASS: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:PFX_B64))
+          $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]'PersistKeySet,Exportable'
+          $cert  = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($pfxPath, $env:PFX_PASS, $flags)
+
+          # CI runners don't trust our self-signed cert, so the verification
+          # Status is never 'Valid' here. Treat "signer thumbprint matches +
+          # timestamp applied" as success instead.
+          $timestampServers = @(
+            'http://timestamp.digicert.com',
+            'http://timestamp.sectigo.com',
+            'http://time.certum.pl'
+          )
+          $targets = @(Get-ChildItem -Path build/bin -Filter *.exe)
+          if ($targets.Count -eq 0) { throw 'No .exe artifacts found under build/bin to sign.' }
+
+          foreach ($exe in $targets) {
+            $ok = $false
+            foreach ($ts in $timestampServers) {
+              try {
+                Set-AuthenticodeSignature -FilePath $exe.FullName -Certificate $cert `
+                  -HashAlgorithm SHA256 -TimestampServer $ts -ErrorAction Stop | Out-Null
+              } catch {
+                Write-Host "::warning::Sign via $ts failed for $($exe.Name): $($_.Exception.Message)"
+                continue
+              }
+              $sig = Get-AuthenticodeSignature -FilePath $exe.FullName
+              if ($sig.SignerCertificate -and `
+                  $sig.SignerCertificate.Thumbprint -eq $cert.Thumbprint -and `
+                  $sig.TimeStamperCertificate) {
+                Write-Host "Signed $($exe.Name) (timestamp: $ts)"
+                $ok = $true
+                break
+              }
+              Write-Host "::warning::Signature not verified for $($exe.Name) via $ts; trying next."
+            }
+            if (-not $ok) { throw "Failed to sign $($exe.Name)" }
+          }
+          Remove-Item $pfxPath -Force
+
       - name: List artifacts
         shell: bash
         run: ls -la build/bin

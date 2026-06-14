@@ -17,3 +17,6 @@ frontend/dist/
 
 tmp/
 image-observer
+
+# 自己署名の秘密鍵 / .pfx / base64 (#61, scripts/new-signing-cert.ps1 の出力)
+.local-signing/

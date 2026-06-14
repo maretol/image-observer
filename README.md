@@ -114,6 +114,8 @@ wails build
 成果物は `build/bin/` に出力されます。  
 本番向け Windows リリースは GitHub Actions の `release.yml`（タグ push）で作成します。
 
+リリース EXE は、自己署名証明書を Secrets に設定している場合のみ CI で署名されます（自分の PC で警告なく起動するための自分用署名。設定手順と限界は [`docs/spec-self-signing.md`](./docs/spec-self-signing.md)）。
+
 ---
 
 ## テスト
