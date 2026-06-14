@@ -96,8 +96,8 @@ scripts/new-signing-cert.ps1                wails build → build/bin/*.exe
 
 ## 8. DoD
 
-- [ ] `release.yml` に署名ステップを追加 (Secrets 未設定で自動スキップ)
-- [ ] `scripts/new-signing-cert.ps1` で証明書作成 + 自 PC 信頼 + .pfx 出力ができる
-- [ ] `.local-signing/` を `.gitignore` に追加
-- [ ] todo.md §I のコードサイニング項目を #61 反映で更新
+- [x] `release.yml` に署名ステップを追加 (Secrets 未設定で自動スキップ)
+- [x] `scripts/new-signing-cert.ps1` で証明書作成 + 自 PC 信頼 + .pfx 出力ができる
+- [x] `.local-signing/` を `.gitignore` に追加
+- [x] todo.md §I のコードサイニング項目を #61 反映で更新
 - [ ] (開発者手作業) Secrets 登録後、`v*` タグで出た EXE が自 PC で警告なく起動
