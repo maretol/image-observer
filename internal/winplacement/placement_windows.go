@@ -111,10 +111,10 @@ func Restore(s state.WindowState) (ok bool) {
 	wp := windowPlacement{
 		showCmd: swShowNormal,
 		rcNormalPosition: rect{
-			Left:   int32(left),
-			Top:    int32(top),
-			Right:  int32(right),
-			Bottom: int32(bottom),
+			Left:   clampInt32(left),
+			Top:    clampInt32(top),
+			Right:  clampInt32(right),
+			Bottom: clampInt32(bottom),
 		},
 	}
 	if maximized {

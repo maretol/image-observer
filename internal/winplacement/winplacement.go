@@ -23,7 +23,11 @@
 // dependency-free; no cycle.
 package winplacement
 
-import "image-observer/internal/state"
+import (
+	"math"
+
+	"image-observer/internal/state"
+)
 
 // ToWindowState converts a WINDOWPLACEMENT rcNormalPosition rectangle (Win32
 // RECT: right/bottom are exclusive edges) plus a maximized flag into the
@@ -45,4 +49,20 @@ func ToWindowState(left, top, right, bottom int, maximized bool) state.WindowSta
 // into a WINDOWPLACEMENT for SetWindowPlacement.
 func FromWindowState(s state.WindowState) (left, top, right, bottom int, maximized bool) {
 	return s.X, s.Y, s.X + s.Width, s.Y + s.Height, s.Maximized
+}
+
+// clampInt32 saturates a Go int (int64 on 64-bit) into the int32 range a Win32
+// RECT field requires. A corrupt or hand-edited state.json could hold a value
+// outside int32; an unchecked int32() conversion would wrap (sign-flip) and
+// place the window at a wild coordinate. Saturating instead keeps the value
+// sane, and the OS still clamps the final placement to the visible work area.
+// Lives in the build-tag-free file so it is unit-tested on the Linux CI runner.
+func clampInt32(v int) int32 {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v)
 }

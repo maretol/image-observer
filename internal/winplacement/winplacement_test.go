@@ -1,6 +1,7 @@
 package winplacement
 
 import (
+	"math"
 	"testing"
 
 	"image-observer/internal/state"
@@ -72,6 +73,30 @@ func TestFromWindowState(t *testing.T) {
 			if l != tt.wantL || top != tt.wantT || r != tt.wantR || b != tt.wantB || max != tt.wantMax {
 				t.Errorf("FromWindowState(%+v) = (%d,%d,%d,%d,%v), want (%d,%d,%d,%d,%v)",
 					tt.in, l, top, r, b, max, tt.wantL, tt.wantT, tt.wantR, tt.wantB, tt.wantMax)
+			}
+		})
+	}
+}
+
+func TestClampInt32(t *testing.T) {
+	tests := []struct {
+		name string
+		in   int
+		want int32
+	}{
+		{"in range", 1024, 1024},
+		{"negative in range (secondary monitor)", -1920, -1920},
+		{"zero", 0, 0},
+		{"max boundary", math.MaxInt32, math.MaxInt32},
+		{"min boundary", math.MinInt32, math.MinInt32},
+		{"above max saturates", math.MaxInt32 + 1, math.MaxInt32},
+		{"far above max saturates", math.MaxInt32 * 4, math.MaxInt32},
+		{"below min saturates", math.MinInt32 - 1, math.MinInt32},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampInt32(tt.in); got != tt.want {
+				t.Errorf("clampInt32(%d) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
 	}
