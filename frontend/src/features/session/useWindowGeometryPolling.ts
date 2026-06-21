@@ -155,8 +155,13 @@ export function useWindowGeometryPolling(
         }
         startPolling();
       })
-      .catch(() => {
-        // Environment() unavailable (runtime not ready) — do not poll.
+      .catch((err) => {
+        // Environment() unavailable (runtime not ready) — do not poll (safe
+        // default). Log so a non-Windows dev can tell *why* polling never
+        // started instead of seeing silent inaction.
+        logger.debug("session", "window geometry polling skipped (Environment() failed)", {
+          err: String(err),
+        });
       });
 
     return () => {
