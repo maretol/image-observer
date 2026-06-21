@@ -124,8 +124,10 @@ func Restore(s state.WindowState) (ok bool) {
 		wp.showCmd = swShowMaximized
 	}
 	wp.length = uint32(unsafe.Sizeof(wp))
-	if ret, _, _ := procSetWindowPlacement.Call(hwnd, uintptr(unsafe.Pointer(&wp))); ret == 0 {
-		logging.Warn("winplacement", "SetWindowPlacement failed; falling back to runtime restore")
+	// .Call's third return is the Win32 last-error; include it so a real-machine
+	// failure is diagnosable (it is only meaningful on the ret==0 failure path).
+	if ret, _, errno := procSetWindowPlacement.Call(hwnd, uintptr(unsafe.Pointer(&wp))); ret == 0 {
+		logging.Warn("winplacement", "SetWindowPlacement failed; falling back to runtime restore", "err", errno.Error())
 		return false
 	}
 	return true
@@ -146,8 +148,8 @@ func Capture() (s state.WindowState, ok bool) {
 	}
 	var wp windowPlacement
 	wp.length = uint32(unsafe.Sizeof(wp))
-	if ret, _, _ := procGetWindowPlacement.Call(hwnd, uintptr(unsafe.Pointer(&wp))); ret == 0 {
-		logging.Warn("winplacement", "GetWindowPlacement failed; skipping placement capture")
+	if ret, _, errno := procGetWindowPlacement.Call(hwnd, uintptr(unsafe.Pointer(&wp))); ret == 0 {
+		logging.Warn("winplacement", "GetWindowPlacement failed; skipping placement capture", "err", errno.Error())
 		return state.WindowState{}, false
 	}
 	maximized := wp.showCmd == swShowMaximized
