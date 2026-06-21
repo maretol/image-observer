@@ -16,13 +16,16 @@ import (
 	"image-observer/internal/settings"
 	"image-observer/internal/state"
 	"image-observer/internal/thumb"
+	"image-observer/internal/winplacement"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 // Version is the build-time release tag, injected via:
-//   go build -ldflags "-X main.Version=v0.1.0"
+//
+//	go build -ldflags "-X main.Version=v0.1.0"
+//
 // (Wails forwards `-ldflags` from `wails build`.) Untagged builds (local
 // `wails dev` / `wails build` without a flag) leave it as the dev sentinel.
 var Version = "dev"
@@ -92,6 +95,15 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup: func(ctx context.Context) {
 			app.startup(ctx)
+			// Windows: restore the full native placement (issue #129). The
+			// Wails-runtime path below lands the window on the primary monitor
+			// on multi-monitor Windows (the bug we fix); SetWindowPlacement
+			// puts it back on the correct monitor and also captures the restore
+			// rect even while maximized. winplacement.Restore is a no-op
+			// (ok=false) on non-Windows, where we keep the #86 fallback below.
+			if winplacement.Restore(persisted.Window) {
+				return
+			}
 			if persisted.Window.X >= 0 && persisted.Window.Y >= 0 {
 				runtime.WindowSetPosition(ctx, persisted.Window.X, persisted.Window.Y)
 			}
@@ -103,6 +115,19 @@ func main() {
 			if persisted.Window.Maximized {
 				runtime.WindowMaximise(ctx)
 			}
+		},
+		OnBeforeClose: func(_ context.Context) (prevent bool) {
+			// Windows: capture the native placement while the window still
+			// exists (OnShutdown is too late — the HWND may be gone) and persist
+			// only the window field (issue #129). winplacement.Capture is a
+			// no-op (ok=false) on non-Windows, where the frontend polling owns
+			// the window geometry (#86), so nothing is saved here.
+			if w, ok := winplacement.Capture(); ok {
+				if err := state.SaveWindow(w); err != nil {
+					logging.Warn("app", "save window placement failed", "err", err.Error())
+				}
+			}
+			return false // allow the window to close
 		},
 		OnShutdown: func(ctx context.Context) {
 			app.shutdown(ctx)
