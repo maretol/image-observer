@@ -148,11 +148,13 @@ export function useWindowGeometryPolling(
     // must not permanently disable the #86 polling on non-Windows. Once the
     // retry budget is exhausted we fall back to "do not poll", which is also the
     // safe default for Windows (never clobber the Go-owned geometry, issue #129).
+    let lastEnvError: unknown;
     const resolvePlatform = async (): Promise<string | null> => {
       for (let attempt = 0; attempt < ENV_RETRY_LIMIT; attempt++) {
         try {
           return (await Environment()).platform;
-        } catch {
+        } catch (err) {
+          lastEnvError = err;
           if (cancelled || attempt === ENV_RETRY_LIMIT - 1) return null;
           await new Promise<void>((resolve) => {
             retryTimer = window.setTimeout(resolve, ENV_RETRY_DELAY_MS);
@@ -166,9 +168,12 @@ export function useWindowGeometryPolling(
     resolvePlatform().then((platform) => {
       if (cancelled) return;
       if (platform === null) {
+        // Log the most recent failure reason so a non-Windows dev can tell why
+        // polling never started instead of seeing silent inaction.
         logger.debug(
           "session",
           "window geometry polling skipped (Environment() unresolved after retries)",
+          { err: String(lastEnvError) },
         );
         return;
       }
