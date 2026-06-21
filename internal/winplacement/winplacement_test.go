@@ -48,7 +48,7 @@ func TestFromWindowState(t *testing.T) {
 	tests := []struct {
 		name                       string
 		in                         state.WindowState
-		wantL, wantT, wantR, wantB int
+		wantL, wantT, wantR, wantB int32
 		wantMax                    bool
 	}{
 		{
@@ -65,6 +65,13 @@ func TestFromWindowState(t *testing.T) {
 			name:  "negative origin",
 			in:    state.WindowState{X: -1920, Y: 0, Width: 1024, Height: 768},
 			wantL: -1920, wantT: 0, wantR: -896, wantB: 768, wantMax: false,
+		},
+		{
+			// Absurdly corrupt state.json: X+Width would overflow int64 with a
+			// naive add. FromWindowState must saturate, not wrap (issue #129 review).
+			name:  "overflow-prone width saturates instead of wrapping",
+			in:    state.WindowState{X: math.MaxInt, Y: 0, Width: math.MaxInt, Height: 768},
+			wantL: math.MaxInt32, wantT: 0, wantR: math.MaxInt32, wantB: 768, wantMax: false,
 		},
 	}
 	for _, tt := range tests {
@@ -112,9 +119,32 @@ func TestRoundTrip(t *testing.T) {
 	}
 	for _, want := range cases {
 		l, top, r, b, max := FromWindowState(want)
-		got := ToWindowState(l, top, r, b, max)
+		// FromWindowState now returns int32 (saturated RECT edges); the in-range
+		// cases above convert back losslessly.
+		got := ToWindowState(int(l), int(top), int(r), int(b), max)
 		if got != want {
 			t.Errorf("round trip mismatch: got %+v, want %+v", got, want)
 		}
+	}
+}
+
+func TestClampSumInt32(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b int
+		want int32
+	}{
+		{"normal", 100, 1024, 1124},
+		{"negative origin", -1920, 1024, -896},
+		{"max int addends saturate (no int64 overflow)", math.MaxInt, math.MaxInt, math.MaxInt32},
+		{"min int addends saturate", math.MinInt, math.MinInt, math.MinInt32},
+		{"mixed huge saturates", math.MaxInt32, math.MaxInt32, math.MaxInt32},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampSumInt32(tt.a, tt.b); got != tt.want {
+				t.Errorf("clampSumInt32(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
+			}
+		})
 	}
 }

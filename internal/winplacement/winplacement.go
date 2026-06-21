@@ -46,9 +46,15 @@ func ToWindowState(left, top, right, bottom int, maximized bool) state.WindowSta
 
 // FromWindowState is the inverse of ToWindowState: it yields the RECT edges
 // (right / bottom computed from width / height) and the maximized flag to feed
-// into a WINDOWPLACEMENT for SetWindowPlacement.
-func FromWindowState(s state.WindowState) (left, top, right, bottom int, maximized bool) {
-	return s.X, s.Y, s.X + s.Width, s.Y + s.Height, s.Maximized
+// into a WINDOWPLACEMENT for SetWindowPlacement. Every edge is saturated into
+// the int32 range the RECT fields require, so the syscall path never sees a
+// wrapped value. right / bottom are X+Width / Y+Height, whose int64 sum could
+// itself overflow for an absurdly corrupt state.json; clampSumInt32 adds in a
+// domain that cannot overflow before saturating.
+func FromWindowState(s state.WindowState) (left, top, right, bottom int32, maximized bool) {
+	return clampInt32(s.X), clampInt32(s.Y),
+		clampSumInt32(s.X, s.Width), clampSumInt32(s.Y, s.Height),
+		s.Maximized
 }
 
 // clampInt32 saturates a Go int (int64 on 64-bit) into the int32 range a Win32
@@ -65,4 +71,21 @@ func clampInt32(v int) int32 {
 		return math.MinInt32
 	}
 	return int32(v)
+}
+
+// clampSumInt32 returns a+b saturated to the int32 range without int64
+// overflow. Each addend is first clamped into int32, so the int64 sum of two
+// int32-bounded values stays well within int64 before the final saturation —
+// this closes the gap where a raw `s.X + s.Width` could overflow int64 and wrap
+// before clampInt32 ever ran (issue #129 review). For in-range geometry the
+// clamps are identities, so the sum is exact.
+func clampSumInt32(a, b int) int32 {
+	sum := int64(clampInt32(a)) + int64(clampInt32(b))
+	if sum > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if sum < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(sum)
 }

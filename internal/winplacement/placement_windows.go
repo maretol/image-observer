@@ -107,14 +107,16 @@ func Restore(s state.WindowState) (ok bool) {
 		logging.Warn("winplacement", "main window HWND not found; falling back to runtime restore")
 		return false
 	}
+	// FromWindowState already saturates every edge into int32 (and adds
+	// X+Width / Y+Height without overflow), so the rect is ready to use as-is.
 	left, top, right, bottom, maximized := FromWindowState(s)
 	wp := windowPlacement{
 		showCmd: swShowNormal,
 		rcNormalPosition: rect{
-			Left:   clampInt32(left),
-			Top:    clampInt32(top),
-			Right:  clampInt32(right),
-			Bottom: clampInt32(bottom),
+			Left:   left,
+			Top:    top,
+			Right:  right,
+			Bottom: bottom,
 		},
 	}
 	if maximized {
