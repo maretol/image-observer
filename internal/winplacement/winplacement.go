@@ -19,8 +19,9 @@
 // The struct-conversion helpers in this file carry no build tag, so they are
 // unit-tested on the Linux CI runner where the Win32 syscalls cannot run.
 //
-// Dependency direction: winplacement -> state (type only). state stays
-// dependency-free; no cycle.
+// Dependency direction: winplacement -> state (the state.WindowState type) and,
+// on Windows builds only, -> logging (placement_windows.go emits warn logs).
+// state stays dependency-free; no cycle.
 package winplacement
 
 import (
