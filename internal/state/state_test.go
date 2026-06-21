@@ -909,9 +909,9 @@ func TestSaveWindow_MissingFile_SeedsDefaults(t *testing.T) {
 
 // TestSaveWindow_ConcurrentWithSave hammers Save and SaveWindow from many
 // goroutines at once (mirrors the OnBeforeClose SaveWindow racing the frontend
-// SaveState binding, #134 review). stateMu must serialize them: the file stays
-// valid (never a torn / lost-update read) and `go test -race` reports no data
-// race on the read-modify-write path.
+// SaveState binding, issue #129 review). stateMu must serialize them: the file
+// stays valid (never a torn / lost-update read) and `go test -race` reports no
+// data race on the read-modify-write path.
 func TestSaveWindow_ConcurrentWithSave(t *testing.T) {
 	setStateFile(t)
 	if err := Save(DefaultData()); err != nil {
