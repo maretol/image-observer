@@ -104,7 +104,13 @@ func main() {
 			if winplacement.Restore(persisted.Window) {
 				return
 			}
-			if persisted.Window.X >= 0 && persisted.Window.Y >= 0 {
+			// Restore the position unless it is the never-positioned sentinel.
+			// Real negative coordinates (a secondary monitor left of / above the
+			// primary) are valid and must be restored on this fallback path too
+			// (issue #129 review) — the old `>= 0` guard wrongly dropped them.
+			posUnset := persisted.Window.X == state.WindowPositionUnset &&
+				persisted.Window.Y == state.WindowPositionUnset
+			if !posUnset {
 				runtime.WindowSetPosition(ctx, persisted.Window.X, persisted.Window.Y)
 			}
 			// Restore maximized state last so the unmaximize button falls back

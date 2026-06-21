@@ -97,6 +97,14 @@ type WindowState struct {
 	Maximized bool `json:"maximized,omitempty"`
 }
 
+// WindowPositionUnset is the X/Y sentinel DefaultData seeds when no window has
+// ever been positioned. Restore paths must skip applying the position only when
+// *both* X and Y equal this sentinel; real negative coordinates (a secondary
+// monitor left of / above the primary) are valid and must be restorable
+// (issue #129 review). Single-sourced here so DefaultData and main.go cannot
+// drift (AGENTS.md D-2).
+const WindowPositionUnset = -1
+
 // LayoutState is the persisted form of one viewer's BSP layout tree. ActiveID
 // points to the leaf currently focused (mirrors `Layout.activeId` in TS).
 type LayoutState struct {
@@ -155,7 +163,7 @@ func DefaultData() StateData {
 	v := defaultViewer()
 	return StateData{
 		Version:        StateSchemaVersion,
-		Window:         WindowState{Width: 1024, Height: 768, X: -1, Y: -1},
+		Window:         WindowState{Width: 1024, Height: 768, X: WindowPositionUnset, Y: WindowPositionUnset},
 		Viewers:        []ViewerState{v},
 		ActiveViewerID: v.ID,
 		TopTab:         "list",
