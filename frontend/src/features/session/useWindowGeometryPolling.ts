@@ -38,6 +38,10 @@ export type WindowGeometryState = {
 const POLL_INTERVAL_MS = 2000;
 const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 768;
+// Environment() can transiently fail right after startup; retry a few times so
+// one early failure does not permanently disable the #86 polling on non-Windows.
+const ENV_RETRY_LIMIT = 5;
+const ENV_RETRY_DELAY_MS = 300;
 
 type Opts = {
   initial?: state.WindowState | null;
@@ -127,6 +131,7 @@ export function useWindowGeometryPolling(
     const onResize = () => update();
     let interval: number | undefined;
     let resizeListening = false;
+    let retryTimer: number | undefined;
     const startPolling = () => {
       window.addEventListener("resize", onResize);
       resizeListening = true;
@@ -137,35 +142,52 @@ export function useWindowGeometryPolling(
       update();
     };
 
-    // Gate the polling on platform: Windows owns the window geometry natively
-    // (issue #129, see the file-level comment), so polling must not run there.
-    // Every other platform keeps the #86 polling. If Environment() cannot be
-    // resolved we err on the safe side and do not poll — a missing platform
-    // check must never risk clobbering the Windows geometry; the loaded initial
-    // value is retained.
-    Environment()
-      .then((env) => {
-        if (cancelled) return;
-        if (env.platform === "windows") {
-          logger.debug(
-            "session",
-            "window geometry polling disabled on windows (issue #129)",
-          );
-          return;
+    // Resolve the platform before deciding whether to poll. Environment() can
+    // transiently fail right after startup (the same reason update() above is
+    // wrapped in try/catch), so retry it a few times — a single early failure
+    // must not permanently disable the #86 polling on non-Windows. Once the
+    // retry budget is exhausted we fall back to "do not poll", which is also the
+    // safe default for Windows (never clobber the Go-owned geometry, issue #129).
+    const resolvePlatform = async (): Promise<string | null> => {
+      for (let attempt = 0; attempt < ENV_RETRY_LIMIT; attempt++) {
+        try {
+          return (await Environment()).platform;
+        } catch {
+          if (cancelled || attempt === ENV_RETRY_LIMIT - 1) return null;
+          await new Promise<void>((resolve) => {
+            retryTimer = window.setTimeout(resolve, ENV_RETRY_DELAY_MS);
+          });
+          if (cancelled) return null;
         }
-        startPolling();
-      })
-      .catch((err) => {
-        // Environment() unavailable (runtime not ready) — do not poll (safe
-        // default). Log so a non-Windows dev can tell *why* polling never
-        // started instead of seeing silent inaction.
-        logger.debug("session", "window geometry polling skipped (Environment() failed)", {
-          err: String(err),
-        });
-      });
+      }
+      return null;
+    };
+
+    resolvePlatform().then((platform) => {
+      if (cancelled) return;
+      if (platform === null) {
+        logger.debug(
+          "session",
+          "window geometry polling skipped (Environment() unresolved after retries)",
+        );
+        return;
+      }
+      // Windows owns the window geometry natively (issue #129, see the
+      // file-level comment), so polling must not run there. Every other
+      // platform keeps the #86 polling.
+      if (platform === "windows") {
+        logger.debug(
+          "session",
+          "window geometry polling disabled on windows (issue #129)",
+        );
+        return;
+      }
+      startPolling();
+    });
 
     return () => {
       cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
       if (resizeListening) window.removeEventListener("resize", onResize);
       if (interval !== undefined) window.clearInterval(interval);
     };

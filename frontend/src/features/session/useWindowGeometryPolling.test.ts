@@ -67,16 +67,49 @@ describe("useWindowGeometryPolling", () => {
     );
   });
 
-  it("does not poll when Environment() rejects (safe default)", async () => {
-    environmentMock.mockRejectedValue(new Error("runtime not ready"));
+  it("retries Environment() and recovers from a transient failure", async () => {
+    // A single early reject must NOT permanently disable #86 polling (issue
+    // #129 review): the hook retries until Environment() resolves.
+    environmentMock
+      .mockRejectedValueOnce(new Error("runtime not ready"))
+      .mockResolvedValue({ platform: "linux" });
+    windowIsMaximisedMock.mockResolvedValue(false);
+    windowGetSizeMock.mockResolvedValue({ w: 1280, h: 1024 });
+    windowGetPositionMock.mockResolvedValue({ x: 100, y: 200 });
 
     const { result } = renderHook(() =>
       useWindowGeometryPolling({ initial: initial() }),
     );
-    await waitFor(() => expect(environmentMock).toHaveBeenCalled());
-    await flush();
 
-    expect(windowGetSizeMock).not.toHaveBeenCalled();
-    expect(result.current).toEqual(initialShape);
+    await waitFor(
+      () =>
+        expect(result.current).toEqual({
+          width: 1280,
+          height: 1024,
+          x: 100,
+          y: 200,
+          maximized: false,
+        }),
+      { timeout: 2000 },
+    );
+    expect(environmentMock.mock.calls.length).toBeGreaterThanOrEqual(2); // retried
+  });
+
+  it("gives up without polling when Environment() never resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      environmentMock.mockRejectedValue(new Error("runtime not ready"));
+
+      const { result } = renderHook(() =>
+        useWindowGeometryPolling({ initial: initial() }),
+      );
+      // Drive every retry + delay to completion (well past the retry budget).
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(windowGetSizeMock).not.toHaveBeenCalled();
+      expect(result.current).toEqual(initialShape);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
