@@ -95,22 +95,27 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup: func(ctx context.Context) {
 			app.startup(ctx)
-			// Windows: restore the full native placement (issue #129). The
-			// Wails-runtime path below lands the window on the primary monitor
-			// on multi-monitor Windows (the bug we fix); SetWindowPlacement
-			// puts it back on the correct monitor and also captures the restore
-			// rect even while maximized. winplacement.Restore is a no-op
-			// (ok=false) on non-Windows, where we keep the #86 fallback below.
-			if winplacement.Restore(persisted.Window) {
-				return
-			}
-			// Restore the position unless it is the never-positioned sentinel.
-			// Real negative coordinates (a secondary monitor left of / above the
-			// primary) are valid and must be restored on this fallback path too
-			// (issue #129 review) — the old `>= 0` guard wrongly dropped them.
+			// With the never-positioned sentinel (first launch / missing state)
+			// there is no real geometry to restore, so let Wails use its default
+			// placement — skip both the Win32 restore and the fallback
+			// WindowSetPosition (issue #129 review: applying (-1,-1) would shove
+			// the window into the top-left corner).
 			posUnset := persisted.Window.X == state.WindowPositionUnset &&
 				persisted.Window.Y == state.WindowPositionUnset
 			if !posUnset {
+				// Windows: restore the full native placement (issue #129). The
+				// Wails-runtime path below lands the window on the primary
+				// monitor on multi-monitor Windows (the bug we fix);
+				// SetWindowPlacement puts it back on the correct monitor and
+				// also captures the restore rect even while maximized.
+				// winplacement.Restore is a no-op (ok=false) on non-Windows,
+				// where we keep the #86 fallback.
+				if winplacement.Restore(persisted.Window) {
+					return
+				}
+				// Real negative coordinates (a secondary monitor left of /
+				// above the primary) are valid and must be restored on this
+				// fallback path too (issue #129 review).
 				runtime.WindowSetPosition(ctx, persisted.Window.X, persisted.Window.Y)
 			}
 			// Restore maximized state last so the unmaximize button falls back
