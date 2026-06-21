@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  Environment,
   WindowGetPosition,
   WindowGetSize,
   WindowIsMaximised,
@@ -14,6 +15,13 @@ import { logger } from "../../shared/utils/logger";
 // maximized is true we deliberately do not overwrite them, so closing the
 // window while maximized still leaves a sensible restore size for the next
 // launch (issue #86).
+//
+// On Windows the polling is disabled: the native Win32 WINDOWPLACEMENT path
+// (issue #129) owns the window field there — main.go captures it at
+// OnBeforeClose and state.SaveWindow is the sole writer — so polling
+// WindowGetPosition would feed a competing value into useSessionSave and
+// clobber the Go-owned geometry. On Windows the hook just returns the loaded
+// initial value, frozen. See docs/spec-window-placement.md §8 (sync model).
 //
 // The returned object is the value held in useState, so `Object.is` identity
 // is stable across polls that observe no change. Consumers (typically
@@ -117,16 +125,44 @@ export function useWindowGeometryPolling(
       }
     };
     const onResize = () => update();
-    window.addEventListener("resize", onResize);
-    const interval = window.setInterval(update, POLL_INTERVAL_MS);
-    logger.debug("session", "window pos/size polling started", {
-      intervalMs: POLL_INTERVAL_MS,
-    });
-    update();
+    let interval: number | undefined;
+    let resizeListening = false;
+    const startPolling = () => {
+      window.addEventListener("resize", onResize);
+      resizeListening = true;
+      interval = window.setInterval(update, POLL_INTERVAL_MS);
+      logger.debug("session", "window pos/size polling started", {
+        intervalMs: POLL_INTERVAL_MS,
+      });
+      update();
+    };
+
+    // Gate the polling on platform: Windows owns the window geometry natively
+    // (issue #129, see the file-level comment), so polling must not run there.
+    // Every other platform keeps the #86 polling. If Environment() cannot be
+    // resolved we err on the safe side and do not poll — a missing platform
+    // check must never risk clobbering the Windows geometry; the loaded initial
+    // value is retained.
+    Environment()
+      .then((env) => {
+        if (cancelled) return;
+        if (env.platform === "windows") {
+          logger.debug(
+            "session",
+            "window geometry polling disabled on windows (issue #129)",
+          );
+          return;
+        }
+        startPolling();
+      })
+      .catch(() => {
+        // Environment() unavailable (runtime not ready) — do not poll.
+      });
+
     return () => {
       cancelled = true;
-      window.removeEventListener("resize", onResize);
-      window.clearInterval(interval);
+      if (resizeListening) window.removeEventListener("resize", onResize);
+      if (interval !== undefined) window.clearInterval(interval);
     };
   }, []);
 
