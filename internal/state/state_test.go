@@ -913,7 +913,7 @@ func TestSaveWindow_MissingFile_SeedsDefaults(t *testing.T) {
 // stays valid (never a torn / lost-update read) and `go test -race` reports no
 // data race on the read-modify-write path.
 func TestSaveWindow_ConcurrentWithSave(t *testing.T) {
-	setStateFile(t)
+	p := setStateFile(t)
 	if err := Save(DefaultData()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -921,22 +921,42 @@ func TestSaveWindow_ConcurrentWithSave(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range 50 {
 		wg.Add(2)
-		go func() { defer wg.Done(); _ = Save(DefaultData()) }()
+		go func() {
+			defer wg.Done()
+			// t.Errorf is safe to call concurrently; wg.Wait() below joins all
+			// goroutines before the test returns, so no late report is lost.
+			if err := Save(DefaultData()); err != nil {
+				t.Errorf("Save: %v", err)
+			}
+		}()
 		go func(i int) {
 			defer wg.Done()
-			_ = SaveWindow(WindowState{Width: 1024, Height: 768, X: i, Y: i})
+			if err := SaveWindow(WindowState{Width: 1024, Height: 768, X: i, Y: i}); err != nil {
+				t.Errorf("SaveWindow: %v", err)
+			}
 		}(i)
 	}
 	wg.Wait()
 
-	// Whatever the interleaving, the persisted state must still be structurally
-	// valid (a torn write or lost update would drop Load to default fallback,
-	// but more importantly it must never panic / corrupt).
-	got := Load()
-	if len(got.Viewers) == 0 {
-		t.Fatalf("state corrupted after concurrent writes: %+v", got)
+	// Read the file raw rather than via Load: Load would mask a torn write by
+	// silently falling back to DefaultData (which trivially satisfies the
+	// assertions below). The bytes themselves must be valid JSON — proof that
+	// stateMu serialized the atomic writes and none interleaved mid-rename.
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read state file: %v", err)
 	}
-	if got.Window.Width != 1024 || got.Window.Height != 768 {
-		t.Errorf("window size clobbered: got %+v", got.Window)
+	var parsed StateData
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("state file is not valid JSON after concurrent writes: %v\n%s", err, raw)
+	}
+	if parsed.Version != StateSchemaVersion {
+		t.Errorf("version: got %d, want %d", parsed.Version, StateSchemaVersion)
+	}
+	if len(parsed.Viewers) == 0 {
+		t.Errorf("viewers empty after concurrent writes: %+v", parsed)
+	}
+	if parsed.Window.Width != 1024 || parsed.Window.Height != 768 {
+		t.Errorf("window size clobbered: got %+v", parsed.Window)
 	}
 }
