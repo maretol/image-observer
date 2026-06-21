@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -903,5 +904,39 @@ func TestSaveWindow_MissingFile_SeedsDefaults(t *testing.T) {
 	}
 	if len(got.Viewers) != 1 {
 		t.Errorf("expected one default viewer seeded, got %d", len(got.Viewers))
+	}
+}
+
+// TestSaveWindow_ConcurrentWithSave hammers Save and SaveWindow from many
+// goroutines at once (mirrors the OnBeforeClose SaveWindow racing the frontend
+// SaveState binding, #134 review). stateMu must serialize them: the file stays
+// valid (never a torn / lost-update read) and `go test -race` reports no data
+// race on the read-modify-write path.
+func TestSaveWindow_ConcurrentWithSave(t *testing.T) {
+	setStateFile(t)
+	if err := Save(DefaultData()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := range 50 {
+		wg.Add(2)
+		go func() { defer wg.Done(); _ = Save(DefaultData()) }()
+		go func(i int) {
+			defer wg.Done()
+			_ = SaveWindow(WindowState{Width: 1024, Height: 768, X: i, Y: i})
+		}(i)
+	}
+	wg.Wait()
+
+	// Whatever the interleaving, the persisted state must still be structurally
+	// valid (a torn write or lost update would drop Load to default fallback,
+	// but more importantly it must never panic / corrupt).
+	got := Load()
+	if len(got.Viewers) == 0 {
+		t.Fatalf("state corrupted after concurrent writes: %+v", got)
+	}
+	if got.Window.Width != 1024 || got.Window.Height != 768 {
+		t.Errorf("window size clobbered: got %+v", got.Window)
 	}
 }

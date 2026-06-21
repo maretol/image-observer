@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -146,6 +147,13 @@ const (
 // stateFilePathOverride lets tests redirect away from the user config dir.
 var stateFilePathOverride string
 
+// stateMu serializes state.json read-modify-write across goroutines. The Wails
+// SaveState binding (frontend, debounced) and the OnBeforeClose SaveWindow
+// capture (#129) run on independent goroutines; without this lock SaveWindow's
+// Load→Save could lose a concurrent Save's viewer/list update (or vice versa).
+// All exported Load/Save/SaveWindow take it; the *Locked helpers assume it held.
+var stateMu sync.Mutex
+
 func stateFilePath() (string, error) {
 	if stateFilePathOverride != "" {
 		return stateFilePathOverride, nil
@@ -236,6 +244,12 @@ func newViewerID() string {
 // v5 payloads are migrated to v6 in-memory before validation runs; older
 // versions are not migrated and yield a default-data fallback.
 func Load() StateData {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	return loadLocked()
+}
+
+func loadLocked() StateData {
 	path, err := stateFilePath()
 	if err != nil {
 		log.Printf("state: cannot determine state path: %v", err)
@@ -475,8 +489,15 @@ func clampRatio(r float64) float64 {
 	return r
 }
 
-// Save atomically writes the given state to state.json.
+// Save atomically writes the given state to state.json. Serialized with Load /
+// SaveWindow via stateMu so concurrent writers do not lose each other's updates.
 func Save(s StateData) error {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	return saveLocked(s)
+}
+
+func saveLocked(s StateData) error {
 	path, err := stateFilePath()
 	if err != nil {
 		return err
@@ -509,8 +530,14 @@ func Save(s StateData) error {
 // Load never fails (it falls back to DefaultData), so a SaveWindow into a
 // missing / corrupt state file seeds defaults + the given window — acceptable
 // because the frontend rewrites the full state during the next session.
+//
+// The load+save is done under stateMu so it is atomic with respect to a
+// concurrent frontend Save (the read-modify-write cannot interleave and lose
+// the other writer's update).
 func SaveWindow(w WindowState) error {
-	s := Load()
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	s := loadLocked()
 	s.Window = w
-	return Save(s)
+	return saveLocked(s)
 }
