@@ -846,3 +846,62 @@ func TestLoadState_LegacyV6_NoUntaggedOnlyField_DefaultsToFalse(t *testing.T) {
 		t.Errorf("legacy v6 filter Tags not preserved: %v", s.List.Filter.Tags)
 	}
 }
+
+// TestSaveWindow_PreservesOtherFields verifies the Go OnBeforeClose window
+// capture (issue #129) overwrites only the window field and leaves the
+// frontend-owned viewer / list / topTab state intact.
+func TestSaveWindow_PreservesOtherFields(t *testing.T) {
+	setStateFile(t)
+
+	seed := DefaultData()
+	seed.TopTab = "viewer"
+	seed.List.FolderPath = "/tmp/photos"
+	seed.Viewers[0].Name = "マイビューア"
+	if err := Save(seed); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+
+	// A secondary-monitor placement (negative X) that the buggy runtime restore
+	// could not reach.
+	want := WindowState{X: -1920, Y: 100, Width: 1280, Height: 1024, Maximized: true}
+	if err := SaveWindow(want); err != nil {
+		t.Fatalf("SaveWindow: %v", err)
+	}
+
+	got := Load()
+	if got.Window != want {
+		t.Errorf("window: got %+v, want %+v", got.Window, want)
+	}
+	if got.TopTab != "viewer" {
+		t.Errorf("topTab clobbered: got %q, want viewer", got.TopTab)
+	}
+	if got.List.FolderPath != "/tmp/photos" {
+		t.Errorf("list folderPath clobbered: got %q", got.List.FolderPath)
+	}
+	if got.Viewers[0].Name != "マイビューア" {
+		t.Errorf("viewer name clobbered: got %q", got.Viewers[0].Name)
+	}
+}
+
+// TestSaveWindow_MissingFile_SeedsDefaults documents the accepted behaviour
+// when SaveWindow runs before any full state has been persisted: Load falls
+// back to defaults, so the file is seeded with defaults plus the given window.
+func TestSaveWindow_MissingFile_SeedsDefaults(t *testing.T) {
+	setStateFile(t)
+
+	want := WindowState{X: 10, Y: 20, Width: 800, Height: 600}
+	if err := SaveWindow(want); err != nil {
+		t.Fatalf("SaveWindow: %v", err)
+	}
+
+	got := Load()
+	if got.Window != want {
+		t.Errorf("window: got %+v, want %+v", got.Window, want)
+	}
+	if got.Version != StateSchemaVersion {
+		t.Errorf("version: got %d, want %d", got.Version, StateSchemaVersion)
+	}
+	if len(got.Viewers) != 1 {
+		t.Errorf("expected one default viewer seeded, got %d", len(got.Viewers))
+	}
+}

@@ -27,9 +27,9 @@ const StateSchemaVersion = 6
 // range (= 8 viewers selectable by digit). MaxNameLen is rune-counted, not
 // byte-counted, so Japanese names get 32 characters' worth of latitude.
 const (
-	maxViewers          = 8
-	maxNameLen          = 32
-	defaultViewerName   = "ビューア 1"
+	maxViewers           = 8
+	maxNameLen           = 32
+	defaultViewerName    = "ビューア 1"
 	defaultViewerNamePat = "ビューア %d"
 )
 
@@ -480,4 +480,24 @@ func Save(s StateData) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// SaveWindow persists only the window geometry, preserving every other field of
+// the most recently saved session state.
+//
+// It re-reads the current state via Load (same validation / default-fallback as
+// startup), overwrites the Window field, and atomically rewrites the file. This
+// lets a writer that knows only the window geometry — the Go OnBeforeClose Win32
+// placement capture (issue #129) — update the window without clobbering the
+// viewer / layout / list state that the frontend owns. On Windows the frontend
+// deliberately stops polling geometry, so Go is the sole writer of the window
+// field there (see docs/spec-window-placement.md §8 sync model).
+//
+// Load never fails (it falls back to DefaultData), so a SaveWindow into a
+// missing / corrupt state file seeds defaults + the given window — acceptable
+// because the frontend rewrites the full state during the next session.
+func SaveWindow(w WindowState) error {
+	s := Load()
+	s.Window = w
+	return Save(s)
 }
