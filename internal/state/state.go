@@ -81,9 +81,14 @@ type ListFilterState struct {
 // Width / Height / X / Y are the *non-maximized* (restore) geometry. Maximized
 // is a separate bool so the user can close the app while maximized and have it
 // reopen maximized while still retaining the size to fall back to when they
-// hit the restore button. The polling in App.tsx intentionally freezes
-// width/height/x/y when WindowIsMaximised is true so we don't accidentally
-// overwrite the restore geometry with the maximized size.
+// hit the restore button.
+//
+// Who writes this field depends on the platform (see docs/spec-window-placement.md
+// §8 sync model): on Windows the Go OnBeforeClose Win32 capture (issue #129) is
+// the sole writer — GetWindowPlacement's rcNormalPosition is the restore rect
+// even while maximized. On non-Windows the frontend polling owns it and freezes
+// width/height/x/y while WindowIsMaximised is true so a maximized-at-close
+// session does not overwrite the restore geometry with the maximized size (#86).
 type WindowState struct {
 	Width     int  `json:"width"`
 	Height    int  `json:"height"`

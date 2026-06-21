@@ -19,8 +19,10 @@ export type ListPersist = {
 };
 
 export type SessionInput = {
-  // `maximized` rides alongside the restore geometry (see WindowState doc on
-  // the Go side / App.tsx polling effect for the freeze-while-maximized rule).
+  // `maximized` rides alongside the restore geometry. On non-Windows the
+  // useWindowGeometryPolling effect supplies these via the freeze-while-maximized
+  // rule (#86); on Windows the field is frozen at the loaded value here and Go
+  // owns it (issue #129 — see the Go WindowState doc / spec-window-placement §8).
   window: {
     width: number;
     height: number;
