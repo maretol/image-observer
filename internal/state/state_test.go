@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -844,5 +845,118 @@ func TestLoadState_LegacyV6_NoUntaggedOnlyField_DefaultsToFalse(t *testing.T) {
 	// The rest of the filter must survive untouched (no version bump / fallback).
 	if len(s.List.Filter.Tags) != 1 || s.List.Filter.Tags[0] != "iroha" {
 		t.Errorf("legacy v6 filter Tags not preserved: %v", s.List.Filter.Tags)
+	}
+}
+
+// TestSaveWindow_PreservesOtherFields verifies the Go OnBeforeClose window
+// capture (issue #129) overwrites only the window field and leaves the
+// frontend-owned viewer / list / topTab state intact.
+func TestSaveWindow_PreservesOtherFields(t *testing.T) {
+	setStateFile(t)
+
+	seed := DefaultData()
+	seed.TopTab = "viewer"
+	seed.List.FolderPath = "/tmp/photos"
+	seed.Viewers[0].Name = "マイビューア"
+	if err := Save(seed); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+
+	// A secondary-monitor placement (negative X) that the buggy runtime restore
+	// could not reach.
+	want := WindowState{X: -1920, Y: 100, Width: 1280, Height: 1024, Maximized: true}
+	if err := SaveWindow(want); err != nil {
+		t.Fatalf("SaveWindow: %v", err)
+	}
+
+	got := Load()
+	if got.Window != want {
+		t.Errorf("window: got %+v, want %+v", got.Window, want)
+	}
+	if got.TopTab != "viewer" {
+		t.Errorf("topTab clobbered: got %q, want viewer", got.TopTab)
+	}
+	if got.List.FolderPath != "/tmp/photos" {
+		t.Errorf("list folderPath clobbered: got %q", got.List.FolderPath)
+	}
+	if got.Viewers[0].Name != "マイビューア" {
+		t.Errorf("viewer name clobbered: got %q", got.Viewers[0].Name)
+	}
+}
+
+// TestSaveWindow_MissingFile_SeedsDefaults documents the accepted behaviour
+// when SaveWindow runs before any full state has been persisted: Load falls
+// back to defaults, so the file is seeded with defaults plus the given window.
+func TestSaveWindow_MissingFile_SeedsDefaults(t *testing.T) {
+	setStateFile(t)
+
+	want := WindowState{X: 10, Y: 20, Width: 800, Height: 600}
+	if err := SaveWindow(want); err != nil {
+		t.Fatalf("SaveWindow: %v", err)
+	}
+
+	got := Load()
+	if got.Window != want {
+		t.Errorf("window: got %+v, want %+v", got.Window, want)
+	}
+	if got.Version != StateSchemaVersion {
+		t.Errorf("version: got %d, want %d", got.Version, StateSchemaVersion)
+	}
+	if len(got.Viewers) != 1 {
+		t.Errorf("expected one default viewer seeded, got %d", len(got.Viewers))
+	}
+}
+
+// TestSaveWindow_ConcurrentWithSave hammers Save and SaveWindow from many
+// goroutines at once (mirrors the OnBeforeClose SaveWindow racing the frontend
+// SaveState binding, issue #129 review). stateMu must serialize them: the file
+// stays valid (never a torn / lost-update read) and `go test -race` reports no
+// data race on the read-modify-write path.
+func TestSaveWindow_ConcurrentWithSave(t *testing.T) {
+	p := setStateFile(t)
+	if err := Save(DefaultData()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := range 50 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			// t.Errorf is safe to call concurrently; wg.Wait() below joins all
+			// goroutines before the test returns, so no late report is lost.
+			if err := Save(DefaultData()); err != nil {
+				t.Errorf("Save: %v", err)
+			}
+		}()
+		go func(i int) {
+			defer wg.Done()
+			if err := SaveWindow(WindowState{Width: 1024, Height: 768, X: i, Y: i}); err != nil {
+				t.Errorf("SaveWindow: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// Read the file raw rather than via Load: Load would mask a torn write by
+	// silently falling back to DefaultData (which trivially satisfies the
+	// assertions below). The bytes themselves must be valid JSON — proof that
+	// stateMu serialized the atomic writes and none interleaved mid-rename.
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read state file: %v", err)
+	}
+	var parsed StateData
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("state file is not valid JSON after concurrent writes: %v\n%s", err, raw)
+	}
+	if parsed.Version != StateSchemaVersion {
+		t.Errorf("version: got %d, want %d", parsed.Version, StateSchemaVersion)
+	}
+	if len(parsed.Viewers) == 0 {
+		t.Errorf("viewers empty after concurrent writes: %+v", parsed)
+	}
+	if parsed.Window.Width != 1024 || parsed.Window.Height != 768 {
+		t.Errorf("window size clobbered: got %+v", parsed.Window)
 	}
 }

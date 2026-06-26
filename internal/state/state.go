@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -27,9 +28,9 @@ const StateSchemaVersion = 6
 // range (= 8 viewers selectable by digit). MaxNameLen is rune-counted, not
 // byte-counted, so Japanese names get 32 characters' worth of latitude.
 const (
-	maxViewers          = 8
-	maxNameLen          = 32
-	defaultViewerName   = "ビューア 1"
+	maxViewers           = 8
+	maxNameLen           = 32
+	defaultViewerName    = "ビューア 1"
 	defaultViewerNamePat = "ビューア %d"
 )
 
@@ -81,9 +82,14 @@ type ListFilterState struct {
 // Width / Height / X / Y are the *non-maximized* (restore) geometry. Maximized
 // is a separate bool so the user can close the app while maximized and have it
 // reopen maximized while still retaining the size to fall back to when they
-// hit the restore button. The polling in App.tsx intentionally freezes
-// width/height/x/y when WindowIsMaximised is true so we don't accidentally
-// overwrite the restore geometry with the maximized size.
+// hit the restore button.
+//
+// Who writes this field depends on the platform (see docs/spec-window-placement.md
+// §8 sync model): on Windows the Go OnBeforeClose Win32 capture (issue #129) is
+// the sole writer — GetWindowPlacement's rcNormalPosition is the restore rect
+// even while maximized. On non-Windows the frontend polling owns it and freezes
+// width/height/x/y while WindowIsMaximised is true so a maximized-at-close
+// session does not overwrite the restore geometry with the maximized size (#86).
 type WindowState struct {
 	Width     int  `json:"width"`
 	Height    int  `json:"height"`
@@ -91,6 +97,14 @@ type WindowState struct {
 	Y         int  `json:"y"`
 	Maximized bool `json:"maximized,omitempty"`
 }
+
+// WindowPositionUnset is the X/Y sentinel DefaultData seeds when no window has
+// ever been positioned. Restore paths must skip applying the position only when
+// *both* X and Y equal this sentinel; real negative coordinates (a secondary
+// monitor left of / above the primary) are valid and must be restorable
+// (issue #129 review). Single-sourced here so DefaultData and main.go cannot
+// drift (AGENTS.md D-2).
+const WindowPositionUnset = -1
 
 // LayoutState is the persisted form of one viewer's BSP layout tree. ActiveID
 // points to the leaf currently focused (mirrors `Layout.activeId` in TS).
@@ -133,6 +147,13 @@ const (
 // stateFilePathOverride lets tests redirect away from the user config dir.
 var stateFilePathOverride string
 
+// stateMu serializes state.json read-modify-write across goroutines. The Wails
+// SaveState binding (frontend, debounced) and the OnBeforeClose SaveWindow
+// capture (#129) run on independent goroutines; without this lock SaveWindow's
+// Load→Save could lose a concurrent Save's viewer/list update (or vice versa).
+// All exported Load/Save/SaveWindow take it; the *Locked helpers assume it held.
+var stateMu sync.Mutex
+
 func stateFilePath() (string, error) {
 	if stateFilePathOverride != "" {
 		return stateFilePathOverride, nil
@@ -150,7 +171,7 @@ func DefaultData() StateData {
 	v := defaultViewer()
 	return StateData{
 		Version:        StateSchemaVersion,
-		Window:         WindowState{Width: 1024, Height: 768, X: -1, Y: -1},
+		Window:         WindowState{Width: 1024, Height: 768, X: WindowPositionUnset, Y: WindowPositionUnset},
 		Viewers:        []ViewerState{v},
 		ActiveViewerID: v.ID,
 		TopTab:         "list",
@@ -223,6 +244,12 @@ func newViewerID() string {
 // v5 payloads are migrated to v6 in-memory before validation runs; older
 // versions are not migrated and yield a default-data fallback.
 func Load() StateData {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	return loadLocked()
+}
+
+func loadLocked() StateData {
 	path, err := stateFilePath()
 	if err != nil {
 		log.Printf("state: cannot determine state path: %v", err)
@@ -462,8 +489,15 @@ func clampRatio(r float64) float64 {
 	return r
 }
 
-// Save atomically writes the given state to state.json.
+// Save atomically writes the given state to state.json. Serialized with Load /
+// SaveWindow via stateMu so concurrent writers do not lose each other's updates.
 func Save(s StateData) error {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	return saveLocked(s)
+}
+
+func saveLocked(s StateData) error {
 	path, err := stateFilePath()
 	if err != nil {
 		return err
@@ -480,4 +514,30 @@ func Save(s StateData) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// SaveWindow persists only the window geometry, preserving every other field of
+// the most recently saved session state.
+//
+// It re-reads the current state via Load (same validation / default-fallback as
+// startup), overwrites the Window field, and atomically rewrites the file. This
+// lets a writer that knows only the window geometry — the Go OnBeforeClose Win32
+// placement capture (issue #129) — update the window without clobbering the
+// viewer / layout / list state that the frontend owns. On Windows the frontend
+// deliberately stops polling geometry, so Go is the sole writer of the window
+// field there (see docs/spec-window-placement.md §8 sync model).
+//
+// Load never fails (it falls back to DefaultData), so a SaveWindow into a
+// missing / corrupt state file seeds defaults + the given window — acceptable
+// because the frontend rewrites the full state during the next session.
+//
+// The load+save is done under stateMu so it is atomic with respect to a
+// concurrent frontend Save (the read-modify-write cannot interleave and lose
+// the other writer's update).
+func SaveWindow(w WindowState) error {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	s := loadLocked()
+	s.Window = w
+	return saveLocked(s)
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  Environment,
   WindowGetPosition,
   WindowGetSize,
   WindowIsMaximised,
@@ -14,6 +15,13 @@ import { logger } from "../../shared/utils/logger";
 // maximized is true we deliberately do not overwrite them, so closing the
 // window while maximized still leaves a sensible restore size for the next
 // launch (issue #86).
+//
+// On Windows the polling is disabled: the native Win32 WINDOWPLACEMENT path
+// (issue #129) owns the window field there — main.go captures it at
+// OnBeforeClose and state.SaveWindow is the sole writer — so polling
+// WindowGetPosition would feed a competing value into useSessionSave and
+// clobber the Go-owned geometry. On Windows the hook just returns the loaded
+// initial value, frozen. See docs/spec-window-placement.md §8 (sync model).
 //
 // The returned object is the value held in useState, so `Object.is` identity
 // is stable across polls that observe no change. Consumers (typically
@@ -30,6 +38,10 @@ export type WindowGeometryState = {
 const POLL_INTERVAL_MS = 2000;
 const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 768;
+// Environment() can transiently fail right after startup; retry a few times so
+// one early failure does not permanently disable the #86 polling on non-Windows.
+const ENV_RETRY_LIMIT = 5;
+const ENV_RETRY_DELAY_MS = 300;
 
 type Opts = {
   initial?: state.WindowState | null;
@@ -117,16 +129,72 @@ export function useWindowGeometryPolling(
       }
     };
     const onResize = () => update();
-    window.addEventListener("resize", onResize);
-    const interval = window.setInterval(update, POLL_INTERVAL_MS);
-    logger.debug("session", "window pos/size polling started", {
-      intervalMs: POLL_INTERVAL_MS,
+    let interval: number | undefined;
+    let resizeListening = false;
+    let retryTimer: number | undefined;
+    const startPolling = () => {
+      window.addEventListener("resize", onResize);
+      resizeListening = true;
+      interval = window.setInterval(update, POLL_INTERVAL_MS);
+      logger.debug("session", "window pos/size polling started", {
+        intervalMs: POLL_INTERVAL_MS,
+      });
+      update();
+    };
+
+    // Resolve the platform before deciding whether to poll. Environment() can
+    // transiently fail right after startup (the same reason update() above is
+    // wrapped in try/catch), so retry it a few times — a single early failure
+    // must not permanently disable the #86 polling on non-Windows. Once the
+    // retry budget is exhausted we fall back to "do not poll", which is also the
+    // safe default for Windows (never clobber the Go-owned geometry, issue #129).
+    let lastEnvError: unknown;
+    const resolvePlatform = async (): Promise<string | null> => {
+      for (let attempt = 0; attempt < ENV_RETRY_LIMIT; attempt++) {
+        try {
+          return (await Environment()).platform;
+        } catch (err) {
+          lastEnvError = err;
+          if (cancelled || attempt === ENV_RETRY_LIMIT - 1) return null;
+          await new Promise<void>((resolve) => {
+            retryTimer = window.setTimeout(resolve, ENV_RETRY_DELAY_MS);
+          });
+          if (cancelled) return null;
+        }
+      }
+      return null;
+    };
+
+    resolvePlatform().then((platform) => {
+      if (cancelled) return;
+      if (platform === null) {
+        // Log the most recent failure reason so a non-Windows dev can tell why
+        // polling never started instead of seeing silent inaction.
+        logger.debug(
+          "session",
+          "window geometry polling skipped (Environment() unresolved after retries)",
+          { err: String(lastEnvError) },
+        );
+        return;
+      }
+      // Windows owns the window geometry natively (issue #129, see the
+      // file-level comment), so polling must not run there. Every other
+      // platform keeps the #86 polling.
+      if (platform === "windows") {
+        logger.debug(
+          "session",
+          "window geometry polling disabled on windows (issue #129)",
+        );
+        return;
+      }
+      startPolling();
     });
-    update();
+
     return () => {
       cancelled = true;
-      window.removeEventListener("resize", onResize);
-      window.clearInterval(interval);
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      if (resizeListening) window.removeEventListener("resize", onResize);
+      if (interval !== undefined) window.clearInterval(interval);
     };
   }, []);
 
