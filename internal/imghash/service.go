@@ -25,7 +25,7 @@ type DuplicatePair struct {
 
 // DuplicateReport は 1 フォルダ分の検出結果 (spec §4.1)。
 type DuplicateReport struct {
-	FolderPath string          `json:"folderPath"`
+	FolderPath string `json:"folderPath"`
 	// Pairs は (FileA, FileB) 辞書順で決定的に並ぶ。
 	Pairs []DuplicatePair `json:"pairs"`
 	// Skipped は判定対象外 (AVIF / 非対応拡張子 / stat・decode 失敗)。バッジは出さない。
