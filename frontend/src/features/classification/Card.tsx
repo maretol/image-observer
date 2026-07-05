@@ -1,6 +1,7 @@
 import type { classification } from "../../../wailsjs/go/models";
 import { EditIcon } from "../../shared/icons/EditIcon";
 import { ThumbErrorIcon } from "../../shared/icons/ThumbErrorIcon";
+import { WarnIcon } from "../../shared/icons/WarnIcon";
 import { extractTags } from "./filters";
 import { readableTextColor, tagBadgeClass, tagColor } from "./colors";
 import { useGridThumbnail } from "./useGridThumbnail";
@@ -23,6 +24,9 @@ export type CardProps = {
   onExtendSelectionTo: () => void;
   // card 上どこでも右クリック。親が (clientX, clientY) に単一 CardContextMenu を出す (#47)。
   onRequestContextMenu: (clientX: number, clientY: number) => void;
+  // ダブり候補 (#136)。true でサムネ左下に ⚠ バッジ。クリックで確認モーダル。
+  duplicateWarn: boolean;
+  onShowDuplicates: () => void;
 };
 
 export function Card({
@@ -37,6 +41,8 @@ export function Card({
   onToggleSelect,
   onExtendSelectionTo,
   onRequestContextMenu,
+  duplicateWarn,
+  onShowDuplicates,
 }: CardProps) {
   const fullPath = `${folderPath}/${entry.filename}`;
   const { ref, url, state } = useGridThumbnail(fullPath);
@@ -142,6 +148,22 @@ export function Card({
         >
           <EditIcon size={12} />
         </button>
+        {duplicateWarn ? (
+          // 警告なので hover-reveal (cls-card-edit) にせず常時表示。四隅は checkbox (左上) /
+          // 編集 (右上) / .cls-card-preview 予約 (右下) が使うため左下 (#136 §5.1)。
+          <button
+            type="button"
+            className="cls-card-dup-warn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowDuplicates();
+            }}
+            title="ダブりの可能性があります (クリックで確認)"
+            aria-label="ダブりの可能性があります (クリックで確認)"
+          >
+            <WarnIcon size={12} />
+          </button>
+        ) : null}
       </div>
       <div className="cls-card-info">
         <div className="cls-card-filename" title={entry.filename}>

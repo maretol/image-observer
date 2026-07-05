@@ -19,6 +19,8 @@ import { CardContextMenu } from "./CardContextMenu";
 import { ClassificationHeader } from "./ClassificationHeader";
 import { ConfidenceSegment } from "./ConfidenceSegment";
 import { DirectoryGroup } from "./DirectoryGroup";
+import { DuplicatePairsModal } from "./DuplicatePairsModal";
+import { duplicateFileSet, pairsForFile } from "./duplicateBadge";
 import { SampleModal, type SampleModalOpenSource } from "./SampleModal";
 import { SearchBox } from "./SearchBox";
 import type { SaveContext } from "./useClassificationEdit";
@@ -99,6 +101,8 @@ export function ClassificationView({
     resolveMergeSkip,
     resolveMergeCancel,
     deleteOne,
+    duplicatePairs,
+    dismissDuplicatePair,
   } = state;
 
   const allEntries = loadResult?.entries ?? [];
@@ -313,6 +317,44 @@ export function ClassificationView({
     },
     [],
   );
+
+  // ダブり候補 (#136)。バッジ対象集合と確認モーダルの起点 filename。folder 変更で閉じるのは
+  // 他のモーダル / メニューと同じ。dismiss で pairs が減り起点のペアが尽きたら自動で閉じる
+  // (spec §5.3)。
+  const duplicateSet = useMemo(
+    () => duplicateFileSet(duplicatePairs ?? []),
+    [duplicatePairs],
+  );
+  const [dupModalFilename, setDupModalFilename] = useState<string | null>(
+    null,
+  );
+  useLayoutEffect(() => {
+    setDupModalFilename(null);
+  }, [folderPath]);
+  const dupModalPairs = useMemo(
+    () =>
+      dupModalFilename === null
+        ? []
+        : pairsForFile(duplicatePairs ?? [], dupModalFilename),
+    [duplicatePairs, dupModalFilename],
+  );
+  useEffect(() => {
+    if (dupModalFilename !== null && dupModalPairs.length === 0) {
+      setDupModalFilename(null);
+    }
+  }, [dupModalFilename, dupModalPairs]);
+
+  const onShowDuplicates = useCallback((filename: string) => {
+    setDupModalFilename(filename);
+  }, []);
+
+  // ctx メニュー経由 — 先にメニューを閉じてから開く (他の項目と同じ流儀)。
+  const onContextMenuShowDuplicates = useCallback(() => {
+    if (!cardCtxMenu) return;
+    const filename = cardCtxMenu.filename;
+    setCardCtxMenu(null);
+    setDupModalFilename(filename);
+  }, [cardCtxMenu]);
 
   // bulk アクションの宛先 viewer (#11)。spec §5.6.2 で既定は常に「直近アクティブな viewer」なので、
   // 親の変更報告のたび activeViewerId に同期し明示選択も上書きする。閉じられた viewer が選択中なら
@@ -568,6 +610,8 @@ export function ClassificationView({
                 extendSelectionTo(filename, displayedOrder)
               }
               onRequestCardContextMenu={onRequestCardContextMenu}
+              duplicateSet={duplicateSet}
+              onShowDuplicates={onShowDuplicates}
             />
           ))}
         </div>
@@ -607,6 +651,16 @@ export function ClassificationView({
         onSave={handleSave}
         autoSave={editAutoSave}
       />
+      <DuplicatePairsModal
+        open={dupModalFilename !== null}
+        folderPath={folderPath}
+        filename={dupModalFilename}
+        pairs={dupModalPairs}
+        onDismissPair={(fileA, fileB) => {
+          void dismissDuplicatePair(fileA, fileB);
+        }}
+        onClose={() => setDupModalFilename(null)}
+      />
       {cardCtxMenu ? (
         <CardContextMenu
           // filename / x / y 変更で re-mount し、メニューの useState 位置 seed を再評価する。
@@ -624,6 +678,11 @@ export function ClassificationView({
           bulkDstViewerId={bulkDstViewerId}
           onOpenInViewer={onContextMenuOpenInViewer}
           onCopy={onContextMenuCopy}
+          onShowDuplicates={
+            duplicateSet.has(cardCtxMenu.filename)
+              ? onContextMenuShowDuplicates
+              : null
+          }
           onEnterSelectionMode={onContextMenuEnterSelectionMode}
           onDelete={onContextMenuDelete}
           onOpenManyInTabs={onContextMenuOpenManyInTabs}

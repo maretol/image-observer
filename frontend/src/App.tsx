@@ -96,6 +96,8 @@ function AppInner({ initialState }: AppInnerProps) {
     initialList: initialState?.list ?? null,
     confirm,
     watchMode: settings.data?.watchMode,
+    duplicateDetectMode: settings.data?.duplicateDetectMode,
+    duplicateThreshold: settings.data?.duplicateThreshold,
   });
 
   // 一覧タブのスクロール位置 (#40)。"viewer" 切替で ClassificationView が unmount

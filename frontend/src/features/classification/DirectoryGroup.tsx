@@ -19,6 +19,9 @@ export type DirectoryGroupProps = {
   onExtendSelectionTo: (filename: string) => void;
   // Card 右クリック → ClassificationView が (x, y) に CardContextMenu を出す (#47 §5.1)。
   onRequestCardContextMenu: (filename: string, x: number, y: number) => void;
+  // ダブり候補 filename の集合 (#136)。含まれる Card に ⚠ バッジ。
+  duplicateSet: ReadonlySet<string>;
+  onShowDuplicates: (filename: string) => void;
 };
 
 export function DirectoryGroup({
@@ -36,6 +39,8 @@ export function DirectoryGroup({
   onToggleSelect,
   onExtendSelectionTo,
   onRequestCardContextMenu,
+  duplicateSet,
+  onShowDuplicates,
 }: DirectoryGroupProps) {
   const filteredCount = group.entries.length;
   return (
@@ -72,6 +77,8 @@ export function DirectoryGroup({
               onRequestContextMenu={(x, y) =>
                 onRequestCardContextMenu(entry.filename, x, y)
               }
+              duplicateWarn={duplicateSet.has(entry.filename)}
+              onShowDuplicates={() => onShowDuplicates(entry.filename)}
             />
           ))}
         </div>
