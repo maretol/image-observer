@@ -9,9 +9,7 @@ export type ConflictDialogProps = {
   onCancel: () => void;
 };
 
-// Three-button dialog used when an external process modified
-// _classification.json while the user was editing in-app.
-// See spec-classification.md §4.10.
+// アプリ内編集中に外部プロセスが _classification.json を変更したときの 3 ボタン dialog (spec-classification.md §4.10)。
 export function ConflictDialog({
   open,
   onReload,

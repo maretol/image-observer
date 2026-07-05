@@ -29,12 +29,9 @@ type Props = {
   toast: ToastFn;
 };
 
-// useClassificationMerge owns the child-sidecar merge prompt: either merge
-// the discovered child sidecars into the parent folder, skip and create an
-// empty sidecar, or cancel and leave the prompt closed. Mutation IPCs
-// (MergeChildSidecars / CreateEmptyClassification) bump requestGenRef
-// after the disk write so any in-flight watcher / silent-recheck Load is
-// stale-discarded (AGENTS.md §H-8, PR #75 10th thread A pattern).
+// 子 sidecar マージ prompt。mutation IPC (MergeChildSidecars / CreateEmptyClassification)
+// はディスク書き込み後に requestGenRef を bump し、in-flight の watcher / silent-recheck
+// Load を stale 破棄する (AGENTS.md §H-8)。
 export function useClassificationMerge(props: Props): UseClassificationMergeReturn {
   const {
     mergePrompt,
@@ -59,15 +56,12 @@ export function useClassificationMerge(props: Props): UseClassificationMergeRetu
       logger.error("classification", "merge failed", { folder: target, err: msg });
       return;
     }
-    // Folder check before bumping gen + dispatching the reload — without
-    // this the OLD folder's reload would bump generation (stale-ifying
-    // the NEW folder's in-flight Load) and then commit OLD folder data
-    // to NEW folder state (PR #75 14th, thread C).
+    // gen bump + reload の前に folder チェック — これが無いと旧 folder の reload が
+    // gen を bump して新 folder の in-flight Load を stale 化し、旧 folder データを
+    // 新 folder state に commit してしまう。
     if (folderRef.current !== target) return;
-    // Bump gen after the merge write so an in-flight watcher / silent
-    // recheck Load that started before the merge is stale-discarded —
-    // same flicker-prevention rule as saveEdit / deleteOne (PR #75 10th
-    // thread A pattern; preemptive sweep).
+    // merge 書き込み後に gen bump し、merge 前に始まった in-flight watcher /
+    // silent-recheck Load を stale 破棄する (saveEdit / deleteOne と同じ flicker 防止)。
     ++requestGenRef.current;
     await loadInternal(target);
   }, [
@@ -91,7 +85,7 @@ export function useClassificationMerge(props: Props): UseClassificationMergeRetu
       return;
     }
     if (folderRef.current !== target) return;
-    // Same gen-bump rule as resolveMergeMerge above.
+    // resolveMergeMerge と同じ gen-bump ルール。
     ++requestGenRef.current;
     await loadInternal(target);
   }, [
@@ -105,7 +99,7 @@ export function useClassificationMerge(props: Props): UseClassificationMergeRetu
 
   const resolveMergeCancel = useCallback(() => {
     setMergePrompt({ open: false, preview: null, folderPath: "" });
-    // Folder selection persists; the user can hit "再読み込み" or pick again.
+    // フォルダ選択は残す (ユーザーは "再読み込み" か再選択できる)。
   }, [setMergePrompt]);
 
   return { resolveMergeMerge, resolveMergeSkip, resolveMergeCancel };

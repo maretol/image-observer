@@ -1,10 +1,8 @@
 import { classification } from "../../../wailsjs/go/models";
 import { extractTags, serializeTags } from "./filters";
 
-// Baseline is the (filename, folder, confidence, note) tuple SampleEditPane
-// remembers as "the entry state the local form was last reconciled against".
-// extracted from SampleEditPane (#110 B) so the per-field sync decision — the
-// part that took PR #109 rounds 2 and 5 to get right — can be unit-tested.
+// SampleEditPane が「local フォームを最後に突き合わせた entry 状態」として覚える
+// tuple。per-field sync 判定を unit-test できるよう SampleEditPane から分離 (#110 B)。
 export type Baseline = {
   filename: string | null;
   folder: string;
@@ -18,19 +16,17 @@ export type LocalEdit = {
   note: string;
 };
 
-// Per-field "touched since the last baseline observation" flags.
+// 直近 baseline 観測以降、フィールドが touch されたかのフラグ。
 export type Touched = {
   tags: boolean;
   confidence: boolean;
   note: boolean;
 };
 
-// Baseline used when no entry is active. Frozen so no importer can mutate the
-// shared instance (AGENTS B-1: never expose a mutable reference type — a stray
-// `EMPTY_BASELINE.folder = ...` would poison every later baseline reset that
-// assigns it to lastBaselineRef). The touched flags, which *are* mutated
-// field-by-field, deliberately have no shared constant: the reset sites in
-// SampleEditPane always allocate a fresh literal.
+// entry 非アクティブ時の baseline。freeze するのは共有インスタンスの mutation を防ぐ
+// ため (AGENTS B-1 — `EMPTY_BASELINE.folder = ...` が後続の baseline reset を汚す)。
+// touched フラグは field ごとに mutate するのであえて共有定数を持たず、reset 側で
+// 毎回新リテラルを確保する。
 export const EMPTY_BASELINE: Readonly<Baseline> = Object.freeze({
   filename: null,
   folder: "",
@@ -48,13 +44,11 @@ export function baselineOf(entry: classification.Entry): Baseline {
 }
 
 export type BaselineSyncAction =
-  // filename change = an entirely different entry (prev/next nav). Reset all
-  // three local fields to the new baseline; the previous local edits do not
-  // belong to this entry (nav is blocked while dirty, #93 §5.4).
+  // filename 変化 = 別 entry (prev/next nav)。3 フィールドを新 baseline に reset
+  // する (前の local 編集はこの entry のものではない; dirty 中 nav は禁止, #93 §5.4)。
   | { kind: "resetAll" }
-  // Same entry, baseline patched (auto-save success touching a subset of
-  // fields, or an external sidecar edit). Sync a field only if it still
-  // matches the *previous* baseline AND the user hasn't touched it since.
+  // 同一 entry で baseline が patch された (subset を触る auto-save 成功、または
+  // 外部 sidecar 編集)。前 baseline と一致し、かつ未 touch のフィールドだけ sync。
   | {
       kind: "perField";
       syncTags: boolean;
@@ -62,20 +56,15 @@ export type BaselineSyncAction =
       syncNote: boolean;
     };
 
-// computeBaselineSync decides how the local form should react to a new (non-
-// null) `entry` baseline observation. The caller handles `entry === null`
-// (clear to EMPTY_BASELINE) separately so this stays a total function over a
-// present entry.
+// 新しい (非 null) entry baseline 観測に local フォームがどう反応すべきか決める。
+// entry === null (EMPTY_BASELINE へクリア) は呼び出し側が別扱いする。
 //
-// Per-field rule (round 2 + round 5): overwrite a local field with the new
-// baseline only when BOTH
-//   (a) the local value still equals the *previous* baseline value, and
-//   (b) the user has not touched that field since the last baseline.
-// (a) alone is the round 2 fix (partial save must not clobber an untouched
-// field that genuinely differs). (b) adds the round 5 fix: a "touched then
-// reverted" field whose value coincidentally equals the previous baseline must
-// stay local — without (b) a post-save baseline patch would silently discard
-// the user's revert.
+// per-field ルール: local フィールドを新 baseline で上書きするのは
+//   (a) local 値が *前の* baseline 値とまだ一致し、かつ
+//   (b) 直近 baseline 以降そのフィールドを touch していない
+// の両方が成り立つときだけ。(a) だけだと partial save が「本当に差分のある未 touch
+// フィールド」を潰す。(b) が無いと「touch して元に戻した」値がたまたま前 baseline と
+// 一致するとき、save 後の baseline patch がユーザーの revert を握り潰す。
 export function computeBaselineSync(
   prev: Baseline,
   entry: classification.Entry,

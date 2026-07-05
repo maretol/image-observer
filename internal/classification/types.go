@@ -1,7 +1,5 @@
-// Package classification implements the sidecar-based image classification
-// metadata layer used by the "list" tab. The canonical store is JSON
-// (_classification.json); CSV is read once for migration and never written.
-// See docs/spec-classification.md.
+// Package classification は "list" タブが使う sidecar ベースの画像分類メタデータ層。正の store は
+// JSON (_classification.json)。CSV は移行のため一度読むだけで書かない (docs/spec-classification.md)。
 package classification
 
 import (
@@ -18,8 +16,7 @@ const (
 	TempJSON    = "_classification.json.tmp"
 )
 
-// Confidence is the level of certainty assigned to a classification.
-// Empty string means "not set".
+// Confidence は分類の確信度。空文字は「未設定」。
 type Confidence string
 
 const (
@@ -29,7 +26,7 @@ const (
 	ConfNone Confidence = ""
 )
 
-// Entry is one row of classification metadata for a single image file.
+// Entry は 1 画像ファイル分の分類メタデータ 1 行。
 type Entry struct {
 	Filename   string     `json:"filename"`
 	Folder     string     `json:"folder"`
@@ -37,24 +34,19 @@ type Entry struct {
 	Note       string     `json:"note"`
 }
 
-// Classification is the on-disk shape of _classification.json.
+// Classification は _classification.json の on-disk 形。
 type Classification struct {
 	Version   int       `json:"version"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	Entries   []Entry   `json:"entries"`
 }
 
-// LoadResult is the merged view returned to the frontend: sidecar entries
-// reconciled against the actual files on disk.
+// LoadResult は frontend へ返す merged view: sidecar entry を disk 上の実ファイルと突き合わせる。
 //
-// - Entries: visible in the grid. Files present on disk but absent from the
-//   sidecar are appended with empty Folder/Confidence/Note.
-// - Orphans: in the sidecar but no file on disk. Hidden from the grid but
-//   preserved when saving so the user does not lose intentional records.
-// - Mtime: UnixMilli of _classification.json at load time. Used by the
-//   frontend to pass back to Save/UpdateEntry for conflict detection.
-//   Zero when no JSON file exists.
-//   (Milliseconds — not nanoseconds — to fit JS Number safe-integer range.)
+//   - Entries: grid に表示。disk にあり sidecar に無いファイルは Folder/Confidence/Note 空で追加。
+//   - Orphans: sidecar にあり disk に無い。grid では隠すが save 時に保持し、意図的な記録を失わせない。
+//   - Mtime: load 時の _classification.json の UnixMilli。frontend が Save/UpdateEntry に戻し conflict
+//     検出に使う。JSON 無しなら 0。ミリ秒 (ナノ秒でない) なのは JS Number の safe-integer に収めるため。
 type LoadResult struct {
 	FolderPath string  `json:"folderPath"`
 	Entries    []Entry `json:"entries"`
@@ -64,31 +56,24 @@ type LoadResult struct {
 	Mtime      int64   `json:"mtime"`
 }
 
-// SaveOutput is returned from Save/UpdateEntry/CreateEmpty so the frontend can
-// update its tracked mtime after a successful write.
+// SaveOutput は Save/UpdateEntry/CreateEmpty が返す。frontend が書き込み成功後に追跡 mtime を更新する用。
 type SaveOutput struct {
 	Mtime int64 `json:"mtime"`
 }
 
-// ErrConflict signals that the on-disk JSON was modified externally between
-// the caller's last Load and the Save attempt.
+// ErrConflict は caller の直近 Load から Save までに on-disk JSON が外部変更されたことを示す。
 var ErrConflict = errors.New("classification: external modification detected")
 
-// ErrAlreadyExists signals that CreateEmpty would overwrite an existing sidecar.
+// ErrAlreadyExists は CreateEmpty が既存 sidecar を上書きしてしまうことを示す。
 var ErrAlreadyExists = errors.New("classification: sidecar already exists")
 
-// ErrDuplicate signals duplicate filename entries in the sidecar.
+// ErrDuplicate は sidecar 内の filename 重複を示す。
 var ErrDuplicate = errors.New("classification: duplicate filename in entries")
 
-// ChildSidecarSummary describes one child-folder sidecar that is a candidate
-// for the initial parent-merge flow (Phase 4 v1.2).
-//
-// Subfolder is the relative POSIX path from the parent (e.g. "child1" or
-// "child1/sub"). Source is "json" or "csv". EntryCount is the total number of
-// rows in the child sidecar. NonEmptyCount is the count of rows that carry
-// real data (Folder, Confidence, or Note set) — the prompt is only shown when
-// NonEmptyCount > 0 across all candidates so users are not bothered by
-// blank-template sidecars.
+// ChildSidecarSummary は親 merge フロー (Phase 4 v1.2) の候補となる 1 子フォルダ sidecar。
+// Subfolder は親からの相対 POSIX path ("child1" / "child1/sub")。NonEmptyCount は実データ
+// (Folder/Confidence/Note のいずれか) を持つ行数 — 全候補で NonEmptyCount > 0 のときだけ prompt を
+// 出し、空テンプレ sidecar で user を煩わせない。
 type ChildSidecarSummary struct {
 	Subfolder     string `json:"subfolder"`
 	Source        string `json:"source"`
@@ -96,15 +81,13 @@ type ChildSidecarSummary struct {
 	NonEmptyCount int    `json:"nonEmptyCount"`
 }
 
-// MergePreview is the result of scanning a parent folder for child sidecars.
-// HasNonTrivial == true means at least one ChildSidecarSummary contributes
-// data worth merging; the frontend uses this to decide whether to show the
-// merge prompt. When false, the caller should proceed to the normal
-// "create empty sidecar?" flow.
+// MergePreview は親フォルダの子 sidecar 走査結果。HasNonTrivial == true は merge に値するデータを
+// 持つ子が 1 つ以上あること (frontend が merge prompt を出すか判断)。false なら通常の
+// "create empty sidecar?" フローへ。
 type MergePreview struct {
-	FolderPath     string                `json:"folderPath"`
-	Children       []ChildSidecarSummary `json:"children"`
-	HasNonTrivial  bool                  `json:"hasNonTrivial"`
-	TotalEntries   int                   `json:"totalEntries"`
-	TotalNonEmpty  int                   `json:"totalNonEmpty"`
+	FolderPath    string                `json:"folderPath"`
+	Children      []ChildSidecarSummary `json:"children"`
+	HasNonTrivial bool                  `json:"hasNonTrivial"`
+	TotalEntries  int                   `json:"totalEntries"`
+	TotalNonEmpty int                   `json:"totalNonEmpty"`
 }

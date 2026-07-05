@@ -1,6 +1,5 @@
-// Barrel for the viewer flex-layout primitives (Phase 5 /
-// spec-viewer-flexlayout.md). Importers should keep using `./layout` —
-// internals are organized into per-concern modules under this directory.
+// viewer flex-layout プリミティブの barrel (Phase 5 / spec-viewer-flexlayout.md)。import 側は
+// ./layout を使い続ける — 内部は concern 別モジュールに分割。
 
 export type {
   Edge,

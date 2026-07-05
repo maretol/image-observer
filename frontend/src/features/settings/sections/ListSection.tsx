@@ -42,10 +42,8 @@ const WATCH_MODES: Array<{
   },
 ];
 
-// #105: edit-pane save mode. The Segment uses number-coded values because the
-// underlying setting is a bool (`editAutoSave`); 1/0 just route through the
-// generic Segment<T extends string | number> wrapper. boolean directly would
-// require widening Segment's type parameter, which we don't want for one site.
+// edit-pane save モード (#105)。設定は bool (editAutoSave) だが、汎用 Segment<string|number> に
+// 通すため 1/0 で符号化する (boolean 直だと 1 箇所のために Segment の型 param を広げる必要がある)。
 const EDIT_AUTO_SAVE_MODES: Array<{
   value: number;
   label: string;

@@ -7,10 +7,8 @@ type Props = {
   tabIndex: number;
   x: number;
   y: number;
-  // Multi-viewer (#11). Every viewer except the current one is rendered as a
-  // top-level "{name} へ移動" menuitem (#57 — flattened from the previous
-  // submenu). With only 1 viewer the entries (and the preceding divider) are
-  // suppressed.
+  // 現在以外の各 viewer を top-level の "{name} へ移動" menuitem として出す (#11, #57)。
+  // viewer が 1 個なら entry (と前の divider) を抑止。
   viewers: Viewer[];
   currentViewerId: string;
   onClose: () => void;
@@ -20,12 +18,8 @@ type Props = {
   onMoveToViewer: (dstViewerId: string) => void;
 };
 
-// Approximate width / per-item heights used as the *initial* position seed.
-// The actual viewport-edge clamp runs in useLayoutEffect after DOM commit but
-// before paint using getBoundingClientRect(), so this seed only needs to be
-// close enough to avoid a visible jump — it doesn't have to perfectly match
-// the rendered size (which depends on browser default line-height / font
-// metrics).
+// *初期* 位置 seed 用の概算幅 / item 高さ。実際の画面端クランプは DOM commit 後 paint 前の
+// useLayoutEffect で getBoundingClientRect により再計算するので、初回描画で飛ばない程度でよい。
 const APPROX_MENU_WIDTH = 320;
 const CTX_ITEM_HEIGHT = 24; // padding 5+5 + line-height ≈ 14
 const CTX_DIVIDER_HEIGHT = 9; // height 1 + margin 4+4
@@ -48,13 +42,11 @@ export function TabContextMenu({
   const hasMoveItems = otherViewers.length > 0;
 
   useEffect(() => {
-    // Defer registration so we don't catch the same click that opened the menu.
+    // メニューを開いた click を拾わないよう登録を defer。
     const t = window.setTimeout(() => {
       const onDocPointerDown = (e: PointerEvent) => {
-        // We listen on pointerdown rather than mousedown because ImageView's
-        // pan-drag handler calls preventDefault() on pointerdown, which
-        // suppresses the synthesized mousedown — clicking the image area
-        // would otherwise leave this menu open (#56).
+        // mousedown でなく pointerdown を聞く: ImageView の pan-drag が pointerdown を
+        // preventDefault して合成 mousedown を抑止するので、画像領域クリックでもメニューを閉じる (#56)。
         const target = e.target as Element | null;
         if (target && target.closest(".tab-context-menu-root")) return;
         onClose();
@@ -64,7 +56,7 @@ export function TabContextMenu({
       };
       document.addEventListener("pointerdown", onDocPointerDown);
       document.addEventListener("keydown", onKey);
-      // Move focus into the menu so keyboard users land on the first item.
+      // keyboard ユーザーが先頭 item に着くよう menu へ focus を移す。
       itemsRef.current[0]?.focus();
       cleanup = () => {
         document.removeEventListener("pointerdown", onDocPointerDown);
@@ -78,7 +70,7 @@ export function TabContextMenu({
     };
   }, [onClose]);
 
-  // Vertical arrow-key navigation between menu items. Wraps top↔bottom.
+  // menu item 間の矢印キー縦移動。上↔下で wrap。
   const focusItem = (idx: number) => {
     const items = itemsRef.current.filter(
       (el): el is HTMLButtonElement => el !== null,
@@ -110,13 +102,8 @@ export function TabContextMenu({
     }
   };
 
-  // Initial position seed from a per-item-count estimate. 4 fixed items
-  // (コピー / 閉じる / split×2), 2 dividers always (after コピー + before split),
-  // + (1 divider + N viewer items) when other viewers exist. This is only the
-  // *seed* — useLayoutEffect below measures the actual rendered size and
-  // re-clamps before paint, so this estimate doesn't have to perfectly match
-  // the rendered size (which depends on browser default line-height / font
-  // metrics).
+  // item 数からの初期位置 seed。固定 4 item (コピー / 閉じる / split×2) + 常に 2 divider、
+  // + 他 viewer があれば (1 divider + N viewer item)。seed のみ — 下の useLayoutEffect が実測して再クランプ。
   const itemCount = 4 + otherViewers.length;
   const dividerCount = 2 + (hasMoveItems ? 1 : 0);
   const approxHeight =
@@ -126,16 +113,13 @@ export function TabContextMenu({
 
   const rootRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>(() => ({
-    // Math.max(0, ...) floors the result so a window narrower / shorter than
-    // the menu doesn't push it off-screen into negative coordinates.
+    // Math.max(0, ...) で下限を切り、メニューより狭い/低い窓でも負座標に押し出されないように。
     left: Math.max(0, Math.min(x, window.innerWidth - APPROX_MENU_WIDTH)),
     top: Math.max(0, Math.min(y, window.innerHeight - approxHeight)),
   }));
 
-  // After first DOM commit (before paint), measure the actual rendered size
-  // and re-clamp so OS / browser / font differences in line-height can't push
-  // the menu off-screen. Only adjust when the menu actually overflows —
-  // shrinking the gap to the cursor would be jarring.
+  // 初回 commit 後 (paint 前) に実サイズを測って再クランプ (line-height 差で画面外に出ないように)。
+  // 実際に overflow したときだけ調整 (カーソルとの隙間を詰めると不自然)。
   useLayoutEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -151,18 +135,15 @@ export function TabContextMenu({
     if (newLeft !== pos.left || newTop !== pos.top) {
       setPos({ left: newLeft, top: newTop });
     }
-    // Mount-only: pos / x / y are captured by closure; re-clamping on a later
-    // setState would just no-op since the second render lands inside the
-    // viewport. Re-running this on every render would also flicker.
+    // mount のみ: pos / x / y は closure 捕捉。2 回目の render は viewport 内に着くので再クランプは
+    // no-op、毎 render 実行は flicker する。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Build menuitems in a single flat array so itemsRef indices stay stable
-  // regardless of how many other viewers exist. Order: コピー → 閉じる →
-  // split×2 → (divider) → viewer×N. コピー is index 0 so it gets the initial
-  // focus. Each index is captured in render (not inside the ref callback) so
-  // itemsRef positions don't drift if React re-invokes the ref callback during
-  // StrictMode double-invoke / unmount-null cleanup.
+  // menuitem を単一 flat 配列で作り、他 viewer 数によらず itemsRef index を安定させる。
+  // 順: コピー → 閉じる → split×2 → (divider) → viewer×N。コピーが index 0 で初期 focus。
+  // 各 index を render 時に確定するのは StrictMode の二重呼び出し / unmount-null cleanup で slot が
+  // ずれないため。
   let refIdx = 0;
   const copyIdx = refIdx++;
   const closeIdx = refIdx++;

@@ -1,9 +1,6 @@
-// Multi-viewer pure-function layer (#11). A `ViewerSet` holds N viewers, each
-// with its own BSP `Layout` (spec-viewer-flexlayout.md). All mutations here
-// are pure: take a ViewerSet, return a new one. The React glue lives in
-// useViewerSet.ts, which applies the layout-level pure functions from
-// layout/ to the active viewer's `Layout` and exposes both viewer-level
-// (add/close/rename) and panel-level (open/split/move/...) operations.
+// マルチビューアの純関数層 (#11)。ViewerSet は N 個の viewer を持ち、各々が独自の BSP
+// Layout を持つ (spec-viewer-flexlayout.md)。ここの mutation は全て純粋 (ViewerSet を受け
+// 新しいものを返す)。React 配線は useViewerSet.ts。
 
 import {
   appendOrFocusInActive,
@@ -22,10 +19,8 @@ import type { state } from "../../../wailsjs/go/models";
 
 // ─── Constants ───────────────────────────────────────────────────────
 
-// MAX_VIEWERS = 8 ties to the `Ctrl+Shift+2..9` keybinding range.
-// MAX_NAME_LEN is rune-counted, not byte-counted (Japanese names get full
-// 32-char latitude). DEFAULT_NAME_PREFIX trails with a space because the
-// suggestion appends an integer ("ビューア 1").
+// MAX_VIEWERS = 8 は Ctrl+Shift+2..9 のキーバインド範囲に対応。MAX_NAME_LEN は byte でなく
+// rune 数 (日本語名も 32 文字使える)。DEFAULT_NAME_PREFIX が空白で終わるのは末尾に整数を足すため ("ビューア 1")。
 export const MAX_VIEWERS = 8;
 export const MAX_NAME_LEN = 32;
 export const DEFAULT_NAME_PREFIX = "ビューア ";
@@ -33,14 +28,14 @@ export const DEFAULT_NAME_PREFIX = "ビューア ";
 // ─── Types ───────────────────────────────────────────────────────────
 
 export type Viewer = {
-  id: string; // crypto.randomUUID at construction
+  id: string; // 構築時に crypto.randomUUID
   name: string;
   layout: Layout;
 };
 
 export type ViewerSet = {
-  viewers: Viewer[]; // length: 1..MAX_VIEWERS (invariant)
-  activeViewerId: string; // must be one of viewers[*].id
+  viewers: Viewer[]; // 長さ 1..MAX_VIEWERS (不変条件)
+  activeViewerId: string; // viewers[*].id のいずれか
 };
 
 // ─── ID generation ───────────────────────────────────────────────────
@@ -49,8 +44,7 @@ export function newViewerId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
-  // Test environments without globalThis.crypto fall through to a non-RFC
-  // but unique-enough id. Real browsers always take the crypto branch.
+  // globalThis.crypto 無しのテスト環境は非 RFC だが十分ユニークな id に fallback。
   return `vt-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
@@ -65,10 +59,8 @@ export function initialViewerSet(): ViewerSet {
   return { viewers: [v], activeViewerId: v.id };
 }
 
-// hydrateInitialViewerSet rebuilds the ViewerSet from persisted state. Empty
-// / missing viewers fall back to a fresh single-viewer set. Go-side
-// validateState already enforces the 1+-viewer invariant, but we guard the
-// hydration here too in case of first-launch before any save.
+// 永続 state から ViewerSet を復元。viewers が空/欠落なら単一 viewer に fallback。Go 側
+// validateState が 1+ viewer 不変条件を保証するが、初回起動 (save 前) 用にここでも guard。
 export function hydrateInitialViewerSet(
   initialState: state.StateData | null,
 ): ViewerSet {
@@ -88,8 +80,7 @@ export function hydrateInitialViewerSet(
   return { viewers, activeViewerId };
 }
 
-// countLeafTabs sums all tab counts across a viewer's BSP layout. Used by the
-// close-confirm prompt to tell the user how much they will lose.
+// viewer の BSP layout 全体の tab 数合計。close-confirm で喪失量を伝えるのに使う。
 export function countLeafTabs(v: Viewer): number {
   let n = 0;
   walk(v.layout.root);
@@ -111,15 +102,12 @@ export function findViewer(set: ViewerSet, id: string): Viewer | null {
 }
 
 export function activeViewer(set: ViewerSet): Viewer {
-  // Invariant guarantees 1+ viewers and a valid activeViewerId. Fall through
-  // to viewers[0] only as a last-resort guard so callers never get null.
+  // 不変条件が 1+ viewer と有効な activeViewerId を保証。viewers[0] は最終防御 (呼び出し側が null を受けないため)。
   return findViewer(set, set.activeViewerId) ?? set.viewers[0];
 }
 
-// suggestViewerName picks the smallest positive integer N not currently used
-// in any name matching `${DEFAULT_NAME_PREFIX}<digits>$` and returns
-// `${DEFAULT_NAME_PREFIX}${N}`. Custom user names are ignored — they don't
-// occupy a slot in the auto-numbering sequence.
+// `${DEFAULT_NAME_PREFIX}<数字>` にマッチする名前で未使用の最小正整数 N を選ぶ。
+// ユーザーのカスタム名は無視 (自動採番の枠を占めない)。
 export function suggestViewerName(existingNames: string[]): string {
   const pattern = new RegExp(
     `^${DEFAULT_NAME_PREFIX.replace(/\s/g, "\\s")}(\\d+)$`,
@@ -135,12 +123,10 @@ export function suggestViewerName(existingNames: string[]): string {
   return `${DEFAULT_NAME_PREFIX}${n}`;
 }
 
-// sanitizeName trims, drops control chars, and rune-truncates to MAX_NAME_LEN.
-// Returns null when the result would be empty (caller decides whether to
-// reject or fall back).
+// trim + 制御文字除去 + MAX_NAME_LEN で rune 切り詰め。結果が空なら null (呼び出し側が拒否/fallback を決める)。
 export function sanitizeName(raw: string): string | null {
   const trimmed = raw.trim();
-  // Drop ASCII control + DEL — viewer names are single-line.
+  // ASCII 制御 + DEL を除去 — viewer 名は 1 行。
   // eslint-disable-next-line no-control-regex
   const cleaned = trimmed.replace(/[\x00-\x1f\x7f]/g, "");
   if (cleaned === "") return null;
@@ -151,9 +137,8 @@ export function sanitizeName(raw: string): string | null {
 
 // ─── Mutations (pure) ────────────────────────────────────────────────
 
-// addViewer creates a fresh viewer (auto-named via suggestViewerName) and
-// switches active to it. Returns the same set when at MAX_VIEWERS — caller
-// is responsible for surfacing the limit (toast/log).
+// 新 viewer を作り (suggestViewerName で自動命名) active を切り替える。MAX_VIEWERS 到達時は
+// 同じ set を返す — 上限の通知 (toast/log) は呼び出し側の責任。
 export function addViewer(set: ViewerSet): ViewerSet {
   if (set.viewers.length >= MAX_VIEWERS) return set;
   const name = suggestViewerName(set.viewers.map((v) => v.name));
@@ -164,11 +149,8 @@ export function addViewer(set: ViewerSet): ViewerSet {
   };
 }
 
-// closeViewer removes a viewer and re-resolves activeViewerId by:
-//  1. the viewer at the same index in the new array (= "the next viewer")
-//  2. else the previous index
-//  3. else the first viewer
-// Refuses to close the last remaining viewer.
+// viewer を除去し activeViewerId を再解決: 新配列の同 index (= 次の viewer) → 1 つ前 → 先頭。
+// 最後の 1 個は閉じない。
 export function closeViewer(set: ViewerSet, id: string): ViewerSet {
   if (set.viewers.length <= 1) return set;
   const idx = set.viewers.findIndex((v) => v.id === id);
@@ -188,8 +170,7 @@ export function closeViewer(set: ViewerSet, id: string): ViewerSet {
   return { viewers: next, activeViewerId: activeId };
 }
 
-// renameViewer applies sanitizeName. Empty-after-trim → no-op (caller shows
-// validation feedback). activeViewerId is never touched.
+// sanitizeName を適用。trim 後空なら no-op (呼び出し側が検証 feedback)。activeViewerId は不変。
 export function renameViewer(
   set: ViewerSet,
   id: string,
@@ -212,13 +193,9 @@ export function setActiveViewer(set: ViewerSet, id: string): ViewerSet {
   return { ...set, activeViewerId: id };
 }
 
-// moveViewer reorders one viewer within the viewers array. `toIdx` is the
-// **insert position** before splice (0..len), so `toIdx === fromIdx` and
-// `toIdx === fromIdx + 1` are both no-ops (visual position unchanged).
-// activeViewerId is preserved verbatim — reordering does not change which
-// viewer is active.
-//
-// Out-of-range fromIdx is rejected (no-op). toIdx is clamped to [0, len].
+// viewer を配列内で並べ替える。toIdx は splice 前の **挿入位置** (0..len) なので、
+// toIdx === fromIdx と toIdx === fromIdx + 1 は共に no-op (視覚位置不変)。activeViewerId は不変。
+// 範囲外 fromIdx は no-op、toIdx は [0, len] に clamp。
 export function moveViewer(
   set: ViewerSet,
   fromIdx: number,
@@ -230,17 +207,15 @@ export function moveViewer(
   if (dst === fromIdx || dst === fromIdx + 1) return set;
   const next = set.viewers.slice();
   const [picked] = next.splice(fromIdx, 1);
-  // After splice removal, indices > fromIdx shift left by 1. The visual-
-  // intent "insert before index dst" maps to `dst > fromIdx ? dst - 1 : dst`
-  // in the post-removal array.
+  // splice 除去後、fromIdx より後ろの index は 1 左シフト。視覚的な「dst の前に挿入」は
+  // 除去後配列で dst > fromIdx ? dst - 1 : dst になる。
   const insertAt = dst > fromIdx ? dst - 1 : dst;
   next.splice(insertAt, 0, picked);
   return { ...set, viewers: next };
 }
 
-// updateViewerLayout swaps in a new Layout for a single viewer. This is the
-// generic bridge used by useViewerSet to apply existing `layout/` mutations
-// (split/move/reorder/etc.) to one viewer at a time.
+// 1 viewer の Layout を差し替える。useViewerSet が layout/ の mutation を 1 viewer ずつ
+// 適用する汎用 bridge。
 export function updateViewerLayout(
   set: ViewerSet,
   id: string,
@@ -257,19 +232,13 @@ export function updateViewerLayout(
 
 // ─── Cross-viewer tab move (§4.6 of spec) ────────────────────────────
 
-// moveTabAcrossViewers transplants one tab from src viewer's specified leaf
-// into dst viewer's currently-active leaf. State preserved: zoom / pan /
-// initialized / imageWidth / imageHeight (just the Tab object passed by
-// reference). Behavior:
-//
-//   - src/dst must both exist; same-viewer move is a no-op (use the
-//     in-viewer move helpers instead).
-//   - dst leaf dedupes by path: if the path already exists, focus moves to
-//     the existing tab and src's tab is still removed.
-//   - src leaf may collapse (sibling promotion) when the move empties it.
-//   - activeViewerId is NOT changed — the user keeps working in src.
-//
-// Caller (useViewerSet) is responsible for the post-move toast + logging.
+// src viewer の指定 leaf の 1 tab を dst viewer の現アクティブ leaf へ移植する。zoom/pan 等の
+// Tab 状態は参照渡しで保たれる。挙動:
+//   - src/dst 両方が必要。同一 viewer 移動は no-op (in-viewer helper を使う)。
+//   - dst leaf は path で dedupe: 既存なら既存 tab へ focus し src の tab は除去される。
+//   - 移動で src leaf が空になると collapse (兄弟昇格) しうる。
+//   - activeViewerId は変えない — ユーザーは src で作業を続ける。
+// 移動後の toast + logging は呼び出し側 (useViewerSet) の責任。
 export function moveTabAcrossViewers(
   set: ViewerSet,
   srcViewerId: string,
@@ -290,7 +259,7 @@ export function moveTabAcrossViewers(
   const dstLeaf = findLeaf(dstViewer.layout.root, dstViewer.layout.activeId);
   if (!dstLeaf) return set;
 
-  // Build new dst leaf: dedupe-by-path or append.
+  // 新 dst leaf: path dedupe か append。
   let nextDstLeaf: LeafNode;
   const existing = dstLeaf.tabs.findIndex((t) => t.path === tab.path);
   if (existing >= 0) {
@@ -306,7 +275,7 @@ export function moveTabAcrossViewers(
   const dstRoot = replaceNode(dstViewer.layout.root, dstLeaf.id, nextDstLeaf);
   const nextDstLayout: Layout = { root: dstRoot, activeId: dstLeaf.id };
 
-  // Build new src leaf: tab removed; possibly collapse if empty.
+  // 新 src leaf: tab 除去、空なら collapse。
   const srcTabs = srcLeaf.tabs.filter((_, i) => i !== srcIdx);
   const nextSrcLeaf: LeafNode = {
     ...srcLeaf,
@@ -321,21 +290,20 @@ export function moveTabAcrossViewers(
   if (nextSrcLeaf.tabs.length === 0) {
     srcRoot = collapseEmptyLeaf(srcRoot, nextSrcLeaf.id);
   }
-  // Resolve src's activeId: if it pointed at the now-empty leaf and the leaf
-  // got collapsed (or merged), fall back to the first remaining leaf.
+  // src の activeId 解決: 空になった leaf を指しており collapse/merge されたら先頭 leaf に fallback。
   let srcActiveId = srcViewer.layout.activeId;
   if (
     nextSrcLeaf.tabs.length === 0 &&
     srcViewer.layout.activeId === srcLeaf.id &&
     !findLeaf(srcRoot, srcLeaf.id)
   ) {
-    // findLeaf returns null when the leaf was collapsed away; pick first leaf.
+    // collapse で消えた leaf は findLeaf が null を返す。先頭 leaf を選ぶ。
     const firstLeaf = pickFirstLeafId(srcRoot);
     if (firstLeaf) srcActiveId = firstLeaf;
   }
   const nextSrcLayout: Layout = { root: srcRoot, activeId: srcActiveId };
 
-  // Patch both viewers in one pass.
+  // 両 viewer を 1 パスで patch。
   const viewers = set.viewers.map((v) => {
     if (v.id === srcViewerId) return { ...v, layout: nextSrcLayout };
     if (v.id === dstViewerId) return { ...v, layout: nextDstLayout };
@@ -344,9 +312,8 @@ export function moveTabAcrossViewers(
   return { ...set, viewers };
 }
 
-// pickFirstLeafId — local helper for activeId fallback after a collapse.
-// Avoids importing enumerateLeaves from layout/ (which would allocate
-// the full leaf list when we only need the first one).
+// collapse 後の activeId fallback 用 local helper。enumerateLeaves の import を避ける
+// (先頭 1 個で足りるのに全 leaf list を確保するため)。
 function pickFirstLeafId(node: LayoutNode): string | null {
   if (node.kind === "leaf") return node.id;
   return pickFirstLeafId(node.a) ?? pickFirstLeafId(node.b);
@@ -354,10 +321,8 @@ function pickFirstLeafId(node: LayoutNode): string | null {
 
 // ─── Open-in-specific-viewer thin wrappers ───────────────────────────
 
-// These compose with appendOrFocusInActive so the existing (single-viewer)
-// open path is reused unchanged. Caller (useViewerSet) is expected to wrap
-// these with pre-flight checks (dimensions, error toasts) — they only do
-// the layout transform.
+// appendOrFocusInActive と合成し既存の単一 viewer open 経路をそのまま再利用する。
+// pre-flight チェック (寸法 / error toast) は呼び出し側 (useViewerSet) がラップする。
 
 export function openPathInViewer(
   set: ViewerSet,
@@ -370,8 +335,8 @@ export function openPathInViewer(
   return updateViewerLayout(set, viewerId, next);
 }
 
-// makeNewTab is exported so useViewerSet can construct Tab objects for bulk
-// open-as-split flows (which need a fresh Tab to feed splitWithNewLeaf).
+// bulk open-as-split フロー (splitWithNewLeaf に渡す fresh Tab が要る) 用に useViewerSet が
+// Tab を作れるよう export。
 export function makeNewTab(path: string): Tab {
   return newTab(path);
 }

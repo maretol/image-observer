@@ -1,7 +1,6 @@
-// High-level Layout operations: tab movement (move / reorder / append /
-// close), split creation, leaf activation, and small per-tab/split state
-// patches. All pure functions returning a new Layout (or SplitResult for
-// operations that may refuse due to MAX_PANELS).
+// 高レベル Layout 操作: tab 移動 (move / reorder / append / close) / split 作成 / leaf
+// アクティブ化 / tab・split の小さな patch。全て新 Layout を返す純関数 (MAX_PANELS で拒否
+// しうる操作は SplitResult)。
 
 import type {
   Edge,
@@ -28,8 +27,8 @@ export type SplitResult = { layout: Layout; ok: boolean; reason?: string };
 
 // ─── Tab movement ────────────────────────────────────────────────────
 
-// Move a tab into another leaf. If srcLeafId === dstLeafId we delegate to
-// reorderTabInLeaf. Otherwise the src leaf may collapse if it had only one tab.
+// tab を別 leaf へ移動。src===dst なら reorderTabInLeaf に委譲。別 leaf で src が 1 tab だけ
+// だった場合 collapse しうる。
 export function moveTabIntoLeaf(
   layout: Layout,
   srcLeafId: string,
@@ -50,7 +49,7 @@ export function moveTabIntoLeaf(
 
   const tab = src.tabs[srcIdx];
 
-  // Update dst: dedupe by path, otherwise insert.
+  // dst 更新: path dedupe、無ければ挿入。
   const existing = dst.tabs.findIndex((t) => t.path === tab.path);
   let newDst: LeafNode;
   if (existing >= 0) {
@@ -62,7 +61,7 @@ export function moveTabIntoLeaf(
     newDst = { ...dst, tabs: newTabs, activeIndex: insertAt };
   }
 
-  // Update src: remove the tab.
+  // src 更新: tab を除去。
   const newSrcTabs = src.tabs.filter((_, i) => i !== srcIdx);
   const newSrc: LeafNode = {
     ...src,
@@ -108,9 +107,8 @@ export function reorderTabInLeaf(
 
 // ─── Splits ──────────────────────────────────────────────────────────
 
-// Split a destination leaf and move a tab into the new sibling. If src and
-// dst are the same leaf and src has only one tab, the operation is a no-op
-// (would create an empty src). If countLeaves >= MAX_PANELS, returns ok:false.
+// dst leaf を分割し tab を新しい兄弟へ移す。src===dst かつ src が 1 tab だけなら no-op
+// (空 src ができる)。countLeaves >= MAX_PANELS なら ok:false。
 export function splitTabIntoEdge(
   layout: Layout,
   srcLeafId: string,
@@ -137,12 +135,11 @@ export function splitTabIntoEdge(
     edge === "top" || edge === "bottom" ? "row" : "col";
   const newLeafFirst = edge === "top" || edge === "left";
 
-  // Build the new leaf carrying the moved tab.
+  // 移動 tab を持つ新 leaf を作る。
   const movedTab: Tab = { ...tab };
   const newLeaf: LeafNode = leafWithTab(movedTab);
 
-  // Compute the post-move dst leaf (after src may have lost the tab).
-  // Same-leaf case: dst === src; we strip the tab from dst before splitting.
+  // 移動後の dst leaf を計算。same-leaf の場合 dst===src なので split 前に dst から tab を剥がす。
   let newDstLeaf: LeafNode = dst;
   if (srcLeafId === dstLeafId) {
     const newTabs = dst.tabs.filter((_, i) => i !== srcIdx);
@@ -166,11 +163,10 @@ export function splitTabIntoEdge(
     b: newLeafFirst ? newDstLeaf : newLeaf,
   };
 
-  // Replace dst (or its post-strip version) with the new split.
+  // dst (または剥がし後) を新 split で置換。
   let root = replaceNode(layout.root, dst.id, newSplit);
 
-  // Different-leaf case: we still need to remove the tab from src and
-  // possibly collapse src.
+  // 別 leaf の場合: src から tab を除去し、必要なら src を collapse。
   if (srcLeafId !== dstLeafId) {
     const newSrcTabs = src.tabs.filter((_, i) => i !== srcIdx);
     const newSrc: LeafNode = {
@@ -192,9 +188,8 @@ export function splitTabIntoEdge(
   };
 }
 
-// Split dstLeafId on the given edge and place a freshly-constructed tab in
-// the new sibling leaf. Used by bulk "open as split" flows where the tab
-// has not yet existed in any leaf. Returns ok:false if MAX_PANELS is hit.
+// dstLeafId を edge で分割し、新しく作った tab を新兄弟 leaf に置く。bulk "open as split"
+// (tab がまだどの leaf にも無い) で使う。MAX_PANELS 到達なら ok:false。
 export function splitWithNewLeaf(
   layout: Layout,
   dstLeafId: string,
@@ -223,7 +218,7 @@ export function splitWithNewLeaf(
   return { layout: { root, activeId: newLeaf.id }, ok: true };
 }
 
-// "右に分割" / "下に分割" context menu: split the leaf the tab came from.
+// "右に分割" / "下に分割" コンテキストメニュー: tab の元 leaf を分割。
 export function splitFromContextMenu(
   layout: Layout,
   leafId: string,
@@ -255,15 +250,14 @@ export function closeTabInLeaf(
     ),
   };
 
-  // If the closed leaf becomes empty, find its DFS index BEFORE the collapse so
-  // we can reposition activeId near where it was.
+  // 閉じた leaf が空になる場合、collapse の前に DFS index を取り、activeId を元の位置付近に置き直す。
   const prevLeaves = enumerateLeaves(layout.root);
   const prevIdx = prevLeaves.findIndex((l) => l.id === leafId);
 
   let root = replaceNode(layout.root, leaf.id, newLeaf);
   if (newLeaf.tabs.length === 0) root = collapseEmptyLeaf(root, newLeaf.id);
 
-  // activeId update.
+  // activeId 更新。
   let activeId = layout.activeId;
   if (newLeaf.tabs.length === 0 && layout.activeId === leafId) {
     activeId = pickNewActiveId(root, prevIdx);
@@ -271,13 +265,9 @@ export function closeTabInLeaf(
   return { root, activeId };
 }
 
-// closeTabsForPathInLayout removes every tab whose `path === absPath`
-// across all leaves. Used by the image-delete flow (#47) so that a freshly
-// deleted file does not leave dangling tabs that would error on next open.
-// Tabs are closed from highest tabIndex downward within each leaf so that
-// earlier indices in the same leaf stay valid mid-iteration; that order
-// also lets `closeTabInLeaf`'s "leaf became empty" collapse logic run
-// naturally once the last matching tab is removed.
+// 全 leaf から path === absPath の tab を全て除去する。画像削除フロー (#47) 用で、削除済み
+// ファイルの dangling tab (次回 open でエラー) を残さない。各 leaf 内で tabIndex の高い方から
+// 閉じ、iteration 中に前の index が有効に保たれる (最後の一致 tab 除去時に collapse も自然に走る)。
 export function closeTabsForPathInLayout(
   layout: Layout,
   absPath: string,
@@ -291,8 +281,7 @@ export function closeTabsForPathInLayout(
     });
   }
   if (matches.length === 0) return layout;
-  // Higher tabIndex first so removing one doesn't shift the next within the
-  // same leaf. Across leaves the order is irrelevant.
+  // tabIndex の高い方から (同 leaf 内で除去が次をずらさないように)。leaf をまたぐ順序は無関係。
   matches.sort((a, b) => b.tabIndex - a.tabIndex);
   let next = layout;
   for (const m of matches) {
@@ -359,9 +348,8 @@ export function setSplitRatio(
 
 // ─── Append / focus ──────────────────────────────────────────────────
 
-// Open a path in the active leaf. Mirrors Phase 3b openInActive semantics:
-// dedupe within the active leaf only, append otherwise. The caller owns the
-// pixel-size / decode-error pre-flight (kept in useViewerGrid as before).
+// active leaf に path を開く。active leaf 内でのみ dedupe、無ければ append。pixel-size /
+// decode-error の pre-flight は呼び出し側 (useViewerGrid) の責任。
 export function appendOrFocusInActive(
   layout: Layout,
   path: string,

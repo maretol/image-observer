@@ -1,11 +1,8 @@
 import { classification } from "../../../wailsjs/go/models";
 
-// entriesEquivalent: order-sensitive shallow compare of every Entry field
-// the user cares about. Used by the watcher auto-merge handler to detect
-// "the fresh re-Load matches what we already display" so we don't spam the
-// user with toast notifications for our own Save/Delete echoes
-// (PR #75 review thread #3). Service.Load returns entries in a stable
-// (sidecar-order then alphabetical) sequence so ordered comparison is safe.
+// watcher の auto-merge が「再 Load 結果が表示中と同じ」を検出し、自分の Save/Delete
+// echo で toast を出さないため。順序比較が安全なのは Service.Load が安定順
+// (sidecar 順 → alphabetical) を返すから。
 export function entriesEquivalent(
   a: classification.Entry[],
   b: classification.Entry[],

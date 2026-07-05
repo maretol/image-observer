@@ -5,15 +5,12 @@ type Props = {
   dnd: DnDState | null;
 };
 
-// Rendered inside each Panel. Visualizes which zone the dragged tab will
-// land on. The four edges show as thin colored bars; the center as a faint
-// translucent fill.
+// 各 Panel 内に描画。drag 中の tab がどの zone に落ちるかを可視化する (端は細いバー、中央は淡い塗り)。
 export function DropOverlay({ leafId, dnd }: Props) {
   if (!dnd || !dnd.active) return null;
   const isTarget = dnd.hit?.leafId === leafId;
-  // Only show the indicator on the leaf the cursor is actually over, but
-  // keep the overlay element present everywhere so its data-attrs can be
-  // hit-tested.
+  // indicator はカーソルが乗っている leaf だけに出すが、data 属性を hit-test できるよう
+  // overlay 要素自体は全 leaf に残す。
   return (
     <div className="drop-overlay" aria-hidden="true">
       {isTarget && dnd.hit?.kind === "panel-center" && (

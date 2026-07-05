@@ -1,14 +1,7 @@
-// WATCH_MODE_AUTO / WATCH_MODE_OFF mirror Go-side
-// `internal/settings.WatchModeAuto` / `WatchModeOff`. The TS side of the
-// codebase (settings UI segment values, the watcher lifecycle gate in
-// useClassification, etc.) reads from THIS module so a one-sided rename on
-// the TS side trips the local vitest assertion; the Go side keeps its own
-// `WatchModeAuto` / `WatchModeOff` constants and ships a paired Go test
-// (`TestWatchModeValues`) pinning the same literals. The two sides are
-// kept in sync only by these test-pair pinning assertions — Go's `Validate`
-// does NOT read this module — so renaming one side without the other trips
-// CI rather than silently making the settings UI persist a value Validate
-// rejects (AGENTS.md D-1).
+// Go 側 internal/settings.WatchModeAuto / WatchModeOff のミラー。TS 側 (settings UI /
+// useClassification の watcher gate 等) はこのモジュールを読む。両側は test 対の pin 断言
+// だけで同期される (Go の Validate はこのモジュールを読まない) ので、片側だけ rename すると
+// settings UI が Validate に弾かれる値を永続化するのでなく CI が落ちる (AGENTS.md D-1)。
 export const WATCH_MODE_AUTO = "auto" as const;
 export const WATCH_MODE_OFF = "off" as const;
 

@@ -1,20 +1,15 @@
-// Package logging provides a small, dependency-free file logger for both Go
-// and frontend log events. Output is a single rotated file under
-// `os.UserCacheDir()/image-observer/logs/app.log` (Windows: %LOCALAPPDATA%\…).
+// Package logging は Go / frontend 両方の log 用の依存なしファイル logger。出力は
+// os.UserCacheDir()/image-observer/logs/app.log の単一 rotate ファイル。
 //
-// Log lines look like this (tab-separated category↔message):
+// log 行の形 (category↔message は tab 区切り):
 //
 //	2026-05-10T17:30:12.345+09:00 INFO  dnd.start	src=L1 idx=0 path=/img/foo.png
 //	2026-05-10T17:30:13.012+09:00 WARN  dnd.refused	reason=panel-limit panels=16
 //
-// Level resolution (most-specific wins):
-//  1. env var IMAGE_OBSERVER_LOG_LEVEL ("debug"|"info"|"warn"|"error")
-//  2. file <UserConfigDir>/image-observer/log_level.txt with one of the same
-//     tokens
-//  3. default INFO
-//
-// SetLevel() can be called at runtime to override (intended for the future
-// settings UI).
+// level 解決 (最も具体的が勝つ):
+//  1. env var IMAGE_OBSERVER_LOG_LEVEL
+//  2. file <UserConfigDir>/image-observer/log_level.txt
+//  3. 既定 INFO
 package logging
 
 import (
@@ -37,8 +32,7 @@ const (
 	LevelError
 )
 
-// Tunables. The defaults aim for "small enough that grep stays fast, big
-// enough to capture an hour of dragging without rolling".
+// 調整値。既定は「grep が速いくらい小さく、1 時間の drag を rotate せず捕捉できるくらい大きく」を狙う。
 const (
 	maxFileSize int64 = 2 * 1024 * 1024 // 2 MB per file
 	keepBackups       = 2               // app.log + .1 + .2 = 3 files total
@@ -52,9 +46,8 @@ var (
 	closed  = true
 )
 
-// Init opens (and rotates if oversized) the log file, resolves the level, and
-// redirects Go's standard log package to the same file. Safe to call once at
-// startup. Subsequent calls are no-ops.
+// Init は log ファイルを開き (超過なら rotate)、level を解決、Go 標準 log を同ファイルへ redirect する。
+// 起動時 1 回、以降は no-op。
 func Init() error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -74,8 +67,7 @@ func Init() error {
 
 	level = resolveLevelLocked()
 
-	// Rotate up front if the existing file is already over the cap (e.g., the
-	// previous run died before its own rotation point).
+	// 既存ファイルが既に上限超過なら先に rotate (前回 run が rotate 前に死んだ等)。
 	if info, err := os.Stat(logPath); err == nil && info.Size() >= maxFileSize {
 		if err := rotateLocked(); err != nil {
 			return fmt.Errorf("pre-rotate: %w", err)
@@ -89,10 +81,8 @@ func Init() error {
 	file = f
 	closed = false
 
-	// Send Go's std logger here too, so existing log.Printf calls (and Wails
-	// runtime warnings) end up in the same place. Lines from log.Printf keep
-	// Go's default `YYYY/MM/DD HH:MM:SS` prefix; that's tolerable since both
-	// formats are timestamped.
+	// Go 標準 logger もここへ送り log.Printf / Wails runtime warning を同じ場所に集める。
+	// log.Printf 行は Go 既定 prefix のままだが timestamp 付きなので許容。
 	log.SetOutput(lockedWriter{})
 
 	writeLocked(LevelInfo, "app", "logger initialized",
@@ -100,7 +90,7 @@ func Init() error {
 	return nil
 }
 
-// Close flushes and closes the underlying file. Safe to call multiple times.
+// Close はファイルを flush して閉じる。複数回呼んでも安全。
 func Close() error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -111,35 +101,33 @@ func Close() error {
 	err := file.Close()
 	file = nil
 	closed = true
-	// Detach std logger to avoid writes to a closed file.
+	// 閉じたファイルへの書き込みを避けるため std logger を切り離す。
 	log.SetOutput(io.Discard)
 	return err
 }
 
-// SetLevel adjusts the runtime threshold. Calls below the threshold become
-// no-ops. Intended to be wired to a future settings UI.
+// SetLevel は実行時 threshold を調整する。
 func SetLevel(l Level) {
 	mu.Lock()
 	defer mu.Unlock()
 	level = l
 }
 
-// CurrentLevel returns the active threshold. Mostly for diagnostics.
+// CurrentLevel は現在の threshold を返す。
 func CurrentLevel() Level {
 	mu.Lock()
 	defer mu.Unlock()
 	return level
 }
 
-// LogPath returns the absolute path of the active log file. Empty before Init.
+// LogPath は active な log ファイルの絶対 path を返す。Init 前は空。
 func LogPath() string {
 	mu.Lock()
 	defer mu.Unlock()
 	return logPath
 }
 
-// ParseLevel maps a level token (case-insensitive) to a Level. Unknown
-// strings return (LevelInfo, false).
+// ParseLevel は level トークン (大小無視) を Level に対応させる。不明な文字列は (LevelInfo, false)。
 func ParseLevel(s string) (Level, bool) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "debug":
@@ -154,7 +142,7 @@ func ParseLevel(s string) (Level, bool) {
 	return LevelInfo, false
 }
 
-// LevelName returns the canonical 5-character-padded label.
+// LevelName は 5 文字 padding の canonical ラベルを返す。
 func LevelName(l Level) string {
 	switch l {
 	case LevelDebug:
@@ -169,8 +157,7 @@ func LevelName(l Level) string {
 	return "?    "
 }
 
-// Debug / Info / Warn / Error are the public emitters. `kv` is a flat
-// (key, value, key, value, ...) sequence; non-string keys are skipped.
+// Debug / Info / Warn / Error は public emitter。kv は flat な (key, value, ...) 列で non-string key は skip。
 func Debug(category, message string, kv ...any) {
 	emit(LevelDebug, category, message, kv)
 }
@@ -184,7 +171,7 @@ func Error(category, message string, kv ...any) {
 	emit(LevelError, category, message, kv)
 }
 
-// Log dispatches by Level, useful when the level was parsed from a string.
+// Log は Level で dispatch する。
 func Log(l Level, category, message string, kv ...any) {
 	emit(l, category, message, kv)
 }
@@ -197,7 +184,7 @@ func emit(l Level, category, message string, kv []any) {
 	if closed || l < level {
 		return
 	}
-	// Rotate proactively before writing if we're at the size threshold.
+	// size 閾値なら書き込み前に先んじて rotate。
 	if file != nil {
 		if info, err := file.Stat(); err == nil && info.Size() >= maxFileSize {
 			_ = rotateLocked()
@@ -247,9 +234,8 @@ func formatValue(v any) string {
 	return s
 }
 
-// rotateLocked: app.log → app.log.1 → app.log.2 → discard.
-// On Windows, you cannot rename a file that's open for writing, so we close
-// the current file first, then rename, then reopen. Caller holds mu.
+// rotateLocked: app.log → app.log.1 → app.log.2 → discard。Windows は書き込み中ファイルを rename
+// できないので、現ファイルを閉じ → rename → 再オープン。caller が mu を保持。
 func rotateLocked() error {
 	if file != nil {
 		_ = file.Close()
@@ -298,8 +284,7 @@ func resolveLevelLocked() Level {
 	return LevelInfo
 }
 
-// lockedWriter funnels writes from Go's std logger through our mutex so they
-// don't interleave with our own emits to the same file.
+// lockedWriter は Go 標準 logger の書き込みを我々の mutex 経由に通し、同じファイルへの emit と混ざらないように。
 type lockedWriter struct{}
 
 func (lockedWriter) Write(p []byte) (int, error) {
@@ -313,8 +298,7 @@ func (lockedWriter) Write(p []byte) (int, error) {
 
 // ─── test hooks ──────────────────────────────────────────────────────
 
-// resetForTest unwinds Init so a test can drive a fresh logger pointed at a
-// temp directory. Not exported.
+// resetForTest は Init を巻き戻しテストが fresh logger を回せるように。
 func resetForTest() {
 	mu.Lock()
 	defer mu.Unlock()

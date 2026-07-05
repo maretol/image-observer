@@ -11,14 +11,10 @@ export type MergePromptDialogProps = {
   onCancel: () => void;
 };
 
-// MergePromptDialog is shown the first time a parent folder without its own
-// sidecar is opened, when child folders contain non-trivial classification
-// data. The user picks one of three actions:
-//
-//   - merge:  consume children and write a parent sidecar with prefixed paths
-//   - skip:   create an empty parent sidecar; ignore children entirely
-//   - cancel: keep folder selection but make no on-disk change (the user can
-//             revisit this with a manual reload)
+// sidecar を持たない親フォルダを初めて開き、子フォルダに非自明な分類データがあるとき表示。3 択:
+//   - merge:  子を取り込み prefix 付き path で親 sidecar を書く
+//   - skip:   空の親 sidecar を作り子を無視
+//   - cancel: フォルダ選択は残しディスクは変えない (manual reload で再訪可)
 export function MergePromptDialog({
   open,
   preview,
@@ -33,9 +29,8 @@ export function MergePromptDialog({
     <ModalShell
       open={open}
       onClose={onCancel}
-      // Three explicit actions (merge / skip / cancel) — a stray backdrop
-      // click shouldn't be treated as cancel, since it conflates "I didn't
-      // mean to click" with a real decision to ignore the children.
+      // 3 択 (merge / skip / cancel) なので、うっかりの backdrop クリックを cancel 扱いしない
+      // (誤クリックと「子を無視する決定」を混同するため)。
       closeOnBackdrop={false}
       initialFocusRef={mergeRef}
       ariaLabel={t("dialog.merge.aria")}

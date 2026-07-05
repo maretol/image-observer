@@ -20,8 +20,7 @@ import type { Tab } from "./useTabs";
 type Props = {
   layout: Layout;
   wheelMode?: string;
-  // Multi-viewer (#11): identify which viewer this grid belongs to + the
-  // sibling viewers so the tab right-click menu can offer "ビューアへ移動".
+  // tab 右クリックメニューが「ビューアへ移動」を出せるよう、この grid の viewer と兄弟 viewer を渡す (#11)。
   viewers: { id: string; name: string }[];
   currentViewerId: string;
   onActivatePanel: (leafId: string) => void;
@@ -84,9 +83,8 @@ export function ViewerGrid(props: Props) {
     setCtx({ leafId, tabIndex, x: e.clientX, y: e.clientY });
   };
 
-  // Copy the right-clicked tab's image to the clipboard (#127). Resolve the
-  // path from the layout before closing the menu (which clears `ctx`). Fired
-  // from the menu-item onClick so the Clipboard API has a user gesture.
+  // 右クリック tab の画像をクリップボードへコピー (#127)。メニューを閉じる (ctx がクリアされる) 前に
+  // layout から path を解決。Clipboard API の user gesture のため menu-item onClick から発火。
   const onCopy = (leafId: string, tabIndex: number) => {
     const path = findLeaf(props.layout.root, leafId)?.tabs[tabIndex]?.path;
     setCtx(null);
@@ -195,7 +193,7 @@ function RenderNode(props: RenderNodeProps) {
       />
     );
   }
-  // SplitNode: render two children with a draggable splitter between them.
+  // SplitNode: 2 つの子を draggable splitter を挟んで描画。
   const isCol = node.direction === "col";
   const containerStyle: React.CSSProperties = {
     display: "flex",

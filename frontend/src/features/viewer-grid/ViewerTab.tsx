@@ -3,29 +3,21 @@ import { CloseIcon } from "../../shared/icons/CloseIcon";
 import { DATA_VIEWER_TAB } from "./useViewerTabReorder";
 import type { Viewer } from "./viewers";
 
-// ViewerTab — one top-tab chip for a single viewer. Owns the inline rename
-// input (focus + Esc revert / Enter commit) and the pointer plumbing for tab
-// reorder DnD (#50). State lives in the parent: TopTabsBar passes
-// isEditing / isDragSource / anyRenaming as props and forwards activate /
-// commit / cancel / startDrag callbacks.
-//
-// Rename ergonomics + the click/dblclick/close target reconciliation with the
-// list-tab (#53) explain most of the non-obvious branches inline.
+// ViewerTab — 1 viewer 分のトップタブ chip。インライン rename 入力と並べ替え DnD (#50) の
+// pointer 配線を持つ。state は親 (TopTabsBar) が持ち props で渡す。
+// 非自明な分岐の理由 (rename の細部、一覧タブとの click/dblclick/close 当たり判定調整 #53) は
+// インラインコメント参照。
 
 export type ViewerTabProps = {
-  // index is the position of this tab in viewer.viewers — passed to the
-  // reorder hook so it can compute moveViewer's fromIdx (#50).
+  // viewer.viewers 内での位置 — reorder hook が moveViewer の fromIdx を計算するのに渡す (#50)。
   index: number;
   viewer: Viewer;
   isActive: boolean;
   isEditing: boolean;
-  // anyRenaming = true while *any* viewer tab has an open rename input.
-  // We block drag-start on every tab in that state so a sibling drag can't
-  // proceed while the rename editor is still focused (#50).
+  // *どれか* の viewer タブが rename 入力を開いている間 true。その間は全タブで drag 開始を
+  // 止め、rename エディタが focus 中に兄弟タブを drag できないようにする (#50)。
   anyRenaming: boolean;
-  // isDragSource = true while this tab is being dragged. Used to dim the
-  // source (.dragging className) so the user can tell where they grabbed
-  // from while the indicator shows the drop position.
+  // このタブを drag 中 true。source を淡色化 (.dragging) して掴んだ位置を分かるようにする。
   isDragSource: boolean;
   canClose: boolean;
   onActivate: () => void;
@@ -61,18 +53,12 @@ export function ViewerTab({
   // <button>) と同じく「選択中のタブにフォーカスが乗る」状態に揃えるため、
   // wrapper onClick から内側 name button を focus する用の ref。
   const nameButtonRef = useRef<HTMLButtonElement>(null);
-  // Esc cancellation and Enter commit both suppress the blur-commit that
-  // would otherwise fire when isEditing flips false → the input unmounts
-  // while focused → React dispatches blur synchronously on the unmounting
-  // node, calling onCommitRename with the (now-redundant) draft value. The
-  // flag is set in the respective keydown branch before we trigger the
-  // unmount path. (Enter without the suppress works today because the
-  // duplicate call hits useViewerSet.renameViewerCb's silent no-op, but the
-  // symmetry with Esc keeps it robust to downstream changes.)
+  // Esc cancel / Enter commit は、isEditing が false になり input が focus 中に unmount され、
+  // React が unmount ノードに同期 blur を dispatch して onCommitRename を (冗長な) draft 値で
+  // 呼ぶのを抑止する。フラグは各 keydown 分岐で unmount を起こす前に立てる。
   const suppressBlurRef = useRef(false);
 
-  // On entering edit mode, focus + select the input. Run on transitions only
-  // (when isEditing flips true), which is what the dependency array gives us.
+  // 編集モード開始時に input を focus + select。遷移時のみ (isEditing が true になったとき)。
   useEffect(() => {
     if (isEditing) {
       suppressBlurRef.current = false; // reset for the new edit session
@@ -92,8 +78,7 @@ export function ViewerTab({
           maxLength={32}
           onBlur={(e) => {
             if (suppressBlurRef.current) {
-              // Esc cancel or Enter commit already handled this edit
-              // session — swallow the unmount-blur so we don't double up.
+              // Esc cancel / Enter commit が既に処理済み — unmount-blur を飲んで二重処理を防ぐ。
               suppressBlurRef.current = false;
               return;
             }
@@ -135,22 +120,17 @@ export function ViewerTab({
       }`}
       {...{ [DATA_VIEWER_TAB]: String(index) }}
       onPointerDown={(e) => {
-        // Drag-start guards (spec §5.2). Anything that should fall through to
-        // the existing click / dblclick / close paths is rejected here.
-        if (e.button !== 0) return; // primary button only
-        // isEditing here is technically subsumed by anyRenaming (own rename
-        // implies any-rename) but kept for symmetry with the early-return
-        // pair below: own-rename uses the alternate render path, sibling-
-        // rename keeps this render path.
+        // drag 開始 guard (spec §5.2)。click / dblclick / close へ通すべきものはここで弾く。
+        if (e.button !== 0) return; // 主ボタンのみ
+        // isEditing は anyRenaming に技術的に含まれる (自分の rename は any-rename でもある) が、
+        // 下の early-return 対との対称のため残す。
         if (isEditing) return;
-        // Block drag while *any* tab is in rename mode. preventDefault on
-        // this pointerdown would otherwise keep the rename input focused
-        // and let the user reorder a sibling tab behind the open editor.
+        // *どれか* のタブが rename 中は drag を止める。でないと pointerdown の preventDefault で
+        // rename 入力が focus を保ったまま、開いたエディタの裏で兄弟タブを並べ替えられてしまう。
         if (anyRenaming) return;
-        if (isFromClose(e)) return; // close button has its own onClick
-        // Suppress text selection on the wrapper span. The wrapper isn't
-        // focusable, so this is purely about clearing the I-beam cursor +
-        // user-select side effects when the drag turns active.
+        if (isFromClose(e)) return; // close ボタンは自前の onClick を持つ
+        // wrapper span の text 選択を抑止。wrapper は focus 不可なので、drag が active になった
+        // ときの I-beam カーソル + user-select の副作用を消すだけ。
         e.preventDefault();
         onStartDrag(index, {
           clientX: e.clientX,
@@ -160,9 +140,8 @@ export function ViewerTab({
       }}
       onClick={(e) => {
         if (isFromClose(e)) return;
-        // Drag commit/cancel fires a synthetic click right after pointerup
-        // on most engines; suppress that one trailing click so the source
-        // tab doesn't re-activate after a successful reorder (#50).
+        // drag commit/cancel は pointerup 直後に合成 click を出す。並べ替え成功後に source タブが
+        // 再アクティブ化しないよう、その trailing click 1 回を抑止 (#50)。
         if (shouldSuppressClick()) return;
         onActivate();
         // 一覧タブはタブ全体が <button> なので click で自動的にフォーカスが

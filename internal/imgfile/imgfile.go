@@ -1,7 +1,5 @@
-// Package imgfile provides shared image-file predicates used by other internal
-// packages (tree listing, thumbnail generation, image reading, classification
-// folder scanning). Keeping the predicate in one place avoids each consumer
-// drifting on which extensions count as images.
+// Package imgfile は internal package 共有の画像ファイル判定を提供する。判定を 1 箇所にまとめ、
+// consumer ごとに対応拡張子が drift するのを防ぐ。
 package imgfile
 
 import (
@@ -18,8 +16,7 @@ var imageExts = map[string]bool{
 	".avif": true,
 }
 
-// IsImage reports whether the given filename has a supported image extension.
-// Matching is case-insensitive.
+// IsImage は name が対応画像拡張子か判定する (case-insensitive)。
 func IsImage(name string) bool {
 	return imageExts[strings.ToLower(filepath.Ext(name))]
 }

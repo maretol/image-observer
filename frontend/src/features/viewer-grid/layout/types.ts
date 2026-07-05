@@ -1,14 +1,11 @@
-// Viewer flex-layout core types and constants (Phase 5 / spec-viewer-flexlayout.md).
-//
-// The viewer area is a binary space partitioning (BSP) tree. Each internal
-// node (`SplitNode`) splits its area in two with a ratio. Each leaf
-// (`LeafNode`) is one panel with its own tab list.
+// viewer flex-layout のコア型・定数 (Phase 5 / spec-viewer-flexlayout.md)。
+// viewer 領域は BSP tree: 内部ノード (SplitNode) が領域を ratio で 2 分割し、leaf
+// (LeafNode) が独自 tab list を持つ 1 パネル。
 
 import type { Tab } from "../useTabs";
 
 export type SplitDirection = "row" | "col";
-// "row" = horizontal split (a stacked above b). Splitter runs horizontally.
-// "col" = vertical split (a left of b).         Splitter runs vertically.
+// "row" = 横分割 (a が上、b が下、splitter は水平)。"col" = 縦分割 (a が左、b が右)。
 
 export type Edge = "top" | "bottom" | "left" | "right";
 
@@ -16,7 +13,7 @@ export type SplitNode = {
   kind: "split";
   id: string;
   direction: SplitDirection;
-  ratio: number; // a's share, in (MIN_RATIO, 1 - MIN_RATIO).
+  ratio: number; // a の取り分、(MIN_RATIO, 1 - MIN_RATIO)
   a: LayoutNode;
   b: LayoutNode;
 };
@@ -25,7 +22,7 @@ export type LeafNode = {
   kind: "leaf";
   id: string;
   tabs: Tab[];
-  activeIndex: number; // -1 only when tabs.length === 0
+  activeIndex: number; // tabs.length === 0 のときだけ -1
 };
 
 export type LayoutNode = SplitNode | LeafNode;
@@ -35,7 +32,7 @@ export type Layout = {
   activeId: string;
 };
 
-// Persistence shape (mirrors Go state.LayoutNodeState).
+// 永続化形 (Go state.LayoutNodeState のミラー)。
 export type LayoutNodeState = {
   kind: "split" | "leaf";
   id: string;
@@ -56,8 +53,8 @@ export const MIN_RATIO = 0.05;
 export const MAX_PANELS = 16;
 
 export function newNodeId(): string {
-  // crypto.randomUUID is available in modern Chromium (Wails uses webview).
-  // Fall back for unit tests that may run without a global crypto.
+  // crypto.randomUUID は modern Chromium (Wails webview) にある。global crypto 無しの
+  // unit test 用に fallback。
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }

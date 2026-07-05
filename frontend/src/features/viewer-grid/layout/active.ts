@@ -1,15 +1,10 @@
-// activeId resolution + tab activeIndex recomputation after a tab/leaf
-// disappears. Used by closeTabInLeaf and related operations.
+// tab/leaf 消失後の activeId 解決 + activeIndex 再計算。closeTabInLeaf 等が使う。
 
 import type { LayoutNode } from "./types";
 import { enumerateLeaves } from "./tree";
 
-// Given the leaf order BEFORE the mutation, the index of the now-missing
-// active leaf, and the new root, pick a sensible new activeId:
-//   - leaf at the same DFS index in the new tree (= the leaf that "took the
-//     active panel's place")
-//   - else leaf at index -1 (the one just before)
-//   - else first leaf in the new tree
+// mutation 前の leaf 順・消えた active leaf の index・新 root から妥当な activeId を選ぶ:
+// 新木の同 DFS index (= active パネルの位置を継いだ leaf) → その 1 つ前 → 新木の先頭 leaf。
 export function pickNewActiveId(
   newRoot: LayoutNode,
   prevIndex: number,
@@ -22,7 +17,7 @@ export function pickNewActiveId(
   return leaves[0].id;
 }
 
-// Mirror of Phase 3a recomputeActiveAfterClose; lifted here for tests.
+// Phase 3a recomputeActiveAfterClose のミラー。test のためここへ抽出。
 export function recomputeActiveAfterClose(
   curActive: number,
   closedIndex: number,

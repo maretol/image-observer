@@ -86,7 +86,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           ...prev,
           { id, message, severity, timeoutHandle: handle, exiting: false },
         ];
-        // Cap at MAX_TOASTS live items by dropping the oldest non-exiting one immediately.
+        // live item を MAX_TOASTS に制限 (最古の非 exiting を即 drop)。
         const liveCount = next.filter((i) => !i.exiting).length;
         if (liveCount > MAX_TOASTS) {
           const oldestIdx = next.findIndex((i) => !i.exiting);

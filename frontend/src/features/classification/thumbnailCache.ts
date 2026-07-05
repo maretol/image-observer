@@ -1,10 +1,6 @@
-// Bounded LRU cache for grid thumbnails. Keys are absolute image paths;
-// values carry the resolved object URL (or an error marker). On overflow the
-// least-recently-used entry is dropped and its object URL revoked so the
-// underlying Blob memory is reclaimed by the browser.
-//
-// Both `get` and `set` count as a "use" and bump the entry to MRU. Map's
-// insertion order gives us LRU semantics with delete+set on access.
+// grid サムネの LRU キャッシュ。溢れたら LRU entry を捨てて object URL を revoke し、
+// Blob メモリを解放する。get/set 両方が "use" で MRU に上げる (Map の挿入順 +
+// delete+set で LRU を実現)。
 
 export type ThumbCacheValue = {
   url: string;
@@ -28,8 +24,7 @@ export function createThumbCache(
       try {
         revoke(v.url);
       } catch {
-        // Defensive: revoke only throws for malformed URLs, which shouldn't
-        // happen here.
+        // revoke が throw するのは不正 URL のときだけで、ここでは起きない想定。
       }
     }
   };

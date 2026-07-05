@@ -11,22 +11,11 @@ import (
 	"image-observer/internal/logging"
 )
 
-// removeSubtreeFromWatch unwatches every path in st.watchedDirs that is
-// equal to or under `prefix`, calling w.Remove for each. Used when a
-// watched directory disappears from the tree (Remove / Rename) — without
-// removing descendants too, their inotify watches stay alive (Linux tracks
-// them by inode), so a rename moves the watched inode out of our tree
-// while we still receive its events labelled with the original path,
-// violating the "current folder only" invariant. w.Remove errors are
-// ignored (a watch may already have been auto-evicted via IN_IGNORED).
-//
-// `tombstone` (if non-nil) receives every unwatched path. The caller
-// passes acc.removedPaths so any follow-up Remove / Rename event for a
-// descendant arriving within the same debounce window hits the existing
-// dedup guard instead of being misclassified — descendants like
-// `photos.jpg/` (a directory with an image extension) would otherwise
-// fall through to the image-file branch and over-count removedFiles once
-// they've already been deleted from watchedDirs.
+// removeSubtreeFromWatch は watchedDirs のうち prefix と等しいか配下の path を全て unwatch する。
+// watched dir が tree から消える (Remove / Rename) とき用 — 子孫を外さないと inode 追跡の watch が生き残り、
+// rename が inode を tree 外へ動かしても元 path の event を受け続け「現 folder のみ」不変条件を破る。
+// tombstone (非 nil なら) に unwatch した path を入れ、caller の removedPaths で子孫の後続 Remove/Rename が
+// image-file 分岐に落ちて過剰計上するのを防ぐ。
 func removeSubtreeFromWatch(st *watchState, prefix string, tombstone map[string]struct{}) {
 	sep := string(filepath.Separator)
 	prefixWithSep := prefix + sep
@@ -41,43 +30,24 @@ func removeSubtreeFromWatch(st *watchState, prefix string, tombstone map[string]
 	}
 }
 
-// addSubtree adds root + every non-hidden descendant directory to w and
-// returns whether the root itself could be watched. Used by Start for the
-// initial enumeration: root failure is fatal so the caller checks the bool
-// and bails out. Image paths discovered during the walk are intentionally
-// NOT returned — at Start time no inotify Create events are queued for
-// them, so there is nothing to dedup against; allocating thousands of
-// POSIX path strings just to discard them would spike memory on a large
-// image folder.
-//
-// watchedDirs (if non-nil) is populated with every directory path
-// successfully Add'd so the Remove / Rename handler can detect dir-vs-file
-// reliably.
-//
-// Failures on descendant Add calls are logged and skipped rather than
-// aborting the walk — partial coverage beats none.
+// addSubtree は root + 全非 hidden 子孫 dir を w に Add し、root を watch できたか返す (Start の初期列挙用、
+// root 失敗は致命)。画像 path は返さない — Start 時は dedup 対象が無く、捨てる数千文字列の確保が大きい
+// folder でメモリを跳ね上げるため。watchedDirs (非 nil なら) に Add 成功 dir を入れ dir/file 判別に使う。
+// 子孫 Add 失敗は walk を止めず log + skip (部分カバレッジ > ゼロ)。
 func addSubtree(w *fsnotify.Watcher, root string, watchedDirs map[string]struct{}) bool {
 	rootAdded, _ := addSubtreeImpl(w, root, false, watchedDirs)
 	return rootAdded
 }
 
-// addSubtreeCollect is the per-event variant: in addition to adding
-// watches it also returns the absolute paths of image files encountered.
-// Only relevant when a *new* directory is created mid-watch — the caller
-// parks the paths in changedAccumulator.discoveredImagePaths so a
-// concurrent inotify Create racing with the WalkDir (e.g. a writer
-// dropping files into the just-created dir) doesn't double-count
-// addedFiles. Returns (rootAdded, discoveredImagePaths). Root failure is
-// non-fatal at the call site: the parent dir's watch is what gave us the
-// Create event, so we already have some visibility and only lose the new
-// subdir's nested activity.
+// addSubtreeCollect は per-event 版で、遭遇した画像の絶対 path も返す。監視中に *新規* dir が作られた
+// ときだけ意味を持つ — caller が path を discoveredImagePaths に park し、WalkDir と race する並行 inotify
+// Create が addedFiles を二重計上しないように。root 失敗は非致命 (親 dir の watch が event をくれる)。
 func addSubtreeCollect(w *fsnotify.Watcher, root string, watchedDirs map[string]struct{}) (rootAdded bool, discovered []string) {
 	return addSubtreeImpl(w, root, true, watchedDirs)
 }
 
 func addSubtreeImpl(w *fsnotify.Watcher, root string, collect bool, watchedDirs map[string]struct{}) (rootAdded bool, discovered []string) {
-	// Add root explicitly first so callers can distinguish "root failed"
-	// from "some descendant failed".
+	// root を先に明示 Add し、caller が root 失敗と子孫失敗を区別できるように。
 	if err := w.Add(root, fsnotify.All); err != nil {
 		logging.Warn("watcher", "add root failed",
 			"dir", root, "err", err.Error())
@@ -94,7 +64,7 @@ func addSubtreeImpl(w *fsnotify.Watcher, root string, collect bool, watchedDirs 
 			return nil
 		}
 		if p == root {
-			// Already added explicitly above.
+			// 上で明示的に追加済み。
 			return nil
 		}
 		if isHiddenName(d.Name()) {

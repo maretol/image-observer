@@ -29,47 +29,37 @@ const CONF_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "low", label: "low" },
 ];
 
-// <label htmlFor> targets the chip-input <input> inside TagInput. The pane is
-// always single-instance in the unified modal, so a stable global id is fine.
+// TagInput 内の chip-input <input> を <label htmlFor> で指す。pane は modal 内で常に
+// 単一 instance なので固定 global id で足りる。
 const TAG_INPUT_ID = "sample-edit-pane-tags";
 
-// id of the confidence heading <div>. Referenced from the radio group's
-// aria-labelledby so SR users hear "confidence" when entering the group
-// (the heading is not a <label htmlFor> because the radios are wrapped by
-// per-option <label>s — a single htmlFor cannot point at all of them).
+// confidence 見出し <div> の id。radiogroup の aria-labelledby から参照して SR に
+// "confidence" を読ませる (radio は option ごとの <label> で包まれ単一 htmlFor で全部を
+// 指せないので、見出しは <label htmlFor> にしていない)。
 const CONF_GROUP_LABEL_ID = "sample-edit-pane-confidence-label";
 
 export type SampleEditPaneProps = {
-  // null while no entry is active (e.g. preview closed). The pane renders
-  // a disabled placeholder so layout stays stable in the unified modal.
+  // entry 非アクティブ時は null (preview 閉じ等)。pane は空 placeholder を出して layout を保つ。
   entry: classification.Entry | null;
   knownTags: string[];
-  // Tag <input> ref bubbled up so SampleModal can pass it to ModalShell as
-  // initialFocusRef for openSource === "edit" (ModalShell otherwise focuses
-  // the first focusable element, which would be a chip × button or the
-  // modal close icon — bypassing the tag input even with autoFocus set).
+  // SampleModal が openSource === "edit" 時の initialFocusRef として ModalShell に渡すため
+  // 吸い上げる tag <input> ref (無いと最初の focusable = chip × / 閉じるアイコンに当たる)。
   tagInputRef?: RefObject<HTMLInputElement | null>;
-  // Current folder (#110 C). Render-synced into folderPropRef and read by the
-  // save wrapper at dispatch time so each save carries SaveContext.folder = the
-  // folder the edit belongs to. A folder switch unmounts the pane (so this prop
-  // stops updating, staying OLD), which is exactly what lets a save-on-unmount
-  // cleanup stamp the OLD folder and have saveEdit skip it (spec §6.2 / §4.2).
+  // 現在の folder (#110 C)。folderPropRef に render 同期され、save wrapper が dispatch 時に
+  // 読んで各 save の SaveContext.folder にする。folder 切替は pane を unmount する (= この
+  // prop が旧 folder のまま止まる) ので、save-on-unmount cleanup が旧 folder を刻み saveEdit
+  // が skip できる (spec §6.2 / §4.2)。
   folder: string;
-  // Returning a Promise lets the pane serialize in-flight saves so a rapid
-  // tag-blur → note-blur chain does not stack two IPC calls with the same
-  // stale loadResult.mtime (spec-edit-autosave.md §5.3). ctx carries the folder
-  // the save was captured for (#110 C). Manual-mode callers may still return
-  // void; the pane wraps via Promise.resolve.
+  // Promise を返せば pane が in-flight save を直列化し、tag-blur → note-blur の連鎖が
+  // 同じ stale loadResult.mtime で IPC を 2 本積むのを防ぐ (spec-edit-autosave.md §5.3)。
+  // ctx は save を capture した folder を運ぶ (#110 C)。
   onSave: (
     next: classification.Entry,
     ctx: SaveContext,
   ) => void | Promise<void>;
-  // Bubble dirty up so the parent (SampleModal) can disable prev/next
-  // navigation while there are unsaved edits (spec §5.4).
+  // 未保存中に親 (SampleModal) が prev/next を無効化できるよう dirty を上げる (spec §5.4)。
   onDirtyChange?: (dirty: boolean) => void;
-  // #105: when true, individual input blur / radio change auto-save the
-  // entry; the save & cancel buttons are hidden because there is nothing
-  // explicit to do. Manual mode (false) is the pre-#105 behavior.
+  // true で各 input の blur / radio 変更が auto-save し、保存/キャンセルボタンを隠す (#105)。
   autoSave: boolean;
 };
 
@@ -88,66 +78,44 @@ export function SampleEditPane({
   const [confidence, setConfidence] = useState<string>(entry?.confidence ?? "");
   const [note, setNote] = useState<string>(entry?.note ?? "");
 
-  // Auto-save (§5.2): mirror local state into refs so the synchronous
-  // TagInput.onBlur callback can read post-commit tags without waiting for
-  // React's setState to flush. The other two fields mirror for symmetry
-  // (radio change reads its own new value out-of-band, but note blur uses
-  // noteRef for the same reason — onBlur fires synchronously after the
-  // event-driven setNote schedules a re-render).
+  // local state を ref にミラー (§5.2)。同期的な TagInput.onBlur が setState flush を待たず
+  // commit 後のタグを読めるように。note blur も同様に noteRef を使う。
   const tagsRef = useRef<string[]>(tags);
   const confidenceRef = useRef<string>(confidence);
   const noteRef = useRef<string>(note);
 
-  // DOM refs for the single-key focus shortcuts (#115). confidenceGroupRef
-  // points at the radiogroup container so the handler can focus the currently
-  // checked radio (falling back to the first); noteFieldRef is the textarea.
-  // Tags reuse the existing tagInputRef prop. Distinct from the string-valued
-  // noteRef above, which holds the field's *value* for the auto-save path.
+  // 単キー focus ショートカット (#115) 用の DOM ref。confidenceGroupRef は radiogroup で、
+  // checked radio (無ければ先頭) に focus する。上の string の noteRef (値保持) とは別物。
   const confidenceGroupRef = useRef<HTMLDivElement>(null);
   const noteFieldRef = useRef<HTMLTextAreaElement>(null);
 
-  // Prop refs synced at render time (AGENTS.md H-8 "state ref の同期タイミング").
-  // The in-flight queue's finally callback (§5.3) and the save-on-unmount
-  // cleanup (§5.6) both fire *outside* the React render that triggered them,
-  // so reading these props from useEffect-bound dependencies would let the
-  // queue's recursive dequeue and the unmount cleanup hold a *stale* onSave
-  // (= old `saveEdit` closure → old `loadResult.mtime` → CONFLICT on the
-  // second IPC). Mirroring at render time guarantees that by the time these
-  // callbacks fire, refs already reflect the latest props.
+  // render 時同期の prop ref (AGENTS.md H-8)。queue の finally (§5.3) と save-on-unmount
+  // cleanup (§5.6) はトリガした render の *外* で発火するので、これらを useEffect deps 経由で
+  // 読むと stale な onSave (= 古い saveEdit → 古い mtime → 2 本目 IPC で CONFLICT) を掴む。
+  // render 時ミラーで、発火時には ref が最新 prop を反映していることを保証する。
   const onSaveRef = useRef(onSave);
   const autoSaveRef = useRef(autoSave);
   const entryRef = useRef(entry);
-  // folderPropRef (#110 C): the save wrapper reads this at dispatch time to
-  // stamp SaveContext.folder. Synced at render time like the others — a folder
-  // switch unmounts the pane, so this ref stops updating and stays on the OLD
-  // folder, which is what makes a stale cleanup save carry the OLD folder.
+  // save wrapper が dispatch 時に読んで SaveContext.folder に刻む (#110 C)。render 時同期 —
+  // folder 切替で pane が unmount し ref が旧 folder のまま止まるので、stale cleanup save が
+  // 旧 folder を運ぶ。
   const folderPropRef = useRef(folder);
   onSaveRef.current = onSave;
   autoSaveRef.current = autoSave;
   entryRef.current = entry;
   folderPropRef.current = folder;
 
-  // Reset local form whenever the *baseline* the entry exposes changes —
-  // baseline = (filename, folder, confidence, note). Storing the previous
-  // baseline in `lastBaselineRef` and reset-on-mismatch absorbs the
-  // referential churn from watcher-driven `loadResult` updates (a new
-  // `Entry` object whose fields are unchanged) so in-pane typing isn't
-  // clobbered. Any of (filename swap via prev/next, post-save baseline
-  // refresh, external sidecar edit, entry → null) flips at least one
-  // baseline field and triggers reset.
+  // entry の *baseline* (filename, folder, confidence, note) が変わったら local フォームを
+  // reset。前 baseline を lastBaselineRef に持って mismatch 時だけ reset することで、watcher
+  // 由来の loadResult 更新 (フィールド不変の新 Entry オブジェクト) の churn を吸収し、
+  // in-pane 入力を潰さない。
   const lastBaselineRef = useRef<Baseline>(EMPTY_BASELINE);
 
-  // Per-field "touched since last baseline observation" flags. Set true in
-  // the input handlers; cleared in the baseline reset useEffect (both
-  // branches). Read by the per-field sync to suppress overwriting a field
-  // the user touched during an in-flight save, even if their final value
-  // happens to equal the *previous* baseline (Copilot review #109 round 5).
-  // Example: tags=[] in baseline, user types "abc" and blurs → save IPC
-  // in-flight → user clears tags back to [] before the save returns → save
-  // success arrives with entry.folder="abc" → without touched tracking the
-  // equality check (local [] == old baseline []) would resync local to
-  // ["abc"], silently discarding the user's revert. The flag distinguishes
-  // "never touched" from "touched then reverted".
+  // per-field の「直近 baseline 以降 touch したか」フラグ。in-flight save 中に touch した
+  // フィールドは、最終値がたまたま *前* baseline と一致しても上書きしないようにする。
+  // 例: baseline tags=[]、"abc" 入力して blur → save IPC in-flight → 戻る前に [] に戻す →
+  // save 成功が folder="abc" で届く → touched 無しだと等価チェック (local [] == 旧 baseline [])
+  // が local を ["abc"] に resync して revert を握り潰す。「未 touch」と「touch して revert」を区別。
   const touchedAfterBaselineRef = useRef<Touched>({
     tags: false,
     confidence: false,
@@ -170,11 +138,8 @@ export function SampleEditPane({
       };
       return;
     }
-    // entry present: resetAll (different filename = prev/next nav to another
-    // entry) vs per-field sync (same entry, baseline patched by a partial
-    // auto-save success or external sidecar edit). computeBaselineSync encodes
-    // the round 2 (partial save must not clobber an untouched field that
-    // genuinely differs) and round 5 (touched-then-reverted stays local) rules.
+    // entry あり: resetAll (別 filename = prev/next nav) vs per-field sync (同一 entry、
+    // partial auto-save 成功や外部 sidecar 編集で baseline patch)。ルールは computeBaselineSync。
     const action = computeBaselineSync(
       lastBaselineRef.current,
       entry,
@@ -198,9 +163,8 @@ export function SampleEditPane({
       setNote(entry.note);
       noteRef.current = entry.note;
     }
-    // Always advance the baseline pointer (even for fields kept local) so the
-    // next diff is against the latest entry, and reset touched — the touched
-    // window is scoped between two consecutive baseline observations.
+    // local に保ったフィールドも含め baseline pointer は常に進める (次の diff を最新 entry と
+    // 取るため)。touched も reset — touched 窓は連続する baseline 観測の間に限る。
     lastBaselineRef.current = baselineOf(entry);
     touchedAfterBaselineRef.current = {
       tags: false,
@@ -209,15 +173,7 @@ export function SampleEditPane({
     };
   }, [entry]);
 
-  // Derive dirty against the latest baseline. The pure helper passes the
-  // entry side through serializeTags(extractTags(entry.folder)) and the
-  // local tags side through serializeTags(tags) only — so legacy
-  // "alice,bob" (no space after comma) or parens form "head (a + b)"
-  // baselines round-trip to the canonical "alice, bob" save format and
-  // do not show up as dirty on open. The local side intentionally skips
-  // extractTags (TagInput.commit already rejects duplicates on input, so
-  // the state never holds them) and does not sort, so a user-driven
-  // reorder still flips dirty on. See sampleEditDirty.test.ts.
+  // 最新 baseline との dirty 判定。タグ正規化の詳細は computeEditDirty (sampleEditDirty.ts) 参照。
   const dirty = useMemo(
     () => computeEditDirty(entry, tags, confidence, note),
     [entry, tags, confidence, note],
@@ -227,9 +183,8 @@ export function SampleEditPane({
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
-  // In-flight save serialization (§5.3) lives in useAutoSaveQueue (#110 B).
-  // buildEntry below stays here because it shapes the Entry payload; the queue
-  // only ever sees opaque Snapshots.
+  // in-flight save の直列化 (§5.3) は useAutoSaveQueue (#110 B)。buildEntry は Entry payload を
+  // 形作るのでここに残す (queue は opaque な Snapshot しか見ない)。
   const buildEntry = useCallback((snap: Snapshot): classification.Entry => {
     return classification.Entry.createFrom({
       filename: snap.filename,
@@ -239,12 +194,9 @@ export function SampleEditPane({
     });
   }, []);
 
-  // save wrapper passed to useAutoSaveQueue. Read onSave through the ref at
-  // call time (render-time synced above) so the queue's recursive dequeue
-  // picks up the *latest* handleSave — and the saveEdit it closes over, and
-  // that saveEdit's latest loadResult.mtime. Capturing onSave statically would
-  // freeze the mtime and the queued second save would always send a stale
-  // mtime → CONFLICT from Go's expectedMtime check (PR #109 round 1/2).
+  // useAutoSaveQueue に渡す save wrapper。onSave を呼び出し時に ref 経由で読み、queue の
+  // 再帰 dequeue が最新 handleSave (と最新 mtime) を拾う。静的キャプチャだと mtime が固まり
+  // 2 本目 save が stale mtime → CONFLICT になる。
   const save = useCallback(
     (snap: Snapshot) =>
       Promise.resolve(
@@ -256,19 +208,15 @@ export function SampleEditPane({
   const { runSave, resetQueue } = useAutoSaveQueue({ save });
 
   useEffect(() => {
-    // Discard any queued snapshot whenever the active entry (or its absence)
-    // changes — replaying an old filename's snapshot against a new entry would
-    // clobber the wrong record. The in-flight save itself is for the OLD
-    // filename and is allowed to complete on the OLD folder (saveEdit's
-    // folderRef check inside useClassificationEdit gates the state commit).
+    // active entry が変わったら queue 済み snapshot を捨てる — 旧 filename の snapshot を新 entry に
+    // replay すると別レコードを潰す。in-flight save は旧 filename 用で旧 folder で完走させてよい
+    // (saveEdit の folderRef check が state commit を gate する)。
     resetQueue();
   }, [entry?.filename, resetQueue]);
 
-  // performAutoSave is the gate for #105 blur / radio handlers. It reads
-  // the freshest field values from refs (post-commit tags, just-set radio
-  // value passed as an override) so it's race-free against React's batched
-  // setState. The caller passes the field that triggered the auto-save as
-  // an explicit override; the other two come from refs.
+  // #105 の blur / radio ハンドラ用ゲート。最新値を ref から読み (commit 後タグ、override で
+  // 渡された radio 値) React の batched setState と race しない。トリガしたフィールドは
+  // override で明示、他は ref から。
   const performAutoSave = useCallback(
     (overrides: Partial<Omit<Snapshot, "filename">>) => {
       if (!entry) return;
@@ -278,9 +226,8 @@ export function SampleEditPane({
         confidence: overrides.confidence ?? confidenceRef.current,
         note: overrides.note ?? noteRef.current,
       };
-      // Re-run dirty against the merged snapshot, not the stale `dirty`
-      // memo (which is one render behind for radio change). Skips burning
-      // IPC on refocus-without-change.
+      // merged snapshot で dirty を再計算 (stale な dirty memo は radio 変更で 1 render 遅れる)。
+      // 変更なし refocus で IPC を焼かない。
       const isDirty = computeEditDirty(
         entry,
         snap.tags,
@@ -314,37 +261,25 @@ export function SampleEditPane({
       confidenceRef.current = value;
       touchedAfterBaselineRef.current.confidence = true;
       setConfidence(value);
-      // Radio has no blur — auto-save fires on the change itself. Pass the
-      // new value explicitly because confidenceRef has just been written
-      // but the snapshot read inside performAutoSave needs to see it.
+      // radio に blur は無いので change 自体で auto-save。confidenceRef は書いたばかりだが
+      // performAutoSave 内の snapshot 読みに見せるため新値を明示的に渡す。
       performAutoSave({ confidence: value });
     },
     [performAutoSave],
   );
 
   const handleTagInputBlur = useCallback(() => {
-    // TagInput.commit ran first (chip-input onBlur ordering), so tagsRef
-    // already holds the post-commit list. performAutoSave reads it.
+    // TagInput.commit が先に走る (chip-input onBlur 順序) ので tagsRef は commit 後のリスト。
     performAutoSave({ tags: tagsRef.current });
   }, [performAutoSave]);
 
-  // Save-on-unmount (#105 §5.6). Auto-save mode treats modal close (Esc /
-  // backdrop, where no field-level blur fires before the input unmounts)
-  // as an implicit blur for any field that hadn't been blurred before
-  // close. The cleanup intentionally fires *only at unmount* (deps left
-  // empty + refs read at fire time): an earlier `[autoSave, entry, runSave]`
-  // dependency set would also fire on every `entry` reference change — and
-  // a successful save creates a new entry object via setLoadResult, so the
-  // cleanup would replay against the stale-closure baseline and double-save
-  // the user's edits (Copilot review thread #3). Refs read at fire time
-  // give us the latest entry / autoSave; the dirty check is against the
-  // latest baseline so a just-saved entry sees refs == baseline → false →
-  // no spurious save. runSave (from useAutoSaveQueue) closes over the queue's
-  // refs — created per pane instance — so it stays callable after unmount and
-  // the cleanup save still drains (parent ClassificationView stays mounted).
-  // The eslint hook-deps rule would push autoSave / entry / runSave back
-  // into deps; the empty-deps shape is intentional and a lint suppression
-  // would be appropriate if a linter were configured.
+  // save-on-unmount (#105 §5.6)。auto-save モードは modal close (Esc / backdrop で field blur が
+  // 走らない) を、未 blur フィールドの暗黙 blur として扱う。cleanup は *unmount 時のみ* 発火する
+  // (deps 空 + 発火時に ref 読み): [autoSave, entry, runSave] deps だと entry の参照変化ごとに
+  // 発火し、save 成功が setLoadResult で新 entry を作るので、cleanup が stale-closure baseline に
+  // replay して二重保存する。発火時 ref で最新 entry / autoSave を得て、dirty check は最新 baseline
+  // 相手なので直後保存済み entry は ref == baseline → false → 余計な save なし。runSave は pane
+  // instance ごとの queue ref を閉じ込むので unmount 後も呼べる。
   useEffect(() => {
     return () => {
       if (!autoSaveRef.current) return;
@@ -367,9 +302,7 @@ export function SampleEditPane({
         note: noteRef.current,
       });
     };
-    // Deps intentionally empty: see comment above. autoSave / entry / runSave
-    // are accessed via refs synced at render time so the cleanup always reads
-    // the latest values without re-firing on each prop churn.
+    // deps は意図的に空 (上のコメント参照)。autoSave / entry / runSave は render 同期 ref 経由。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -377,17 +310,10 @@ export function SampleEditPane({
     performAutoSave({ note: noteRef.current });
   }, [performAutoSave]);
 
-  // Single-key focus shortcuts (#115): with the modal open and focus NOT in a
-  // free-text field, t / c / n jump focus to the tag input / confidence radios
-  // / note textarea. Bound at window — like the Ctrl+Enter save shortcut — so
-  // it works wherever focus currently sits in the modal (preview side, close
-  // button, a radio, …). Guards, in order: skip modifier combos (Ctrl+T etc.
-  // stay browser/global shortcuts); require an active entry; skip while typing
-  // in a text field so the letter is inserted normally (isTextEntryTarget
-  // deliberately treats radio/checkbox as non-text so "n" works while a
-  // confidence radio is focused). preventDefault stops the triggering letter
-  // from landing in the field we just focused. Refs are stable, so the
-  // listener is attached once for the pane's lifetime.
+  // 単キー focus ショートカット (#115): text field 外で t/c/n が各入力へ focus を飛ばす。
+  // window バインドで modal のどこに focus があっても効く。ガード順: 修飾キー除外 / entry 必須 /
+  // text 入力中は除外 (isTextEntryTarget は radio/checkbox を非 text 扱いにするので radio 上でも
+  // "n" が効く)。preventDefault で発火文字が focus 先に入るのを防ぐ。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -414,10 +340,8 @@ export function SampleEditPane({
   }, [tagInputRef]);
 
   const handleSave = useCallback(() => {
-    // Gate on dirty so the Cmd/Ctrl+Enter shortcut matches the save
-    // button's disabled state — without this, the shortcut would fire
-    // saveEdit (and the editing.open=true → false → true blip from
-    // ClassificationView.handleSave) even when there is nothing to save.
+    // dirty で gate し Cmd/Ctrl+Enter ショートカットを保存ボタンの disabled 状態に合わせる
+    // (無いと変更なしでも saveEdit が走り editing.open の blip が出る)。
     if (!entry || !dirty) return;
     runSave({
       filename: entry.filename,
@@ -427,17 +351,10 @@ export function SampleEditPane({
     });
   }, [entry, dirty, runSave]);
 
-  // Cmd/Ctrl+Enter to save. Bound at window so the shortcut works while
-  // focus is in any of the pane's inputs (tag chip-input / note textarea /
-  // confidence radios) without each one needing its own onKeyDown. Gated
-  // on `entry && dirty` *before* preventDefault so non-dirty Ctrl+Enter
-  // falls through to the platform default (e.g. textarea newline) instead
-  // of being silently swallowed — matches the save button's disabled
-  // state. Esc is intentionally NOT handled here — ModalShell catches Esc
-  // to close the unified modal (spec §5.3: close discards unsaved with no
-  // confirm). The shortcut is left active in auto mode too so users who
-  // built muscle memory in the old behavior still hit a save (idempotent
-  // when nothing is dirty).
+  // Cmd/Ctrl+Enter で保存。window バインドで pane のどの入力に focus があっても効く。
+  // preventDefault の *前* に entry && dirty で gate するので、非 dirty の Ctrl+Enter は
+  // platform 既定 (textarea 改行等) に落ちる。Esc はここで扱わない — ModalShell が Esc で
+  // modal を閉じる (spec §5.3: close は未保存を確認なく破棄)。auto モードでも残す (変更なしなら冪等)。
   useEffect(() => {
     if (!entry || !dirty) return;
     const onKey = (e: KeyboardEvent) => {
@@ -459,9 +376,8 @@ export function SampleEditPane({
     confidenceRef.current = entry.confidence;
     setNote(entry.note);
     noteRef.current = entry.note;
-    // Local now equals baseline — clear touched flags so a subsequent
-    // external baseline patch can re-sync (otherwise the touched-from-
-    // before-cancel flag would suppress the next per-field sync).
+    // local == baseline になったので touched をクリアし、次の外部 baseline patch が re-sync
+    // できるように (でないと cancel 前の touched フラグが次の per-field sync を抑止する)。
     touchedAfterBaselineRef.current = {
       tags: false,
       confidence: false,

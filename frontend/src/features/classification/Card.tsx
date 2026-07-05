@@ -9,25 +9,19 @@ export type CardProps = {
   folderPath: string;
   entry: classification.Entry;
   selected: boolean;
-  // True when at least one card in the current view is selected. While ON,
-  // a thumb click toggles selection instead of opening the image — Finder-
-  // like behavior so the user can build up a multi-select without aiming at
-  // the small checkbox each time. The edit-pencil button is unaffected.
+  // ビュー内に選択済み card が 1 つでもあると true。ON の間は thumb クリックが画像を
+  // 開かず選択トグルになる (Finder 風の複数選択)。編集ペンボタンは対象外。
   selectionMode: boolean;
-  // Whether the always-visible checkbox is rendered (modes: checkbox / both).
+  // 常時表示チェックボックスを出すか (modes: checkbox / both)。
   showCheckbox: boolean;
-  // Whether Ctrl-click and Shift-click change behavior (modes: modifier / both).
+  // Ctrl/Shift クリックの挙動を有効にするか (modes: modifier / both)。
   modifierEnabled: boolean;
-  // Multi-viewer (#11): Card thumb clicks now open the SampleModal (which
-  // hosts the viewer-picker). The dedicated PreviewIcon button was removed
-  // because it became a redundant second entry to the same modal.
+  // thumb クリックは SampleModal (viewer ピッカー) を開く (#11)。
   onClickEdit: () => void;
   onClickPreview: () => void;
   onToggleSelect: () => void;
   onExtendSelectionTo: () => void;
-  // Right-click anywhere on the card surface. The parent positions a
-  // single-item CardContextMenu at (clientX, clientY) and routes the
-  // menu's "削除" action through the classification hook (#47).
+  // card 上どこでも右クリック。親が (clientX, clientY) に単一 CardContextMenu を出す (#47)。
   onRequestContextMenu: (clientX: number, clientY: number) => void;
 };
 
@@ -49,10 +43,8 @@ export function Card({
 
   const tags = extractTags(entry.folder);
 
-  // Primary action depends on the current mode (mirror of onClick logic, but
-  // keyboard activation doesn't carry shift/ctrl meaning — Space/Enter on a
-  // selection-mode thumb toggles selection, otherwise opens the preview
-  // modal where the user picks a destination viewer).
+  // キーボード起動は shift/ctrl を持たないので onClick と別: selection-mode の thumb で
+  // Space/Enter は選択トグル、それ以外は preview modal を開く。
   const activate = () => {
     if (showCheckbox && selectionMode) {
       onToggleSelect();
@@ -65,10 +57,8 @@ export function Card({
     <div
       className={`cls-card ${selected ? "cls-card-selected" : ""}`}
       onContextMenu={(e) => {
-        // Suppress the webview's default menu and let the parent place a
-        // single-item ("削除") menu at the cursor. Captured at the .cls-card
-        // wrapper so right-click anywhere on the card surface — thumb,
-        // filename, badges — opens the menu (#47 §5.1).
+        // webview 既定メニューを抑止。.cls-card wrapper で捕捉するので card 上
+        // どこ (thumb / filename / badge) で右クリックしてもメニューが出る (#47 §5.1)。
         e.preventDefault();
         onRequestContextMenu(e.clientX, e.clientY);
       }}
@@ -92,9 +82,8 @@ export function Card({
             onToggleSelect();
             return;
           }
-          // Plain click. With a visible checkbox + an existing selection we
-          // treat clicks as "extend the selection set" (Finder-like). Modifier
-          // mode skips this branch and always opens the preview modal.
+          // 素のクリック。checkbox 表示 + 選択済みなら「選択に追加」(Finder 風)。
+          // modifier モードはこの分岐を通らず常に preview modal を開く。
           if (showCheckbox && selectionMode) {
             onToggleSelect();
             return;
@@ -102,10 +91,9 @@ export function Card({
           onClickPreview();
         }}
         onKeyDown={(e) => {
-          // Only react when the thumb itself is focused — without this, an
-          // Enter/Space on the inner checkbox or edit button bubbles up and
-          // double-fires (e.g. checkbox toggles selection, parent then runs
-          // activate() and toggles it back).
+          // thumb 自身に focus があるときだけ反応 — でないと内側の checkbox / 編集
+          // ボタンでの Enter/Space が bubble して二重発火する (checkbox がトグル →
+          // 親が activate() で戻す)。
           if (e.target !== e.currentTarget) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();

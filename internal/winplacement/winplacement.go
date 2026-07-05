@@ -1,27 +1,12 @@
-// Package winplacement persists and restores the main window's geometry using
-// the Win32 GetWindowPlacement / SetWindowPlacement APIs (issue #129).
+// Package winplacement は Win32 Get/SetWindowPlacement で main window の geometry を保存/復元する (#129)。
 //
-// Why a dedicated package: Wails v2 exposes no native window handle, and its
-// runtime.WindowSetPosition restores the window onto the primary monitor on
-// multi-monitor Windows (the bug this fixes — size and maximized state already
-// restore, only the position is wrong). SetWindowPlacement takes the HWND we
-// discover ourselves (EnumWindows + own-PID match, see placement_windows.go)
-// and lands the window on the correct monitor. It also captures the restore
-// rectangle (rcNormalPosition) atomically even while the window is maximized,
-// so the frontend's "freeze geometry while maximized" polling hack (issue #86)
-// is unnecessary on Windows.
+// 専用 package の理由: Wails の runtime.WindowSetPosition は multi-monitor で primary monitor に復元して
+// しまう。自前発見の HWND (EnumWindows + own-PID, placement_windows.go) に SetWindowPlacement を渡し
+// 正しい monitor へ置く。rcNormalPosition は maximized 中でも restore rectangle なので frontend の
+// geometry freeze polling (#86) が Windows では不要になる。
 //
-// Platform split mirrors internal/imgfile.Trash:
-//   - placement_windows.go: the real syscall implementation (//go:build windows).
-//   - placement_other.go:   no-op stubs returning ok=false so callers fall back
-//     to the Wails-runtime restore (#86) on non-Windows dev builds.
-//
-// The struct-conversion helpers in this file carry no build tag, so they are
-// unit-tested on the Linux CI runner where the Win32 syscalls cannot run.
-//
-// Dependency direction: winplacement -> state (the state.WindowState type) and,
-// on Windows builds only, -> logging (placement_windows.go emits warn logs).
-// state stays dependency-free; no cycle.
+// platform 分割は imgfile.Trash と同様 (placement_windows.go = syscall 実装 / placement_other.go = no-op
+// stub → non-Windows は caller が #86 fallback)。build tag 無しの変換 helper は Linux CI でも unit-test される。
 package winplacement
 
 import (
@@ -30,11 +15,9 @@ import (
 	"image-observer/internal/state"
 )
 
-// ToWindowState converts a WINDOWPLACEMENT rcNormalPosition rectangle (Win32
-// RECT: right/bottom are exclusive edges) plus a maximized flag into the
-// persisted state.WindowState. Width / Height are derived from the rectangle.
-// Degenerate extents (<200) are left as-is for state.Load's validateState to
-// clamp on the next read — this helper stays a pure coordinate transform.
+// ToWindowState は rcNormalPosition rect (Win32 RECT: right/bottom は exclusive edge) と maximized flag を
+// state.WindowState に変換する。degenerate な extent (<200) はそのまま残す — clamp は state.Load の
+// validateState に任せ、ここは純粋な座標変換に留める。
 func ToWindowState(left, top, right, bottom int, maximized bool) state.WindowState {
 	return state.WindowState{
 		X:         left,
@@ -45,25 +28,17 @@ func ToWindowState(left, top, right, bottom int, maximized bool) state.WindowSta
 	}
 }
 
-// FromWindowState is the inverse of ToWindowState: it yields the RECT edges
-// (right / bottom computed from width / height) and the maximized flag to feed
-// into a WINDOWPLACEMENT for SetWindowPlacement. Every edge is saturated into
-// the int32 range the RECT fields require, so the syscall path never sees a
-// wrapped value. right / bottom are X+Width / Y+Height, whose int64 sum could
-// itself overflow for an absurdly corrupt state.json; clampSumInt32 adds in a
-// domain that cannot overflow before saturating.
+// FromWindowState は ToWindowState の逆で、SetWindowPlacement 用に RECT edge と maximized flag を返す。
+// 各 edge は int32 range に saturate するので syscall が wrap 値を見ることは無い。X+Width / Y+Height は
+// 壊れた state.json では int64 overflow しうるため clampSumInt32 で加算する。
 func FromWindowState(s state.WindowState) (left, top, right, bottom int32, maximized bool) {
 	return clampInt32(s.X), clampInt32(s.Y),
 		clampSumInt32(s.X, s.Width), clampSumInt32(s.Y, s.Height),
 		s.Maximized
 }
 
-// clampInt32 saturates a Go int (int64 on 64-bit) into the int32 range a Win32
-// RECT field requires. A corrupt or hand-edited state.json could hold a value
-// outside int32; an unchecked int32() conversion would wrap (sign-flip) and
-// place the window at a wild coordinate. Saturating instead keeps the value
-// sane, and the OS still clamps the final placement to the visible work area.
-// Lives in the build-tag-free file so it is unit-tested on the Linux CI runner.
+// clampInt32 は Go int を int32 range に saturate する。無チェックの int32() 変換は壊れた state.json の
+// 範囲外値を wrap (sign-flip) させ window を異常座標に置く。build tag 無しで Linux CI で unit-test される。
 func clampInt32(v int) int32 {
 	if v > math.MaxInt32 {
 		return math.MaxInt32
@@ -74,12 +49,8 @@ func clampInt32(v int) int32 {
 	return int32(v)
 }
 
-// clampSumInt32 returns a+b saturated to the int32 range without int64
-// overflow. Each addend is first clamped into int32, so the int64 sum of two
-// int32-bounded values stays well within int64 before the final saturation —
-// this closes the gap where a raw `s.X + s.Width` could overflow int64 and wrap
-// before clampInt32 ever ran (issue #129 review). For in-range geometry the
-// clamps are identities, so the sum is exact.
+// clampSumInt32 は a+b を int64 overflow 無しで int32 range に saturate する。各項を先に int32 clamp する
+// ので和は int64 に必ず収まり、raw な `s.X + s.Width` が clampInt32 前に overflow して wrap する穴を塞ぐ (#129)。
 func clampSumInt32(a, b int) int32 {
 	sum := int64(clampInt32(a)) + int64(clampInt32(b))
 	if sum > math.MaxInt32 {

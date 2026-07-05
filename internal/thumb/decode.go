@@ -12,8 +12,7 @@ import (
 	"golang.org/x/image/webp"
 )
 
-// decodeImage opens path and returns the first frame as image.Image.
-// Animation formats (GIF, WebP) collapse to the first frame per spec §3.4.
+// decodeImage は path を開き最初のフレームを image.Image で返す。アニメ形式 (GIF, WebP) は最初のフレームに潰す (spec §3.4)。
 func decodeImage(path, ext string) (image.Image, error) {
 	f, err := os.Open(path)
 	if err != nil {

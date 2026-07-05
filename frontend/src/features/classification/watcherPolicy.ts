@@ -1,13 +1,7 @@
-// Pure helpers backing the fsnotify auto-merge flow in `useClassification`.
-// Extracted from the hook so the decision logic can be exercised by vitest
-// without React / Wails IPC / DOM in scope. See docs/spec-folder-watch.md §5.
-//
-// Type-mirrors:
-//   ChangedPayload mirrors the Go struct in `internal/watcher.ChangedPayload`.
-//   Wails does not generate a TS namespace for it (it never appears in a
-//   binding signature — `EventsEmit` is dynamic), so we hand-mirror it here.
-
-/** Shape of the payload emitted by the Go-side watcher via Wails events. */
+// useClassification の fsnotify auto-merge フローを支える純ヘルパ。判定ロジックを
+// React / Wails IPC / DOM 無しで vitest にかけられるよう分離 (docs/spec-folder-watch.md §5)。
+// ChangedPayload は Go の internal/watcher.ChangedPayload の手写し — EventsEmit の
+// payload は binding signature に出ないので Wails が TS を生成しないため。
 export type ChangedPayload = {
   folder: string;
   addedFiles: number;
@@ -16,17 +10,9 @@ export type ChangedPayload = {
   sidecarChanged: boolean;
 };
 
-/**
- * formatChangeSummary returns the user-facing toast text for a payload.
- *
- * Counter-bearing payloads get the precise "+N -M" message; sidecar-only
- * payloads get the dedicated phrasing. A counter-less, sidecar-less payload
- * is still meaningful: the Go watcher emits one whenever a non-image / non-
- * sidecar Remove or Rename fires (typically a subdirectory disappearing —
- * see internal/watcher §7.2). For that case we return a generic "change
- * detected" message so users still see a notification when an image-bearing
- * subtree is moved out of the watched root (PR #75 review).
- */
+// payload の toast 文言を返す。カウンタ無し・sidecar 無しの payload も意味がある:
+// Go watcher は非画像/非 sidecar の Remove/Rename (典型はサブディレクトリ消失,
+// internal/watcher §7.2) でこれを emit するので、汎用の "変更検出" 文言を返す。
 export function formatChangeSummary(p: ChangedPayload): string {
   const filesChanged = p.addedFiles > 0 || p.removedFiles > 0;
   if (filesChanged && p.sidecarChanged) {
@@ -38,63 +24,38 @@ export function formatChangeSummary(p: ChangedPayload): string {
   if (p.sidecarChanged) {
     return "分類データが外部で更新されました";
   }
-  // Subtree disappear / move-out — no per-file counts but the on-disk set
-  // changed. Phrasing intentionally generic.
+  // サブツリー消失/移動 — 件数は無いが on-disk set は変わった。文言はあえて汎用。
   return "フォルダの変更を検出しました";
 }
 
-/** Minimal view of the hook's UI state needed to decide what to do. */
 export type AutoMergeContext = {
-  /** True iff the user has the per-card edit popover open. */
   editingOpen: boolean;
-  /** filename being edited, or null when editingOpen is false. */
-  editingFilename: string | null;
-  /** True iff the mtime-conflict resolution dialog is open. */
-  conflictOpen: boolean;
-  /** True iff the child-sidecar merge confirmation is open. */
-  mergePromptOpen: boolean;
-  /**
-   * Sorted/unsorted entry filenames present in the freshly-loaded result.
-   * Passed as a Set for O(1) lookup of the editing target.
-   */
-  freshFilenames: ReadonlySet<string>;
+  editingFilename: string | null; // editingOpen が false のとき null
+  conflictOpen: boolean; // mtime 競合解決ダイアログ
+  mergePromptOpen: boolean; // 子 sidecar マージ確認
+  freshFilenames: ReadonlySet<string>; // 再 Load 結果の filename (O(1) 照合用に Set)
 };
 
-/** Action recommended by `decideAutoMerge`. */
 export type AutoMergeAction =
-  /** Apply fresh result to loadResult immediately. */
-  | { kind: "commit" }
-  /**
-   * Apply fresh result AND close the editing popover with a warn toast —
-   * the editing target was removed externally (spec §5.3 exception).
-   */
+  | { kind: "commit" } // fresh を即 loadResult へ適用
+  // 編集対象が外部削除された: warn toast で popover を閉じて即 commit (spec §5.3 例外)
   | { kind: "commit-editing-removed"; filename: string }
-  /**
-   * Hold fresh result in a pending ref; replay when the deferral source
-   * closes (conflict resolved OR merge prompt resolved).
-   */
+  // fresh を pending に保持、deferral 元 (conflict / merge prompt) が閉じたら replay
   | { kind: "defer" };
 
-/**
- * decideAutoMerge picks the right reaction to an incoming `classification:changed`
- * event. Per spec-folder-watch.md §5.3 / §13.8:
- *
- *   - mergePrompt or conflict open → defer (their semantics depend on the
- *     captured mtime / preview being stable until the user resolves)
- *   - editing open AND the edited file is gone in fresh entries →
- *     "commit-editing-removed" exception: close the popover with a warn and
- *     commit immediately (the user can't usefully save a deleted target)
- *   - editing open AND the edited file still exists → defer; if we committed
- *     here we'd advance `loadResult.mtime` to the externally-bumped value
- *     and the user's next save (still using the old draft) would slip past
- *     the mtime-conflict check, silently overwriting the external change
- *     (PR #75 review thread #1)
- *   - otherwise → commit
- *
- * The deferral-close handler in useClassification replays the parked
- * payload through this same function so the exception still fires if the
- * editing target was removed while we were deferring.
- */
+// classification:changed への反応を決める (spec-folder-watch.md §5.3 / §13.8)。
+//
+//   - mergePrompt / conflict が開いている → defer (捕捉した mtime / preview が
+//     ユーザー解決まで安定している前提のため)
+//   - editing 中で編集対象が fresh から消えた → "commit-editing-removed" 例外:
+//     warn で popover を閉じ即 commit (削除済み対象は保存しても無意味)
+//   - editing 中で編集対象が残っている → defer。ここで commit すると loadResult.mtime
+//     が外部更新値に進み、次の save (古い draft) が mtime 競合チェックをすり抜けて
+//     外部変更を握り潰してしまう
+//   - それ以外 → commit
+//
+// useClassification の deferral-close ハンドラは保留 payload を同じ関数で replay
+// するので、deferral 中に編集対象が消えても例外が発火する。
 export function decideAutoMerge(ctx: AutoMergeContext): AutoMergeAction {
   if (ctx.mergePromptOpen || ctx.conflictOpen) {
     return { kind: "defer" };

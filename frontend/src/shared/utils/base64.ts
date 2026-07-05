@@ -1,5 +1,5 @@
-// Wails serializes Go []byte to JSON as a base64 string at runtime, but the
-// generated TS type may say number[]. Handle both forms defensively.
+// Wails は Go の []byte を実行時 base64 文字列にするが、生成 TS 型は number[] の
+// こともあるため両対応。
 
 export function toDataURL(
   data: number[] | string | Uint8Array,
@@ -19,7 +19,7 @@ export function toDataURL(
 }
 
 export function bytesArrayToBase64(bytes: number[]): string {
-  // Chunk to avoid blowing the call stack on String.fromCharCode(...big array).
+  // 大きい配列で String.fromCharCode(...arr) が call stack を溢れさせないよう分割する。
   const chunkSize = 0x8000;
   let binary = "";
   for (let i = 0; i < bytes.length; i += chunkSize) {
@@ -28,10 +28,8 @@ export function bytesArrayToBase64(bytes: number[]): string {
   return btoa(binary);
 }
 
-// Decode a Wails []byte payload to a Uint8Array backed by a fresh ArrayBuffer.
-// Used when we want the raw bytes (e.g. to build a Blob) rather than a data:
-// URL. All branches copy into a new ArrayBuffer so the Uint8Array<ArrayBuffer>
-// type holds (BlobPart rejects SharedArrayBuffer-backed views under TS 6).
+// 全分岐で新しい ArrayBuffer にコピーするのは Uint8Array<ArrayBuffer> 型を保つため
+// (TS 6 の BlobPart は SharedArrayBuffer 由来の view を弾く)。
 export function toBytes(
   data: number[] | string | Uint8Array,
 ): Uint8Array<ArrayBuffer> {

@@ -1,19 +1,12 @@
-// UI message catalog (ja). Single source of truth for user-facing Japanese
-// strings, so UI wording can be changed in one place (#83). This is the i18n
-// precursor: locale switching (en etc.) is #16 — for now there is exactly one
-// catalog and `t()` reads it directly.
+// UI メッセージカタログ (ja)。文言を一箇所で変えられる (#83)。locale 切替 (en 等)
+// は #16 — 今はこの 1 カタログを t() が直接読む。
 //
-// Structure: a FLAT, dot-separated key space (`<feature>.<context>.<use>`),
-// `as const` so `MessageKey = keyof typeof ja` yields a literal union and tsc
-// flags typos / removed keys at every call site. Values may contain
-// `{placeholder}` tokens filled by `t(key, params)`.
+// フラットなドット区切りキー (`<feature>.<context>.<use>`) + `as const` で、
+// MessageKey がリテラル union になり tsc がタイポ / 削除キーを検出する。
 //
-// Scope (Phase 1, #83 案 A): shared dialogs + the settings dialog and its
-// sections. Not yet migrated (Phase 2): KeybindingsTable (a self-contained data
-// table) and the feature views (classification / viewer-grid / App). A few text
-// blocks that interleave inline <code>/<strong> mid-sentence are intentionally
-// left in place — a flat string catalog can't represent embedded markup; those
-// need a richer formatter, deferred with the rest.
+// スコープ (Phase 1, #83 案 A): 共有ダイアログ + 設定ダイアログ。未移行 (Phase 2):
+// KeybindingsTable と feature view。文中に <code>/<strong> を挟むブロックは、
+// フラットカタログで表現できずリッチな formatter が要るため据え置き。
 export const ja = {
   // --- common ---------------------------------------------------------------
   "common.ok": "OK",

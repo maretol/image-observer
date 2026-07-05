@@ -3,28 +3,18 @@ import type { classification } from "../../../wailsjs/go/models";
 export type Confidence = "high" | "mid" | "low" | "";
 
 export type ListTabFilter = {
-  tags: string[]; // OR; empty = no tag filter
-  // untaggedOnly: when true, show only entries with no tags (extractTags empty).
-  // Mutually exclusive with `tags` at the UI layer (the toggle handlers clear
-  // one when the other is set) — applyFilter still treats it as taking
-  // precedence so the function stays well-defined even if both arrive set.
+  tags: string[]; // OR 結合。空 = タグ絞り込みなし
+  // tags と UI 上は排他だが、両方来ても well-defined になるよう applyFilter では
+  // untaggedOnly を優先する。
   untaggedOnly: boolean;
   confidence: Confidence | "all";
   query: string;
 };
 
-// extractTags parses the on-disk `folder` field into a deduplicated tag list.
-// Two formats are accepted:
-//   - Legacy parens form: "head (sub + sub + ...)"  (Phase 4 v1.0 〜)
-//   - Direct list form  : "tag1, tag2, tag3"        (Phase 4 v1.5 〜, #8)
-// Comma and Japanese full-width comma "、" both work as separators in the
-// list form. Single-token input is naturally handled by the list form path.
-//
-// Examples:
-//   "iroha"                            → ["iroha"]
-//   "shugo (iroha + kaguya)"           → ["shugo", "iroha", "kaguya"]
-//   "tag1, tag2"                       → ["tag1", "tag2"]
-//   ""                                 → []
+// on-disk の `folder` 文字列を重複除去したタグ配列にする。2 形式を受ける:
+//   - 旧括弧形式: "head (sub + sub + ...)"  (Phase 4 v1.0〜)
+//   - 直リスト形式: "tag1, tag2, tag3"       (Phase 4 v1.5〜, #8)
+// リスト形式の区切りは半角/全角コンマ "、" 両方。
 export function extractTags(folder: string): string[] {
   if (!folder) return [];
   const parens = folder.match(/^([^(]+?)\s*\(([^)]*)\)\s*$/);
@@ -43,9 +33,8 @@ export function extractTags(folder: string): string[] {
   return Array.from(new Set(list));
 }
 
-// serializeTags joins a tag list back into the on-disk `folder` field.
-// Uses comma+space separator (the canonical save format from Phase 4 v1.5).
-// Empty input → "" (so unclassified entries round-trip correctly).
+// タグ配列を on-disk `folder` に戻す。区切りは canonical な ", " (Phase 4 v1.5)。
+// 空入力 → "" (未分類が正しく round-trip するため)。
 export function serializeTags(tags: string[]): string {
   return tags
     .map((t) => t.trim())
@@ -54,15 +43,12 @@ export function serializeTags(tags: string[]): string {
 }
 
 export type TagSummary = {
-  // counts: per-tag occurrence count across the entry list.
   counts: Map<string, number>;
-  // untagged: number of entries with no tags at all (extractTags empty).
   untagged: number;
 };
 
-// summarizeTags walks the entry list once, building both the per-tag counts
-// and the untagged total. The TagChips row needs both at the same time, so a
-// single pass avoids running extractTags twice per entry (#120 review).
+// per-tag counts と untagged 総数を 1 パスで作る (extractTags を entry ごとに 2 度
+// 走らせないため)。
 export function summarizeTags(entries: classification.Entry[]): TagSummary {
   const counts = new Map<string, number>();
   let untagged = 0;
@@ -79,26 +65,20 @@ export function summarizeTags(entries: classification.Entry[]): TagSummary {
   return { counts, untagged };
 }
 
-// tagSummary aggregates tag counts across an entry list. Thin wrapper over
-// summarizeTags for callers that only need the per-tag counts.
+// counts だけ要る呼び出し向けの summarizeTags 薄ラッパ。
 export function tagSummary(
   entries: classification.Entry[],
 ): Map<string, number> {
   return summarizeTags(entries).counts;
 }
 
-// untaggedCount returns how many entries have no tags at all (extractTags
-// empty). Drives the count badge on the "未分類" chip (#116).
+// "未分類" chip の件数バッジ用 (#116)。
 export function untaggedCount(entries: classification.Entry[]): number {
   return summarizeTags(entries).untagged;
 }
 
-// applyFilter returns the subset of entries matching the filter.
-// untaggedOnly (when set) keeps only entries with no tags and takes precedence
-// over the tag set (the two are mutually exclusive in the UI). Otherwise tags
-// are OR-combined (entry passes if any selected tag matches). Confidence is
-// single-select. Query is case-insensitive substring match against filename
-// and note. All active conditions are AND-combined.
+// filter にマッチする entry を返す。tags は OR、query は filename/note の
+// 部分一致 (大小無視)、有効な条件同士は AND。untaggedOnly は tags に優先。
 export function applyFilter(
   entries: classification.Entry[],
   f: ListTabFilter,

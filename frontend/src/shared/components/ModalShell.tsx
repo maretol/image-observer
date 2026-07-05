@@ -5,9 +5,7 @@ type ModalShellProps = {
   open: boolean;
   onClose: () => void;
   role?: "dialog" | "alertdialog";
-  // True (default) makes a click on the backdrop call onClose. ConfirmDialog
-  // sets this to false because it's a yes/no question that needs an explicit
-  // decision.
+  // true (既定) で backdrop クリックが onClose を呼ぶ。ConfirmDialog は明示的な決定が要る yes/no なので false。
   closeOnBackdrop?: boolean;
   closeOnEscape?: boolean;
   initialFocusRef?: RefObject<HTMLElement | null>;
@@ -26,15 +24,14 @@ function getFocusableList(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
 }
 
-// Shared modal wrapper for confirm-style dialogs. Provides:
-//   - portal to document.body (so overlay sits above the UI-scale chrome)
-//   - backdrop click → onClose (opt-out via closeOnBackdrop=false)
-//   - Esc → onClose (opt-out via closeOnEscape=false)
-//   - Tab focus trap between the dialog's focusable descendants
-//   - initial focus moved into the dialog on open (caller may pin a ref)
-//   - previously focused element restored on close
-//   - zoom: var(--ui-scale, 1) applied to the inner dialog only (backdrop
-//     stays full-viewport — same pattern as SettingsDialog)
+// confirm 系 dialog の共有ラッパ。提供機能:
+//   - document.body への portal (overlay を UI-scale chrome の上に置く)
+//   - backdrop クリック → onClose (closeOnBackdrop=false で opt-out)
+//   - Esc → onClose (closeOnEscape=false で opt-out)
+//   - dialog 内 focusable 間の Tab focus trap
+//   - open 時に dialog へ初期 focus (呼び出し側が ref で指定可)
+//   - close 時に直前 focus を復元
+//   - zoom: var(--ui-scale, 1) を内側 dialog にだけ適用 (backdrop は全画面のまま)
 export function ModalShell({
   open,
   onClose,
@@ -52,18 +49,16 @@ export function ModalShell({
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  // Tracks whether the current click began with a pointerdown on the bare
-  // backdrop. Browsers fire `click` on the deepest common ancestor of the
-  // pointerdown/pointerup targets, so a text-selection drag that starts inside
-  // a textarea and releases over the backdrop would otherwise trigger a
-  // backdrop click and close the dialog (#96).
+  // 現在の click が bare backdrop での pointerdown から始まったか。browser は
+  // pointerdown/up ターゲットの最深共通祖先で click を発火するので、textarea 内で始まり
+  // backdrop 上で release した選択 drag が backdrop click として dialog を閉じてしまうため (#96)。
   const downOnBackdropRef = useRef(false);
 
-  // Capture previous focus on open and restore it on close.
+  // open 時に直前 focus を捕捉し close 時に復元。
   useEffect(() => {
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    // Defer one tick so the portal subtree is laid out before we query it.
+    // useEffect は layout 後に走るので portal subtree を query できる。
     const target =
       initialFocusRef?.current ??
       (dialogRef.current ? getFocusableList(dialogRef.current)[0] : null);

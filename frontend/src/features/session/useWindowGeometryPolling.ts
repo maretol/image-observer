@@ -8,24 +8,18 @@ import {
 import type { state } from "../../../wailsjs/go/models";
 import { logger } from "../../shared/utils/logger";
 
-// useWindowGeometryPolling polls WindowGetSize/Position and WindowIsMaximised
-// at a fixed interval (and on window-resize). Wails exposes no window-move /
-// window-maximize event, so polling is the best we have. The returned width /
-// height / x / y track the *non-maximized* (restore) geometry — while
-// maximized is true we deliberately do not overwrite them, so closing the
-// window while maximized still leaves a sensible restore size for the next
-// launch (issue #86).
+// WindowGetSize/Position と WindowIsMaximised を固定間隔 (と resize 時) で poll する。Wails に
+// window-move / maximize イベントが無いので poll が最善。返す width/height/x/y は *非最大化*
+// (restore) geometry — maximized の間はあえて上書きしないので、最大化のまま閉じても次回起動に
+// まともな restore サイズが残る (issue #86)。
 //
-// On Windows the polling is disabled: the native Win32 WINDOWPLACEMENT path
-// (issue #129) owns the window field there — main.go captures it at
-// OnBeforeClose and state.SaveWindow is the sole writer — so polling
-// WindowGetPosition would feed a competing value into useSessionSave and
-// clobber the Go-owned geometry. On Windows the hook just returns the loaded
-// initial value, frozen. See docs/spec-window-placement.md §8 (sync model).
+// Windows では poll を無効化する: native Win32 WINDOWPLACEMENT (issue #129) が window 欄を所有
+// (main.go が OnBeforeClose で捕捉、state.SaveWindow が唯一の writer) するので、poll すると
+// useSessionSave に競合値が流れ Go 所有の geometry を潰す。Windows では hook はロード初期値を
+// 固定で返す (spec-window-placement.md §8)。
 //
-// The returned object is the value held in useState, so `Object.is` identity
-// is stable across polls that observe no change. Consumers (typically
-// useSessionSave) can pass it directly without further memoization.
+// 返り object は useState の値なので、変化なしの poll をまたいで Object.is identity が安定する。
+// consumer (useSessionSave) は追加の memo なしで渡せる。
 
 export type WindowGeometryState = {
   width: number;
@@ -38,8 +32,8 @@ export type WindowGeometryState = {
 const POLL_INTERVAL_MS = 2000;
 const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 768;
-// Environment() can transiently fail right after startup; retry a few times so
-// one early failure does not permanently disable the #86 polling on non-Windows.
+// Environment() は起動直後に一時失敗しうる。早期の 1 回失敗が非 Windows の #86 poll を
+// 恒久無効化しないよう数回 retry する。
 const ENV_RETRY_LIMIT = 5;
 const ENV_RETRY_DELAY_MS = 300;
 
@@ -60,9 +54,8 @@ export function useWindowGeometryPolling(
 
   useEffect(() => {
     let cancelled = false;
-    // Freeze geometry; only the maximized flag is allowed to flip. Shared by
-    // both the initial WindowIsMaximised() branch and the post-await re-check
-    // branch so future tweaks land in one place.
+    // geometry は固定し maximized フラグだけ立てる。初回 WindowIsMaximised() 分岐と await 後
+    // 再チェック分岐が共有 (変更を一箇所に集約)。
     const markMaximized = () =>
       setWindowState((cur) =>
         cur.maximized ? cur : { ...cur, maximized: true },
@@ -80,15 +73,11 @@ export function useWindowGeometryPolling(
           WindowGetPosition(),
         ]);
         if (cancelled) return;
-        // Re-check maximized: between the first WindowIsMaximised() and now
-        // the user could have maximized the window, in which case sz/pos
-        // reflect the *maximized* geometry. Committing it under maximized:
-        // false would clobber the restore geometry we are deliberately
-        // freezing (issue #86). Drop the snapshot and let the next poll
-        // pick up the maximized flag through the early-return branch above.
-        // The recheck must come *after* the Promise.all — folding it into
-        // the same Promise.all would let WindowIsMaximised resolve before
-        // WindowGetSize observed the maximized state, missing the race.
+        // maximized 再チェック: 最初の WindowIsMaximised() から今の間にユーザーが最大化し得て、
+        // その場合 sz/pos は *最大化* geometry を反映する。maximized: false で commit すると
+        // あえて固定している restore geometry を潰す (issue #86)。snapshot を捨て、次の poll が
+        // 上の early-return で maximized を拾う。再チェックは Promise.all の *後* でないと、
+        // WindowIsMaximised が WindowGetSize より先に resolve して race を取り逃す。
         const maximizedAfter = await WindowIsMaximised();
         if (cancelled) return;
         if (maximizedAfter) {
@@ -125,7 +114,7 @@ export function useWindowGeometryPolling(
           return next;
         });
       } catch {
-        // ignore — Wails runtime may not be ready briefly during startup
+        // 無視 — 起動中は Wails runtime が一瞬未準備のことがある
       }
     };
     const onResize = () => update();
@@ -142,12 +131,9 @@ export function useWindowGeometryPolling(
       update();
     };
 
-    // Resolve the platform before deciding whether to poll. Environment() can
-    // transiently fail right after startup (the same reason update() above is
-    // wrapped in try/catch), so retry it a few times — a single early failure
-    // must not permanently disable the #86 polling on non-Windows. Once the
-    // retry budget is exhausted we fall back to "do not poll", which is also the
-    // safe default for Windows (never clobber the Go-owned geometry, issue #129).
+    // poll するか決める前に platform を解決。Environment() は起動直後に一時失敗しうるので数回
+    // retry する — 1 回の早期失敗が非 Windows の #86 poll を恒久無効化しないように。retry を
+    // 使い切ったら "poll しない" に fallback (Windows でも Go 所有 geometry を潰さない安全既定)。
     let lastEnvError: unknown;
     const resolvePlatform = async (): Promise<string | null> => {
       for (let attempt = 0; attempt < ENV_RETRY_LIMIT; attempt++) {
@@ -168,8 +154,7 @@ export function useWindowGeometryPolling(
     resolvePlatform().then((platform) => {
       if (cancelled) return;
       if (platform === null) {
-        // Log the most recent failure reason so a non-Windows dev can tell why
-        // polling never started instead of seeing silent inaction.
+        // 直近の失敗理由をログし、非 Windows で poll が始まらない理由が分かるように。
         logger.debug(
           "session",
           "window geometry polling skipped (Environment() unresolved after retries)",
@@ -177,9 +162,7 @@ export function useWindowGeometryPolling(
         );
         return;
       }
-      // Windows owns the window geometry natively (issue #129, see the
-      // file-level comment), so polling must not run there. Every other
-      // platform keeps the #86 polling.
+      // Windows は window geometry を native 所有する (issue #129) ので poll しない。他 platform は #86 poll を維持。
       if (platform === "windows") {
         logger.debug(
           "session",

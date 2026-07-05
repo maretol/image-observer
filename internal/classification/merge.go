@@ -9,21 +9,15 @@ import (
 	"time"
 )
 
-// PreviewChildSidecars walks the parent's immediate child directories looking
-// for sidecar files (_classification.json or _classification.csv) and returns
-// a summary the frontend can show in the merge-prompt dialog.
+// PreviewChildSidecars は親の直下子 dir を walk し sidecar (_classification.json/.csv) を探し、
+// merge-prompt dialog 用の summary を返す。
 //
-// Behavior:
-//   - The parent folder's own sidecar (if any) does NOT appear in the result;
-//     callers are expected to gate this entire flow on parent having no sidecar.
-//   - Hidden directories (".prefix") are skipped.
-//   - Recursion is one level deep — only direct children are considered.
-//     Sidecars deeper than one level are ignored (rare in practice and
-//     supporting them would complicate the merge prefix logic).
-//   - When both JSON and CSV exist in the same child, JSON wins (matches the
-//     repository's load preference).
-//   - Per-child read errors are skipped silently so a single broken sidecar
-//     does not block the prompt for legitimate ones.
+// 挙動:
+//   - 親自身の sidecar は結果に出さない (呼び出し側が「親に sidecar 無し」で gate する前提)。
+//   - hidden dir (".prefix") は skip。
+//   - 再帰は 1 段だけ (直下子のみ。深い sidecar は無視 — 稀 + merge prefix 論理が複雑になる)。
+//   - 同じ子に JSON と CSV があれば JSON 優先 (repository の load 優先に合わせる)。
+//   - 子ごとの read エラーは silent skip (1 つ壊れた sidecar が正常な子の prompt を止めない)。
 func (s *Service) PreviewChildSidecars(folderPath string) (*MergePreview, error) {
 	entries, err := os.ReadDir(folderPath)
 	if err != nil {
@@ -41,7 +35,7 @@ func (s *Service) PreviewChildSidecars(folderPath string) (*MergePreview, error)
 		childPath := filepath.Join(folderPath, name)
 		out, err := s.repo.Load(childPath)
 		if err != nil {
-			continue // best-effort: a corrupt child sidecar should not block others
+			continue // best-effort: 壊れた子 sidecar が他を止めない
 		}
 		if out.Source == "none" || out.Data == nil {
 			continue
@@ -63,21 +57,14 @@ func (s *Service) PreviewChildSidecars(folderPath string) (*MergePreview, error)
 	return preview, nil
 }
 
-// MergeChildSidecars reads every child sidecar found by PreviewChildSidecars
-// and writes a parent _classification.json that contains all entries with
-// their filenames prefixed by the child folder name (e.g. "hoge.png" becomes
-// "child1/hoge.png").
+// MergeChildSidecars は PreviewChildSidecars が見つけた各子 sidecar を読み、filename を子フォルダ名で
+// prefix した全 entry を持つ親 _classification.json を書く ("hoge.png" → "child1/hoge.png")。
 //
-// Idempotency: this is a one-shot migration. Calling it when the parent
-// already has a sidecar returns ErrAlreadyExists and writes nothing — the
-// frontend is expected to gate the call on parent having no sidecar.
-//
-// Child sidecars themselves are left in place (delete/move out of scope per
-// user direction; users may continue to consume them with other tools).
+// 冪等性: 一度きりの移行。親に既に sidecar があれば ErrAlreadyExists で何も書かない (frontend が
+// 「親に sidecar 無し」で gate する前提)。子 sidecar 自体は残す (削除/移動はスコープ外)。
 func (s *Service) MergeChildSidecars(folderPath string) (int64, error) {
-	// Only run when the parent has no existing sidecar — the same precondition
-	// as PreviewChildSidecars; without this guard we could accidentally
-	// overwrite a parent the user has already started maintaining.
+	// 親に既存 sidecar が無いときだけ実行 (PreviewChildSidecars と同じ前提)。guard が無いと、user が
+	// 既にメンテし始めた親を誤って上書きしうる。
 	parentOut, err := s.repo.Load(folderPath)
 	if err != nil {
 		return 0, err
@@ -94,8 +81,7 @@ func (s *Service) MergeChildSidecars(folderPath string) (int64, error) {
 	merged := make([]Entry, 0)
 	seen := make(map[string]struct{})
 
-	// Stable ordering: sort child names so the resulting sidecar is
-	// deterministic across platforms with different ReadDir order.
+	// 安定順序: 子名を sort し、ReadDir 順が異なる platform でも結果 sidecar が決定的になるように。
 	type childRec struct {
 		name string
 		path string
@@ -121,7 +107,7 @@ func (s *Service) MergeChildSidecars(folderPath string) (int64, error) {
 		for _, e := range out.Data.Entries {
 			fname := prefix + e.Filename
 			if _, dup := seen[fname]; dup {
-				continue // shouldn't happen with prefixed paths, but be safe
+				continue // prefix 付き path では起きない想定だが安全策
 			}
 			seen[fname] = struct{}{}
 			merged = append(merged, Entry{
@@ -133,9 +119,8 @@ func (s *Service) MergeChildSidecars(folderPath string) (int64, error) {
 		}
 	}
 
-	// Append any direct-child files of the parent that aren't already covered
-	// by the merged set. Without this step, brand-new images directly under
-	// parent would not appear in the sidecar until the user re-saved.
+	// merged に未収録の親直下ファイルを追加。この step が無いと、親直下の新規画像が再 save まで
+	// sidecar に現れない。
 	files, err := s.scanner.ListImageFiles(folderPath)
 	if err != nil {
 		return 0, fmt.Errorf("post-merge scan: %w", err)
@@ -144,9 +129,8 @@ func (s *Service) MergeChildSidecars(folderPath string) (int64, error) {
 		if _, dup := seen[f]; dup {
 			continue
 		}
-		// Skip files that live under a child whose sidecar we already merged —
-		// those entries already exist (possibly as orphans from a child
-		// sidecar's perspective, but that's fine).
+		// 既に merge した子 sidecar 配下のファイルは skip (その entry は既に存在 — 子 sidecar 視点で
+		// orphan かもしれないがそれでよい)。
 		if strings.Contains(f, "/") && hasMergedPrefix(seen, f) {
 			continue
 		}
@@ -162,10 +146,9 @@ func (s *Service) MergeChildSidecars(folderPath string) (int64, error) {
 	return s.repo.CreateJSON(folderPath, c)
 }
 
-// hasMergedPrefix returns true if any key in seen has the same first path
-// segment as f. Used during post-merge filling so we don't double-add files
-// from a child whose sidecar contributed orphans (entries pointing to no real
-// file) — those already exist in `seen` and will be picked up directly.
+// hasMergedPrefix は seen のいずれかの key が f と最初の path segment を共有すれば true。post-merge
+// 充填で、orphan (実ファイル無しの entry) を出した子由来のファイルを二重追加しないため — それらは
+// 既に seen にあり直接拾われる。
 func hasMergedPrefix(seen map[string]struct{}, f string) bool {
 	slash := strings.IndexByte(f, '/')
 	if slash < 0 {
@@ -189,4 +172,3 @@ func countNonEmpty(entries []Entry) int {
 	}
 	return n
 }
-
