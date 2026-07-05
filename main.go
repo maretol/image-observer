@@ -17,6 +17,7 @@ import (
 	"image-observer/internal/state"
 	"image-observer/internal/thumb"
 	"image-observer/internal/winplacement"
+	"image-observer/internal/winrestart"
 )
 
 //go:embed all:frontend/dist
@@ -59,6 +60,13 @@ func main() {
 	logging.Info("app", "thumb worker pool sized",
 		"workerCount", thumb.CurrentWorkerCount(),
 		"setting", userSettings.ThumbnailWorkerCount)
+
+	// Register with Windows so the OS relaunches us after a crash, hang, or an
+	// update reboot (issue #133). Best-effort: a failure only means we will not
+	// be auto-restarted, so log and continue. No-op on non-Windows dev builds.
+	if err := winrestart.Register(); err != nil {
+		logging.Warn("app", "register application restart failed", "err", err.Error())
+	}
 
 	app := NewApp()
 
