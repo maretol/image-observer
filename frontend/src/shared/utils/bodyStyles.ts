@@ -1,16 +1,6 @@
-// Token stack for `document.body.style.cursor` / `userSelect` so that
-// concurrent claimants (DnD, GridSplitter, ImageView pan, …) compose
-// instead of overwriting one another and leaking "" to whatever the
-// user had set before the first claim.
-//
-// Usage:
-//   const release = pushBodyStyle({ cursor: "grabbing", userSelect: "none" });
-//   // ...drag interaction...
-//   release();
-//
-// The last unreleased claim wins per property. On release the stack is
-// re-applied from the bottom up, falling back to the baseline value
-// captured on the first push.
+// document.body.style の cursor / userSelect を token stack で管理する。並行する
+// 要求元 (DnD / GridSplitter / ImageView pan …) が互いに上書きせず合成でき、最初の
+// 要求前の値へ "" を漏らさないため。戻り値の release() で自分の要求を取り下げる。
 
 type BodyStyleClaim = {
   cursor?: string;
@@ -50,10 +40,8 @@ export function pushBodyStyle(claim: BodyStyleClaim): () => void {
     const idx = stack.findIndex((e) => e.id === entry.id);
     if (idx >= 0) stack.splice(idx, 1);
     apply();
-    // Stack drained — drop our cached baseline so the next push re-captures
-    // whatever document.body.style looks like at that point. Without this,
-    // any cursor/userSelect change made by other code in between two drag
-    // sessions would be silently reverted to the old baseline on release.
+    // これがないと、ドラッグ間に他コードが変えた cursor/userSelect が次の release で
+    // 古い baseline に戻ってしまうため、空になったら baseline を破棄する。
     if (stack.length === 0) {
       baseCursor = null;
       baseUserSelect = null;

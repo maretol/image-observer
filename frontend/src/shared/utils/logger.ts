@@ -1,15 +1,5 @@
-// Frontend logger that mirrors the Go-side `internal/logging` API.
-//
-// - INFO/WARN/ERROR are sent immediately to Go via `LogEvent` (1 IPC per call).
-//   The viewer is low-traffic so this is fine.
-// - DEBUG goes to a 200-entry in-memory ring buffer and console.debug only.
-//   Use `logger.flushAll()` to force-send the ring to Go (e.g., when an
-//   error is caught and we want recent context).
-// - `installGlobalErrorHandlers()` wires `window.onerror` and
-//   `unhandledrejection` to the logger and flushes the ring on each fire.
-//
-// `data` is a structured object that gets serialized to JSON before being
-// passed to Go as the LogEvent's `data` argument.
+// Go 側の internal/logging をミラーするフロントエンドロガー。INFO/WARN/ERROR は
+// 即 IPC、DEBUG は ring buffer のみ。
 
 import { LogEvent } from "../../../wailsjs/go/main/App";
 
@@ -40,16 +30,13 @@ function emit(
   const entry: LogEntry = { ts: Date.now(), level, cat, msg, data };
   pushRing(entry);
 
-  // Always echo to the dev console so `wails dev` users see things in
-  // realtime. In packaged builds the console isn't visible but this is
-  // a no-op cost.
+  // wails dev で見えるよう常に console へ echo (パッケージ版では no-op コスト)。
   const consoleArgs: unknown[] = [`[${cat}] ${msg}`];
   if (data !== undefined) consoleArgs.push(data);
   switch (level) {
     case "debug":
       console.debug(...consoleArgs);
-      // DEBUG stays in the ring only; we don't burn an IPC call per entry
-      // (DEBUG is meant for high-frequency events like pointermove).
+      // DEBUG は ring のみ、IPC は消費しない (pointermove 等の高頻度向け)。
       return;
     case "info":
       console.info(...consoleArgs);
@@ -64,8 +51,7 @@ function emit(
 
   void LogEvent(level, cat, msg, data === undefined ? "" : safeStringify(data))
     .catch(() => {
-      // Don't make logging itself fail loudly; a missing IPC just means we
-      // lose this entry from the file (the ring still has it).
+      // ロギング自体を失敗させない — IPC が欠けてもこの 1 件を失うだけ (ring には残る)。
     });
 }
 
@@ -95,9 +81,8 @@ export const logger = {
     emit("error", cat, msg, data);
   },
 
-  // Forward the entire ring buffer to Go as a single INFO line carrying a
-  // JSON snapshot. Used to dump recent high-frequency context when an
-  // error fires, or (later) on a debug hotkey.
+  // error 発火時などに直近の高頻度コンテキストを吐くため、ring 全体を 1 本の
+  // INFO 行で送る。
   flushAll(reason: string = "manual"): void {
     const snapshot = ring.slice();
     void LogEvent(
@@ -108,7 +93,6 @@ export const logger = {
     ).catch(() => {});
   },
 
-  // Inspect for tests / debug.
   _ringSnapshot(): readonly LogEntry[] {
     return ring.slice();
   },
@@ -117,9 +101,8 @@ export const logger = {
   },
 };
 
-// Install once at app startup. Catches synchronous JS errors and unhandled
-// promise rejections, logs them, and flushes the ring buffer so we have
-// the recent UI context (DnD events, etc.) alongside the failure.
+// 起動時に一度だけ設置。捕捉した error / rejection をログし、ring を flush して
+// 失敗と一緒に直近の UI コンテキスト (DnD 等) を残す。
 export function installGlobalErrorHandlers(): void {
   if (typeof window === "undefined") return;
   window.addEventListener("error", (e) => {
