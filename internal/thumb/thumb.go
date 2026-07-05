@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"image-observer/internal/imgdecode"
 	"image-observer/internal/imgfile"
 )
 
@@ -92,7 +93,7 @@ func Get(path string, size int, mode string) (Result, error) {
 }
 
 func generateThumbnail(path, inputExt, outputExt string, cfg Config) ([]byte, error) {
-	src, err := decodeImage(path, inputExt)
+	src, err := imgdecode.Decode(path, inputExt)
 	if err != nil {
 		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
