@@ -38,8 +38,7 @@ export function Panel(props: Props) {
       ? leaf.tabs[leaf.activeIndex]
       : null;
 
-  // Right-click on the image area opens the same menu as right-click on the tab,
-  // but targets the active tab of this panel.
+  // 画像領域の右クリックはタブ右クリックと同じメニューを開く (このパネルの active tab 対象)。
   const onCanvasContextMenu = (e: React.MouseEvent) => {
     if (!activeTab) return;
     e.preventDefault();

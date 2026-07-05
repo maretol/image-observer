@@ -28,9 +28,8 @@ export type SettingsDialogProps = {
   onClose: () => void;
 };
 
-// Top-level category split (#13). v1 has only two: 設定 with sub-nav and
-// ショートカット which today is just the read-only table but is carved out so
-// future rebinding UI can live alongside without expanding the settings nav.
+// トップレベルのカテゴリ分割 (#13)。v1 は 2 つ: sub-nav 付きの 設定 と、今は read-only テーブル
+// だけの ショートカット (将来の rebinding UI を settings nav を広げず同居させるため分離)。
 type Category = "settings" | "shortcuts";
 
 type SectionId =
@@ -99,14 +98,12 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const [category, setCategory] = useState<Category>("settings");
   const [activeId, setActiveId] = useState<SectionId>("logging");
-  // Suppress backdrop close when a pointerdown started inside the dialog
-  // (e.g. text selection drag in an input released over the backdrop). See
-  // ModalShell for the same pattern (#96).
+  // dialog 内で始まった pointerdown (input の text 選択 drag が backdrop 上で release 等) では
+  // backdrop close を抑止 (ModalShell と同パターン, #96)。
   const downOnBackdropRef = useRef(false);
 
-  // Esc to close — registered only when open to avoid stealing keys otherwise.
-  // App.tsx's global keydown listener already short-circuits on `settingsOpen`,
-  // so no extra propagation guard is needed here.
+  // Esc で閉じる — open のときだけ登録 (でないとキーを奪う)。App.tsx の global keydown は既に
+  // settingsOpen で短絡するので、ここに追加の伝播 guard は不要。
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -144,15 +141,10 @@ export function SettingsDialog({
           <h2 id="settings-title" className="settings-title">
             {t("settings.title")}
           </h2>
-          {/* Plain toggle-buttons rather than role="tablist" — we don't ship
-            * the full WAI-ARIA tabs contract (arrow-key nav, roving tabindex,
-            * aria-controls → tabpanel). aria-pressed conveys the same
-            * "currently selected category" signal without making assistive
-            * tech expect tab semantics that aren't implemented.
-            *
-            * `role="group"` is what makes `aria-label` actually surface in
-            * the accessibility tree — without an explicit role, a bare <div>
-            * is "generic" and ATs drop labels on it. */}
+          {/* role="tablist" でなく素の toggle button — 完全な WAI-ARIA tabs 契約 (arrow nav /
+            * roving tabindex / aria-controls) は実装しないため。aria-pressed で同じ「選択中
+            * カテゴリ」を伝える。role="group" が aria-label を a11y tree に出す (role なしの
+            * <div> は generic 扱いで label が落ちる)。 */}
           <div
             className="settings-category-bar"
             role="group"
@@ -197,8 +189,7 @@ export function SettingsDialog({
               {error ? `: ${error}` : null}
             </div>
           ) : category === "shortcuts" ? (
-            // No side nav in this branch, so the content pane naturally fills
-            // the body — `.settings-content` already has `flex: 1`.
+            // この分岐は side nav なしなので content pane が body を埋める (.settings-content は flex: 1)。
             <div className="settings-content">
               <div className="settings-content-header">
                 <h3 className="settings-content-title">

@@ -11,7 +11,7 @@ export type ListPersist = {
   folderPath: string;
   filter: {
     tags: string[];
-    untaggedOnly: boolean; // show only entries with no tags (#116)
+    untaggedOnly: boolean; // タグ無しの entry のみ表示 (#116)
     confidence: string; // "all" | "high" | "mid" | "low"
     query: string;
   };
@@ -19,10 +19,9 @@ export type ListPersist = {
 };
 
 export type SessionInput = {
-  // `maximized` rides alongside the restore geometry. On non-Windows the
-  // useWindowGeometryPolling effect supplies these via the freeze-while-maximized
-  // rule (#86); on Windows the field is frozen at the loaded value here and Go
-  // owns it (issue #129 — see the Go WindowState doc / spec-window-placement §8).
+  // maximized は restore geometry と一緒に運ぶ。非 Windows は useWindowGeometryPolling が
+  // freeze-while-maximized ルール (#86) で供給、Windows は Go が所有し (issue #129) ここでは
+  // ロード値で固定 (spec-window-placement §8)。
   window: {
     width: number;
     height: number;
@@ -30,9 +29,8 @@ export type SessionInput = {
     y: number;
     maximized: boolean;
   };
-  // Viewer set (#11). Each viewer holds an independent BSP layout; persistence
-  // serializes the layouts together so re-launch restores both content and
-  // active selection.
+  // 各 viewer が独立 BSP layout を持つ (#11)。layout をまとめて直列化し再起動で内容と
+  // active 選択を復元する。
   viewers: Viewer[];
   activeViewerId: string;
   topTab: "list" | "viewer";
@@ -43,11 +41,8 @@ const SAVE_DEBOUNCE_MS = 500;
 const STATE_SCHEMA_VERSION = 6;
 
 export function useSessionSave(input: SessionInput) {
-  // The serialized form goes through JSON.stringify so the debounce only
-  // fires when something actually changed (ignoring object identity churn).
-  // Layouts serialize per-viewer so a structural change in viewer 2 doesn't
-  // require touching viewer 1's payload — but the debounce still operates
-  // on the whole-state JSON, which is fine for the tens-of-KB scale we have.
+  // JSON.stringify を通すことで、object identity churn を無視して実際に変わったときだけ
+  // debounce が発火する。debounce は state 全体の JSON で動くが、数十 KB 規模なので問題ない。
   const serialized = JSON.stringify({
     window: input.window,
     viewers: input.viewers.map((v) => ({

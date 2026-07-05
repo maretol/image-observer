@@ -1,6 +1,4 @@
-// Inline SVG icons for the settings side navigation. Kept local to the
-// settings feature; not reused outside SettingsDialog so they don't belong
-// in `shared/icons`.
+// settings side nav 用のインライン SVG アイコン。SettingsDialog 外で再利用しないので shared/icons に置かない。
 
 export function NavIconLog() {
   return (

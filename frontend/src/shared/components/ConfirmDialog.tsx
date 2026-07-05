@@ -57,12 +57,10 @@ function ConfirmDialog({ open, message, onConfirm, onCancel }: ConfirmDialogProp
       open={open}
       onClose={onCancel}
       role="alertdialog"
-      // Yes/no question — require an explicit decision instead of dismissing
-      // on a stray backdrop click.
+      // yes/no なので、backdrop クリックで閉じず明示的な決定を要求する。
       closeOnBackdrop={false}
       initialFocusRef={cancelRef}
-      // alertdialog requires an accessible name; the message body is exposed
-      // via aria-describedby (not aria-labelledby).
+      // alertdialog は accessible name が必須。message body は aria-describedby で公開 (aria-labelledby ではない)。
       ariaLabel={t("common.confirm.aria")}
       ariaDescribedBy="confirm-dialog-message"
       overlayClassName="confirm-dialog-overlay"

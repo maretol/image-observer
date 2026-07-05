@@ -1,15 +1,10 @@
 import { useCallback, useState } from "react";
 import { sanitizeName } from "./viewers";
 
-// useViewerRename owns the inline-edit state for a viewer tab's display name.
-// The actual mutation (sanitize → renameViewer in the viewer set) goes back
-// through the `renameViewer` prop so this hook stays decoupled from the
-// underlying ViewerSet store — useViewerSet already validates / no-ops on an
-// empty sanitized name and surfaces the toast.
-//
-// `editingViewerId` is exposed as-is so the top-tabs bar can derive both
-// `isEditing` (per-tab equality) and `anyRenaming` (`!== null`) from the same
-// source.
+// viewer タブ表示名のインライン編集 state を持つ。実 mutation は renameViewer prop に戻すので
+// ViewerSet ストアと疎結合 (useViewerSet が空名の検証 / no-op / toast を担う)。
+// editingViewerId をそのまま公開し、top-tabs bar が isEditing (tab 一致) と anyRenaming (!== null)
+// を同じソースから導けるように。
 
 type Opts = {
   renameViewer: (viewerId: string, name: string) => void;
@@ -35,9 +30,7 @@ export function useViewerRename({ renameViewer }: Opts): UseViewerRenameReturn {
     (viewerId: string, name: string) => {
       const sanitized = sanitizeName(name);
       if (sanitized === null) {
-        // Empty/whitespace → keep editing so the user can correct. The
-        // underlying renameViewer is still called with the raw value so its
-        // no-op + toast path runs.
+        // 空/空白 → 編集を続けさせる (ユーザーが直せるよう)。生値で renameViewer を呼び no-op + toast を走らせる。
         renameViewer(viewerId, name);
         return;
       }

@@ -1,6 +1,4 @@
-// Tree primitives for the BSP layout: constructors, traversal, and pure
-// functional updates. `useViewerGrid` does the React glue; everything here
-// is a pure function over `LayoutNode`.
+// BSP layout の tree プリミティブ: constructor / traversal / 純粋関数更新。全て LayoutNode の純関数。
 
 import type { LayoutNode, LeafNode, SplitNode, Layout } from "./types";
 import type { Tab } from "../useTabs";
@@ -84,15 +82,14 @@ export function updateSplit(
   return replaceNode(root, id, fn(node));
 }
 
-// Collapse a leaf with zero tabs by promoting its sibling. The root leaf is
-// preserved (an empty viewer is a valid state).
+// tab が 0 の leaf を、兄弟を昇格して collapse する。root leaf は残す (空 viewer は有効な状態)。
 export function collapseEmptyLeaf(
   root: LayoutNode,
   leafId: string,
 ): LayoutNode {
   const leaf = findLeaf(root, leafId);
   if (!leaf || leaf.tabs.length !== 0) return root;
-  if (root.id === leafId) return root; // root leaf stays
+  if (root.id === leafId) return root; // root leaf は残す
   const parent = findParent(root, leafId);
   if (!parent) return root;
   const sibling = parent.a.id === leafId ? parent.b : parent.a;

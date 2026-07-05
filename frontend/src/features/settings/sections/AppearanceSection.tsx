@@ -2,11 +2,8 @@ import { t } from "../../../shared/messages";
 import type { Settings } from "../useSettings";
 import { Field, Segment } from "../SettingsFields";
 
-// UI scale tiers exposed by the segment control. Any value within the Go-side
-// validated range is still accepted via settings.json; the UI just surfaces
-// these standard tiers. The actual numeric bounds live in `internal/settings`
-// (single source of truth) so we don't duplicate them in this file. The `hint`
-// percentages are plain numbers (not localizable), so they stay as literals.
+// segment が公開する UI スケール tier。Go 検証範囲内の任意値は settings.json で受け付ける;
+// UI は標準 tier だけ出す。数値境界は internal/settings が正 (ここに複製しない)。
 const UI_SCALES: Array<{ value: number; label: string; hint: string }> = [
   { value: 90, label: t("settings.appearance.scale.small"), hint: "90%" },
   { value: 100, label: t("settings.appearance.scale.standard"), hint: "100%" },
@@ -21,12 +18,8 @@ export function AppearanceSection({
   data: Settings;
   onChange: (patch: Partial<Settings>) => void;
 }) {
-  // The segment shows 4 standard tiers but uiScalePercent is a free integer
-  // (Go-side validated range). If settings.json holds a non-standard value
-  // (e.g. 105), the segment falls back to highlighting nothing and a hint
-  // shows the live value. The allowed range itself is intentionally not
-  // duplicated here — the Go validator is the single source of truth so the
-  // two can't drift.
+  // segment は 4 tier を出すが uiScalePercent は自由整数 (Go 検証範囲)。非標準値 (105 等) なら
+  // 何もハイライトせず hint に live 値を出す。許容範囲は Go validator が正でここに複製しない。
   const matchedStandard = UI_SCALES.some((o) => o.value === data.uiScalePercent);
   return (
     <Field
