@@ -5,37 +5,21 @@ export type TagInputProps = {
   tags: string[];
   knownTags: string[];
   onChange: (next: string[]) => void;
-  // datalist id; passed in so multiple TagInputs in one document don't collide.
+  // 同一 document 内の複数 TagInput が衝突しないよう渡す datalist id。
   datalistId?: string;
-  // <input> id used for <label htmlFor> association on the host side. Without
-  // this, a sibling label cannot programmatically bind to the actual focusable
-  // element (the chip-input wrapper is a div, not a form control), so screen
-  // readers don't announce the label when focus lands on the input.
+  // <label htmlFor> 紐付け用の <input> id。wrapper が div なのでこれが無いと label を
+  // 実 focusable 要素に結び付けられず、SR が label を読み上げない。
   inputId?: string;
   ariaLabel?: string;
-  // Fires after the internal commit(draft) on the chip-input's blur. The
-  // commit runs first (synchronously calling onChange with the final tags
-  // including any just-typed draft), then this callback. SampleEditPane uses
-  // it to gate auto-save (#105): if the host mirrors `onChange` into a ref,
-  // it can read the post-commit tag list synchronously inside this handler
-  // even though React's setState has not yet flushed (see
-  // spec-edit-autosave.md §5.2). Optional so non-auto-save consumers ignore it.
+  // blur 時、内部 commit(draft) の *後* に発火する。commit が先に onChange を同期呼び
+  // 出しするので、host が onChange を ref にミラーすれば setState flush 前でも commit
+  // 後のタグ列をこのハンドラ内で同期的に読める (auto-save の gate に使う, spec-edit-autosave.md §5.2)。
   onBlur?: () => void;
 };
 
-// TagInput is a chip-style multi-tag input. Each committed tag becomes a
-// removable chip; the trailing text field accepts the next tag with datalist
-// autocomplete against `knownTags`. Commit on Enter / "," / "、" / half-width
-// space / "　" (full-width space) / blur, and Backspace on an empty draft
-// removes the last chip (standard chip-input UX).
-// Tab with a draft that matches exactly one knownTag (case-insensitive prefix,
-// excluding already-added tags) commits that candidate; other Tab behavior
-// (no draft / 0 or >1 matches / Shift+Tab) falls through to default focus
-// navigation.
-// SampleModal forwards initialFocusRef to ModalShell as the chip-input
-// <input> so openSource === "edit" lands focus there; without this, the
-// shell's first-focusable fallback would target a chip × button or the
-// modal close icon.
+// chip 形式の複数タグ入力。確定キーや Tab 補完の挙動は下の onKeyDown を参照。
+// forwardRef で chip-input の <input> を SampleModal → ModalShell に渡すのは、
+// openSource === "edit" 時にここへ focus させるため (無いと × ボタンや閉じるアイコンに当たる)。
 export const TagInput = forwardRef<HTMLInputElement, TagInputProps>(function TagInput(
   {
     tags,
@@ -83,11 +67,9 @@ export const TagInput = forwardRef<HTMLInputElement, TagInputProps>(function Tag
       e.preventDefault();
       onChange(tags.slice(0, -1));
     } else if (e.key === "Tab" && !e.shiftKey) {
-      // draft の case-insensitive prefix で knownTags を絞り、候補が 1 件なら
-      // Tab で確定。Shift+Tab (逆方向フォーカス移動) や draft が空 (trim 後) の
-      // ときは横取りしない。マッチ 0 件 / 複数件のときも通常の Tab 移動を維持。
-      // commit() 側が raw.trim() するのに合わせて検索クエリも trim する
-      // (先頭/末尾空白付き draft でも commit と同じタグにヒットさせる)。
+      // draft の case-insensitive prefix で knownTags を絞り、候補 1 件なら Tab で確定。
+      // Shift+Tab / draft 空 / マッチ 0 or 複数件のときは通常の Tab 移動を維持。
+      // commit() が raw.trim() するのに合わせクエリも trim する。
       const q = draft.trim().toLowerCase();
       if (q === "") return;
       const candidates = knownTags.filter(
@@ -152,11 +134,8 @@ export const TagInput = forwardRef<HTMLInputElement, TagInputProps>(function Tag
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={onKeyDown}
         onBlur={() => {
-          // Order matters: commit(draft) synchronously calls onChange with
-          // the final tags so the host's onChange wrapper can mirror into a
-          // ref; the host's onBlur callback (auto-save in #105) then reads
-          // that ref to get post-commit tags. Swapping the order would lose
-          // the just-typed draft on the auto-save IPC.
+          // 順序が重要: commit(draft) が先に onChange を同期呼び出しし、onBlur (auto-save)
+          // が commit 後のタグを読む。逆順だと直前 draft が auto-save で失われる。
           commit(draft);
           onBlur?.();
         }}

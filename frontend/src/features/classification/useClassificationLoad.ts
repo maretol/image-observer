@@ -14,26 +14,22 @@ import type { MergePromptState } from "./useClassification";
 export type UseClassificationLoadReturn = {
   openFolder: () => Promise<void>;
   reload: () => Promise<void>;
-  // loadInternal is exposed so merge / delete hooks can reuse the same
-  // generation-aware Load IPC wrapper instead of calling LoadClassification
-  // raw (which would bypass requestGenRef / loadingTokenRef bookkeeping and
-  // re-introduce the order-of-arrival hazards that PR #75 closed).
+  // merge / delete hook が同じ generation-aware な Load ラッパを再利用できるよう公開する
+  // (raw LoadClassification は requestGenRef / loadingTokenRef を bypass し到着順 hazard を戻す)。
   loadInternal: (path: string) => Promise<classification.LoadResult | null>;
 };
 
 type Props = {
   initFolderPath: string;
-  // shared refs (read & write)
+  // 共有 ref (read & write)
   folderRef: React.MutableRefObject<string>;
   requestGenRef: React.MutableRefObject<number>;
   loadingTokenRef: React.MutableRefObject<number>;
   initialLoadInFlightRef: React.MutableRefObject<boolean>;
-  // dispatchWatchIntentRef is owned by the watcher hook but read here so
-  // reload() can kick a watcher reconciliation when the user manually
-  // re-reads the folder (= a previously-vanished root coming back gets the
-  // auto-watcher re-armed without the user toggling settings).
+  // watcher hook が持つが、reload() が手動再読み時に watcher reconcile を蹴れるよう読む
+  // (消えた root が戻ったとき設定を触らず auto-watcher を張り直せる)。
   dispatchWatchIntentRef: React.MutableRefObject<() => void>;
-  // setters
+  // setter
   setFolderPath: (path: string) => void;
   setLoadResult: React.Dispatch<
     React.SetStateAction<classification.LoadResult | null>
@@ -41,22 +37,18 @@ type Props = {
   setLoading: (loading: boolean) => void;
   setError: (msg: string | null) => void;
   setMergePrompt: (state: MergePromptState) => void;
-  // collaborators
+  // 協調先
   resetEntriesDependentState: () => void;
   confirm: ConfirmFn;
   toast: ToastFn;
 };
 
-// useClassificationLoad owns the path that fetches the sidecar from disk
-// and the "what to do if there is no sidecar yet?" prompt chain. Wraps
-// LoadClassification with the shared requestGenRef / loadingTokenRef
-// generation tokens so out-of-order completions across watcher / replay /
-// silent-recheck paths cannot roll back a newer result.
+// disk から sidecar を取得する経路と「まだ sidecar が無いとき何をするか」の prompt チェーンを
+// 持つ。LoadClassification を requestGenRef / loadingTokenRef で包み、watcher / replay /
+// silent-recheck の out-of-order 完了が新結果を巻き戻さないようにする。
 //
-// See AGENTS.md §H-8 for the race variable matrix. This hook is the
-// canonical home for the `loadingTokenRef` (only bumped here) and the
-// `initialLoadInFlightRef` (used by watcher silent-recheck to defer until
-// the initial load commits).
+// race 変数マトリクスは AGENTS.md §H-8。loadingTokenRef (ここだけで bump) と
+// initialLoadInFlightRef (watcher silent-recheck が初期 load commit まで defer に使う) の正の置き場。
 export function useClassificationLoad(props: Props): UseClassificationLoadReturn {
   const {
     initFolderPath,
@@ -86,10 +78,8 @@ export function useClassificationLoad(props: Props): UseClassificationLoadReturn
       setError(null);
       try {
         const res = await LoadClassification(path);
-        // Stale → return null so callers (openFolder / autoLoad) skip
-        // postLoadFlow against a now-superseded folder. Returning the
-        // success result let the caller's downstream side-effects fire
-        // against the wrong folder (PR #75 review thread #1).
+        // stale → null を返し、caller (openFolder / autoLoad) が supersede 済み folder に対して
+        // postLoadFlow を走らせないように (success を返すと下流の副作用が誤 folder に発火する)。
         if (myGen !== requestGenRef.current) return null;
         setLoadResult(res);
         return res;
@@ -98,16 +88,14 @@ export function useClassificationLoad(props: Props): UseClassificationLoadReturn
         const msg = errorMessage(e);
         setError(msg);
         setLoadResult(null);
-        // Clear entries-dependent state so a stranded editing popover /
-        // conflict draft / mergePrompt / pending replay doesn't survive
-        // the load failure (PR #75 13th, thread A).
+        // entries 依存 state をクリアし、load 失敗後に取り残された editing popover / conflict draft /
+        // mergePrompt / pending replay が残らないように。
         resetEntriesDependentState();
         toast(`読み込みに失敗しました: ${msg}`, "error");
         return null;
       } finally {
-        // Clear the in-flight flag before the spinner release so any
-        // silent recheck scheduled while we were awaiting can proceed
-        // on the next microtask without seeing a stale flag.
+        // spinner 解放の前に in-flight フラグをクリアし、await 中に scheduled された silent recheck が
+        // 次の microtask で stale フラグを見ずに進めるように。
         if (myLoadToken === loadingTokenRef.current) {
           initialLoadInFlightRef.current = false;
           setLoading(false);
@@ -126,24 +114,16 @@ export function useClassificationLoad(props: Props): UseClassificationLoadReturn
     ],
   );
 
-  // postLoadFlow runs after a successful Load when the parent has no sidecar.
-  // It first looks for child sidecars to merge (one-time migration path) and
-  // falls back to the "create empty sidecar?" confirm. Used by both the
-  // explicit folder picker and the auto-load on mount, so a session-restored
-  // folder also gets the merge prompt — without this, picking a folder once
-  // and then restarting the app would silently bypass the migration.
+  // 親に sidecar が無いとき成功 Load 後に走る。まず子 sidecar のマージ (一度きりの移行) を探し、
+  // 無ければ「空 sidecar を作る?」confirm。folder picker と mount auto-load 両方が使うので、
+  // session 復元 folder も merge prompt を得る (でないと再起動で移行を silent に飛ばす)。
   const postLoadFlow = useCallback(
     async (path: string, res: classification.LoadResult) => {
       if (res.hasSidecar) return;
-      // Each await point below is a potential window for the user to
-      // switch folders. Without these guards we'd surface the OLD
-      // folder's merge prompt / "create sidecar?" confirm against the
-      // NEW folder's UI (a real UX bug — the user sees a prompt they
-      // never asked for) (PR #75 12th preemptive, postLoadFlow stale
-      // check). The CreateEmptyClassification / loadInternal at the end
-      // still run because they're disk-level operations the user
-      // originally requested on `path` — only the user-facing surfacing
-      // of state (setMergePrompt / confirm) needs the stale check.
+      // 下の各 await 点は user が folder を切り替える窓。guard が無いと旧 folder の merge prompt /
+      // "create sidecar?" confirm を新 folder の UI に出してしまう (頼んでいない prompt = UX バグ)。
+      // 末尾の CreateEmptyClassification / loadInternal は user が path に対して元々頼んだ disk 操作
+      // なので走らせてよい — stale check が要るのは state を UI に出す部分 (setMergePrompt / confirm) だけ。
       let preview: classification.MergePreview | null = null;
       try {
         preview = await PreviewChildSidecars(path);
@@ -168,25 +148,20 @@ export function useClassificationLoad(props: Props): UseClassificationLoadReturn
         }
         return;
       }
-      // Folder check before the trailing reload: even though loadInternal
-      // is gen-aware and would mark itself stale via the new openFolder's
-      // bump, we still issued an IPC for the OLD folder. Skipping it when
-      // state has moved on saves a wasted Load and prevents any race with
-      // the gen-bump timing (PR #75 14th, thread C).
+      // 末尾 reload の前に folder check: loadInternal は gen-aware で新 openFolder の bump により
+      // 自身を stale にするが、旧 folder に対して IPC を出してはいる。state が動いていれば skip して
+      // 無駄な Load を省き gen-bump タイミングとの race も防ぐ。
       if (folderRef.current !== path) return;
       await loadInternal(path);
     },
     [confirm, folderRef, loadInternal, setMergePrompt, toast],
   );
 
-  // Auto-load on mount if a folderPath was restored from session. Also runs
-  // the same merge / create-empty decision tree so the user does not need to
-  // re-pick the folder to see the migration prompt after an app restart.
-  // The ref guards postLoadFlow (the user-facing prompt) at the side-effect
-  // point so StrictMode's dev double-mount cannot queue confirm() twice.
-  // Putting the guard at the effect entry instead would suppress *both* runs:
-  // the first async would be killed by `cancelled` (set by the immediate
-  // cleanup), and the second would early-return before starting any work.
+  // session から folderPath が復元されたら mount で auto-load。同じ merge / create-empty 判定も
+  // 走らせ、再起動後に folder を選び直さず移行 prompt を出す。ref は postLoadFlow (user-facing prompt) を
+  // 副作用点で guard し、StrictMode の dev 二重 mount が confirm() を 2 度 queue しないように。
+  // effect 入口に guard を置くと *両方* の run が抑止される (1 本目は cancelled で殺され、2 本目は
+  // 作業前に early-return する)。
   const autoLoadFlowedRef = useRef(false);
   useEffect(() => {
     if (!initFolderPath) return;
@@ -201,8 +176,7 @@ export function useClassificationLoad(props: Props): UseClassificationLoadReturn
     return () => {
       cancelled = true;
     };
-    // Intentionally run only on mount; `initFolderPath` is a constant captured
-    // at hook construction.
+    // mount 時のみ実行する意図。initFolderPath は hook 構築時に捕捉した定数。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -214,26 +188,19 @@ export function useClassificationLoad(props: Props): UseClassificationLoadReturn
       toast(`フォルダ選択に失敗しました: ${errorMessage(e)}`, "error");
       return;
     }
-    if (!picked) return; // user cancelled
-    // Sync folderRef synchronously before triggering the state update so
-    // any in-flight watcher event for the OLD folder is rejected by the
-    // handler's "payload.folder === folderRef.current" check, instead of
-    // sneaking through during the gap between setFolderPath() and the
-    // next render (PR #75 review).
+    if (!picked) return; // ユーザーがキャンセル
+    // state 更新の前に folderRef を同期更新し、旧 folder の in-flight watcher event が handler の
+    // "payload.folder === folderRef.current" で弾かれるように (setFolderPath() と次 render の隙間で
+    // すり抜けないように)。
     folderRef.current = picked;
     setFolderPath(picked);
-    // Folder change invalidates ALL entries-dependent state, not just
-    // selection — editing pointing at an OLD-folder file would re-surface
-    // its popover if the NEW folder happens to contain a same-named file,
-    // conflict / mergePrompt / pendingResultRef likewise carry stale
-    // folder pointers (PR #75 14th, thread A). resetEntriesDependentState
-    // covers selection + anchor + all of the above in one call.
+    // folder 変更は選択だけでなく entries 依存 state を全て無効化する — 旧 folder のファイルを
+    // 指す editing は新 folder に同名があれば popover を復活させ、conflict / mergePrompt /
+    // pendingResultRef も stale な folder pointer を持つ。resetEntriesDependentState が一括処理する。
     resetEntriesDependentState();
     const res = await loadInternal(picked);
-    // loadInternal returns null on stale (a newer Load superseded us) as
-    // well as on error. In both cases the postLoadFlow's merge / create-
-    // empty prompts must not run against an already-superseded folder
-    // (PR #75 review thread #1).
+    // loadInternal は error だけでなく stale (新 Load が supersede) でも null。どちらでも
+    // postLoadFlow の merge / create-empty prompt を supersede 済み folder に走らせない。
     if (!res) return;
     await postLoadFlow(picked, res);
   }, [
@@ -249,14 +216,10 @@ export function useClassificationLoad(props: Props): UseClassificationLoadReturn
     const cur = folderRef.current;
     if (!cur) return;
     await loadInternal(cur);
-    // Also kick the watcher reconciliation: if a previous root vanished
-    // (the Go-side loop exited but Manager.state went zombie until the
-    // next Start), the folder-watch effect won't re-fire on its own
-    // because folderPath/watchMode didn't change. Dispatching here
-    // bridges that gap so a user pressing "再読み込み" after recreating
-    // the folder also restores auto-monitoring. Manager.Start's
-    // goroutineExited zombie-detection then tears down the dead state
-    // and builds a fresh watcher (PR #75 11th, thread B).
+    // watcher reconcile も蹴る: 前の root が消えた (Go 側 loop は抜けたが次の Start まで
+    // Manager.state が zombie) 場合、folderPath/watchMode が変わらないので folder-watch effect は
+    // 自発的に再発火しない。ここで dispatch すると、folder を作り直して "再読み込み" を押した user が
+    // auto-monitoring も復旧できる。Manager.Start の zombie 検出が dead state を tear down し新 watcher を建てる。
     dispatchWatchIntentRef.current();
   }, [dispatchWatchIntentRef, folderRef, loadInternal]);
 

@@ -6,10 +6,9 @@ import {
   canBulkSplitOpen,
 } from "./cardContextMenuLogic";
 
-// Per-item / chrome heights used for the *initial* position seed. The actual
-// viewport-edge clamp re-runs in useLayoutEffect after DOM commit but before
-// paint via getBoundingClientRect(), so these only need to be "close enough"
-// to avoid a visible jump on first paint (mirrors TabContextMenu).
+// *初期* 位置 seed 用の概算高さ。実際の画面端クランプは DOM commit 後 paint 前の
+// useLayoutEffect で getBoundingClientRect により再計算するので、初回描画で飛ばない
+// 程度に "だいたい" で足りる (TabContextMenu と同様)。
 const APPROX_MENU_WIDTH = 220;
 const CTX_ITEM_HEIGHT = 24;
 const CTX_DIVIDER_HEIGHT = 9;
@@ -18,32 +17,27 @@ const CTX_MENU_CHROME_HEIGHT = 14;
 type Viewer = { id: string; name: string };
 
 export type CardContextMenuProps = {
-  // Initial cursor position (raw clientX/Y from the contextmenu event).
+  // 初期カーソル位置 (contextmenu event の clientX/Y)。
   x: number;
   y: number;
-  // Mode is computed by the parent via computeCardContextMenuMode so callers
-  // can unit-test the decision without rendering.
+  // 親が computeCardContextMenuMode で計算 (render 無しで判定を test できるよう)。
   mode: CardContextMenuMode;
-  // Viewer set (#11). In single mode we render one "ビューアで開く" per viewer.
-  // In bulk mode the destination is `bulkDstViewerId` instead.
+  // single モードは viewer ごとに「ビューアで開く」を出す。bulk は bulkDstViewerId が宛先 (#11)。
   viewers: Viewer[];
   activeViewerId: string;
-  // Number of selected entries (only meaningful in bulk mode). Used both for
-  // the label ("3 件をタブで開く") and to gate the split-open item.
+  // 選択件数 (bulk モードのみ意味を持つ)。ラベルと split-open の gate に使う。
   selectedCount: number;
-  // Bulk destination viewer id — sourced from the ClassificationView's bulk-
-  // toolbar `<select>` so the toolbar and the menu open into the same viewer
-  // (spec §11-E).
+  // bulk の宛先 viewer id — toolbar の <select> 由来で、toolbar とメニューが同じ
+  // viewer に開くように (spec §11-E)。
   bulkDstViewerId: string;
 
-  // Single-mode actions.
+  // single モードのアクション。
   onOpenInViewer: (viewerId: string) => void;
   onCopy: () => void;
   onEnterSelectionMode: () => void;
   onDelete: () => void;
 
-  // Bulk-mode actions. Parent supplies the destination and selection so the
-  // menu doesn't need to know how either is sourced.
+  // bulk アクション。宛先と選択は親が供給する (メニューは出所を知らなくてよい)。
   onOpenManyInTabs: () => void;
   onOpenManyAsSplit: () => void;
   onClearSelection: () => void;
@@ -63,13 +57,9 @@ type MenuEntry =
     }
   | { kind: "divider"; key: string };
 
-// CardContextMenu — right-click menu on a classification list Card.
-// Two modes (spec §5.2):
-//   single: "ビューア「{name}」で開く" × N + 「選択モードに切り替え」+ 「削除」
-//   bulk:   「N 件をタブで開く / パネル分割で開く / 選択解除」
-// Chrome and outside-click / Esc behavior mirror TabContextMenu so list and
-// viewer right-click menus stay consistent. Render via createPortal so the
-// menu sits outside .cls-view's `zoom: var(--ui-scale)` ancestor (#72).
+// 分類 Card の右クリックメニュー。2 モード (single / bulk, spec §5.2)。chrome と
+// outside-click / Esc は TabContextMenu に合わせる。createPortal で描画するのは
+// .cls-view の zoom: var(--ui-scale) 祖先の外に出すため (#72)。
 export function CardContextMenu({
   x,
   y,
@@ -109,14 +99,12 @@ export function CardContextMenu({
   const itemsRef = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
-    // Defer registration so we don't catch the same click / contextmenu
-    // event that opened the menu.
+    // メニューを開いた click / contextmenu を拾わないよう登録を defer。
     const t = window.setTimeout(() => {
       const onDocPointerDown = (e: PointerEvent) => {
-        // pointerdown (not mousedown) so a click landing on ImageView's
-        // pan-drag handler — which preventDefault()s pointerdown and
-        // suppresses the synthesized mousedown — still closes this menu
-        // (#56, same fix used by TabContextMenu).
+        // mousedown でなく pointerdown — ImageView の pan-drag が pointerdown を
+        // preventDefault して合成 mousedown を抑止するので、その上のクリックでも
+        // メニューを閉じられるように (#56)。
         const target = e.target as Element | null;
         if (target && target.closest(".cls-card-context-menu-root")) return;
         onClose();
@@ -139,9 +127,8 @@ export function CardContextMenu({
     };
   }, [onClose]);
 
-  // Vertical arrow-key navigation (mirrors TabContextMenu). Disabled items
-  // are filtered out — focus() no-ops on disabled buttons anyway, but the
-  // wrap math has to skip them so ArrowDown doesn't get stuck.
+  // 矢印キー縦移動。disabled を除外するのは wrap 計算が引っかかって ArrowDown が
+  // 止まらないようにするため。
   const focusItem = (idx: number) => {
     const items = itemsRef.current.filter(
       (el): el is HTMLButtonElement => el !== null && !el.disabled,
@@ -182,16 +169,13 @@ export function CardContextMenu({
 
   const rootRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>(() => ({
-    // Math.max(0, ...) floors the result so a window narrower / shorter than
-    // the menu doesn't push it off-screen into negative coordinates.
+    // Math.max(0, ...) で下限を切り、メニューより狭い/低い窓でも負座標に押し出されないように。
     left: Math.max(0, Math.min(x, window.innerWidth - APPROX_MENU_WIDTH)),
     top: Math.max(0, Math.min(y, window.innerHeight - approxHeight)),
   }));
 
-  // After first DOM commit (before paint), measure the actual rendered size
-  // and re-clamp so OS / browser / font differences in line-height can't
-  // push the menu off-screen. Mount-only — re-running on every render would
-  // flicker.
+  // 初回 commit 後 (paint 前) に実サイズを測って再クランプ (OS/browser/font の
+  // line-height 差で画面外に出ないように)。mount のみ — 毎 render 実行は flicker する。
   useLayoutEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -210,9 +194,8 @@ export function CardContextMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Walk entries once, assigning a stable itemsRef slot to each <button>.
-  // The slot index is captured at render time (not in the ref callback) so
-  // StrictMode double-invoke / unmount-null cleanup can't drift the slots.
+  // 各 <button> に安定した itemsRef スロットを割り当てる。slot index を render 時に
+  // 確定するのは StrictMode の二重呼び出し / unmount-null cleanup で slot がずれないため。
   let buttonIdx = 0;
 
   return createPortal(
@@ -275,7 +258,7 @@ function buildSingleEntries(
 ): MenuEntry[] {
   const entries: MenuEntry[] = [];
   for (const v of viewers) {
-    // Single-viewer mode: no "(現在)" — the suffix would carry zero info.
+    // 単一ビューア時は "(現在)" を付けない (情報量ゼロなので)。
     const suffix =
       viewers.length > 1 && v.id === activeViewerId ? " (現在)" : "";
     const label = `ビューア「${v.name}」で開く${suffix}`;
@@ -288,9 +271,7 @@ function buildSingleEntries(
       onClick: () => onOpenInViewer(v.id),
     });
   }
-  // Copy the image to the clipboard (#127) — grouped with the open actions
-  // since both act on this one image. Always present, so the divider below is
-  // always valid even when there are no viewers.
+  // クリップボードへコピー (#127)。常に出すので viewer が無くても下の divider が有効。
   entries.push({
     kind: "item",
     key: "copy",
@@ -324,24 +305,17 @@ function buildBulkEntries(
   onClearSelection: () => void,
 ): MenuEntry[] {
   const dst = viewers.find((v) => v.id === bulkDstViewerId);
-  // Show "→ {name}" only when the user can plausibly mistake which viewer
-  // would receive the action (= 複数ビューア時)。1 個しかないなら表記不要。
+  // 複数ビューア時だけ "→ {name}" を出す (1 個なら宛先を誤解しようがないので不要)。
   const intoSuffix = dst && viewers.length > 1 ? ` → ${dst.name}` : "";
   const splitDisabled = !canBulkSplitOpen(selectedCount);
-  // Disabled <button>s can't receive focus, so a `title` / `aria-label` would
-  // be unreachable for keyboard / screen-reader users (Copilot review #58
-  // thread #2). Embed the limit reason directly into the visible label so the
-  // disabled state explains itself. `title` is kept as supplementary text for
-  // pointer users with extended hover.
+  // disabled <button> は focus できず title / aria-label が SR / キーボードに届かないので、
+  // 上限理由を可視ラベルに埋めて disabled 状態が自己説明するようにする。title は hover 補助。
   const splitLabel = splitDisabled
     ? `${selectedCount} 件をパネル分割で開く (上限 ${SPLIT_OPEN_LIMIT} 枚)${intoSuffix}`
     : `${selectedCount} 件をパネル分割で開く${intoSuffix}`;
   const tabsLabel = `${selectedCount} 件をタブで開く${intoSuffix}`;
-  // For disabled split, keep the limit hint (already in the label too) so the
-  // tooltip explains *why* it's disabled. Otherwise fall back to the full
-  // label so the truncated viewer-name suffix is reachable on hover (#58
-  // review round 3 — viewer names can be up to 32 runes, the ellipsis from
-  // ctx-item-viewer hides the tail).
+  // disabled 時は上限ヒントを tooltip に。有効時は full ラベルにして、省略された
+  // viewer 名の末尾を hover で読めるようにする (viewer 名は最大 32 runes で ellipsis が末尾を隠す)。
   const splitTitle = splitDisabled
     ? `パネル分割で開けるのは ${SPLIT_OPEN_LIMIT} 枚までです (タブで開いてください)`
     : splitLabel;

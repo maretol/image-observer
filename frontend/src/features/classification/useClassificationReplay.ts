@@ -14,12 +14,12 @@ import type {
 import { decideAutoMerge } from "./watcherPolicy";
 
 type Props = {
-  // Defer-source state (drives the open→close detection effects below).
+  // defer 元 state (下の open→close 検出 effect を駆動)。
   editing: EditingState;
   conflict: ConflictPrompt | null;
   mergePrompt: MergePromptState;
 
-  // shared refs
+  // 共有 ref
   folderRef: React.MutableRefObject<string>;
   watchModeRef: React.MutableRefObject<string | undefined>;
   requestGenRef: React.MutableRefObject<number>;
@@ -29,14 +29,14 @@ type Props = {
   mergePromptOpenRef: React.MutableRefObject<boolean>;
   pendingResultRef: React.MutableRefObject<PendingResult | null>;
 
-  // setters
+  // setter
   setLoadResult: React.Dispatch<
     React.SetStateAction<classification.LoadResult | null>
   >;
   setError: (msg: string | null) => void;
   setEditing: React.Dispatch<React.SetStateAction<EditingState>>;
 
-  // collaborators
+  // 協調先
   commitFreshResult: (
     fresh: classification.LoadResult,
     fnames: ReadonlySet<string>,
@@ -45,25 +45,16 @@ type Props = {
   toast: ToastFn;
 };
 
-// useClassificationReplay handles the parked-payload commit when any of the
-// three defer sources (editing-open / conflict-open / mergePrompt-open)
-// transitions open → closed. performReplay centralises four corner cases
-// that the per-effect implementations kept getting subtly wrong as more
-// cases piled up:
-//   1) folder switched while deferred → drop pending
-//   2) mtime advanced (user saved while deferred → pending.fresh is
-//      pre-save) → re-Load instead of committing the stale snapshot,
-//      otherwise the user's edit gets visually rolled back (PR #75 review)
-//   3) re-running decideAutoMerge so editing-target-removed exception
-//      still fires if it arose while deferring
-//   4) re-parking when one defer source closed but another is still open
-//      (e.g. conflict resolved → editing still open with target)
+// 3 つの defer 元 (editing / conflict / mergePrompt) の open → closed で、保留 payload を
+// commit する。performReplay は 4 つの corner case を集約する:
+//   1) deferred 中に folder 切替 → pending を捨てる
+//   2) mtime が進んだ (deferred 中に save → pending.fresh は save 前) → stale snapshot を
+//      commit せず re-Load する。でないとユーザーの編集が見た目上巻き戻る
+//   3) decideAutoMerge を再実行し、defer 中に生じた editing-target-removed 例外も発火させる
+//   4) 片方の defer 元が閉じてももう片方が開いていれば re-park する
 //
-// The replay reload (case 2) bumps requestGenRef so that any in-flight
-// watcher-handler Load whose result returns *after* this reload's commit
-// is discarded as stale (out-of-order ordering between the event-driven
-// path and the replay-driven path). The reload also honours its own
-// generation in its catch / success guards.
+// replay reload (case 2) は requestGenRef を bump し、この reload の commit *後* に返る
+// in-flight watcher Load を stale 破棄する (event 駆動と replay 駆動の順序前後を吸収)。
 export function useClassificationReplay(props: Props): void {
   const {
     editing,
@@ -89,27 +80,22 @@ export function useClassificationReplay(props: Props): void {
     const pending = pendingResultRef.current;
     if (!pending) return;
     if (watchModeRef.current === WATCH_MODE_OFF) {
-      // The user disabled monitoring while we held this parked auto-merge
-      // result. Commit-on-defer-close would surprise them by reflecting an
-      // external change they opted out of (PR #75 review suppressed-g).
+      // この保留 auto-merge 結果を持っている間にユーザーが監視を無効化した。
+      // defer-close で commit するとオプトアウトした外部変更が反映され驚かせる。
       pendingResultRef.current = null;
       return;
     }
     if (pending.folder !== folderRef.current) {
-      // Folder switched while parked; the stored result is for the wrong
-      // tab. Drop it; a fresh watcher event for the current folder will
-      // arrive on its own.
+      // park 中に folder 切替。保存結果は別タブ用なので捨てる (現 folder の watcher
+      // event は自然に届く)。
       pendingResultRef.current = null;
       return;
     }
     if (pending.capturedGen !== requestGenRef.current) {
-      // Generation drifted: a manual reload / local mutation / another
-      // watcher payload committed (and bumped requestGenRef) since this
-      // pending was parked. The on-screen state already reflects a newer
-      // truth; committing the pending could roll it back even if mtime
-      // happens to match (entries-only changes don't bump sidecar mtime,
-      // so the mtime check below misses this case — PR #75 11th,
-      // suppressed-A).
+      // gen drift: park 後に manual reload / local mutation / 別 watcher payload が
+      // commit (して requestGenRef を bump) した。画面は既に新しい真値なので、pending を
+      // commit すると mtime が一致しても巻き戻りうる (entries だけの変更は sidecar mtime を
+      // bump しないので下の mtime チェックでは拾えない)。
       pendingResultRef.current = null;
       return;
     }
@@ -117,66 +103,49 @@ export function useClassificationReplay(props: Props): void {
     let reloadedFresh = false;
     const cur = loadResultRef.current;
     if (cur && cur.mtime !== fresh.mtime) {
-      // mtime advanced past the park snapshot, which means we (or another
-      // path) wrote the sidecar while deferred. The parked fresh is now
-      // pre-save state — committing it would visually undo the user's
-      // edit. Re-Load to pick up the latest entries + mtime, claiming a
-      // new generation so an out-of-order watcher Load can't overwrite us.
+      // mtime が park snapshot を超えた = deferred 中に sidecar を書いた。park した fresh は
+      // save 前 state で、commit するとユーザー編集を巻き戻す。re-Load して最新
+      // entries + mtime を取り、新 gen を取って out-of-order watcher Load に上書きされないように。
       pendingResultRef.current = null;
       const myGen = ++requestGenRef.current;
       try {
         fresh = await LoadClassification(folderRef.current);
         reloadedFresh = true;
       } catch (e) {
-        // Drop if a newer request superseded us mid-await (the watcher
-        // handler's success path will commit instead).
+        // await 中に新しい request が上書きしたら drop (watcher handler の成功経路が commit する)。
         if (myGen !== requestGenRef.current) return;
         if (folderRef.current !== pending.folder) return;
-        // Also re-check watchMode: the entry-gate above ran before the
-        // reload await. If the user flipped to off while awaiting,
-        // surfacing the failure would act on monitoring the user opted
-        // out of (PR #75 8th, thread B).
+        // watchMode を再チェック: 上の entry-gate は reload await の前に走った。await 中に
+        // off にされたら、オプトアウトした監視に対して失敗を出すことになる。
         if (watchModeRef.current === WATCH_MODE_OFF) return;
-        // Otherwise surface to the user — the suppressed comment in the
-        // 4th-round review pointed out that log-only made auto-merge
-        // failures invisible. Mirror the manual-reload error path.
+        // それ以外はユーザーに出す (log だけだと auto-merge 失敗が見えないため)。manual-reload の
+        // error 経路に合わせる。
         const msg = errorMessage(e);
         setError(msg);
         setLoadResult(null);
-        // Clear entries-dependent state alongside loadResult — same rule
-        // as loadInternal's catch (PR #75 13th, thread A).
+        // loadResult と一緒に entries 依存 state をクリア (loadInternal の catch と同じ)。
         resetEntriesDependentState();
         toast(`読み込みに失敗しました: ${msg}`, "error");
         logger.warn("classification", "replay reload failed", { err: msg });
         return;
       }
-      // Success path also generation-checked: a newer watcher Load may
-      // have committed while we awaited; discard so we don't roll it
-      // back (PR #75 review).
+      // 成功経路も gen チェック: await 中に新しい watcher Load が commit していたら、
+      // 巻き戻さないよう discard する。
       if (myGen !== requestGenRef.current) return;
       if (folderRef.current !== pending.folder) return;
-      // Same off-during-await guard — committing the freshly-reloaded
-      // result after the user disabled monitoring would surprise them
-      // (PR #75 8th, thread B).
+      // 同じ off-during-await ガード — 監視無効化後に reload 結果を commit すると驚かせる。
       if (watchModeRef.current === WATCH_MODE_OFF) return;
     }
-    // Even when we didn't reload (mtime matched, fresh = pending.fresh),
-    // re-check watchMode here so the deferred commit doesn't slip through
-    // after the user disabled monitoring between defer-park and replay
-    // trigger. The entry-gate above already handles the case where
-    // performReplay starts with watchMode = off, but watchMode could
-    // also flip during the reload await covered above (handled there).
-    // This final guard catches the "no reload, fresh was parked while
-    // watchMode was auto, then user toggled off, then defer closed"
-    // sequence (PR #75 8th, thread B).
+    // reload しなかった場合 (mtime 一致, fresh = pending.fresh) でも、defer-park と replay
+    // トリガの間に監視が off にされた deferred commit がすり抜けないよう watchMode を再チェック。
+    // entry-gate は「performReplay 開始時に off」を、上の await ガードは reload 中の flip を
+    // 扱う。この最終ガードは「reload なし + auto 中に park → off にトグル → defer close」を拾う。
     if (watchModeRef.current === WATCH_MODE_OFF) {
       pendingResultRef.current = null;
       return;
     }
     if (reloadedFresh) {
-      // Clear any leftover error from a previous failed reload — the
-      // replay succeeded so the UI should not keep showing it
-      // (PR #75 review suppressed-d).
+      // 前回失敗した reload の残り error をクリア (replay 成功なので出し続けない)。
       setError(null);
     }
     const fnames = new Set(fresh.entries.map((e) => e.filename));
@@ -188,9 +157,8 @@ export function useClassificationReplay(props: Props): void {
       freshFilenames: fnames,
     });
     if (action.kind === "defer") {
-      // Re-park with the possibly-fresher snapshot AND the current gen
-      // (the snapshot was just refreshed by our reload, so this becomes
-      // the new baseline against which future gen drift is measured).
+      // より新しい snapshot と現 gen で re-park (reload で更新した snapshot が、今後の
+      // gen drift 判定の新 baseline になる)。
       pendingResultRef.current = {
         fresh,
         folder: pending.folder,
@@ -221,9 +189,8 @@ export function useClassificationReplay(props: Props): void {
     watchModeRef,
   ]);
 
-  // Replay triggers: any of conflict / mergePrompt / editing transitioning
-  // open → closed. performReplay drops itself if any *other* defer source
-  // is still open.
+  // replay トリガ: conflict / mergePrompt / editing のいずれかが open → closed。
+  // 他の defer 元がまだ開いていれば performReplay は自ら drop する。
   const wasInDeferRef = useRef(false);
   useEffect(() => {
     const inDefer = mergePrompt.open || conflict !== null;

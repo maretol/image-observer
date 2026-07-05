@@ -1,19 +1,12 @@
 import type { classification } from "../../../wailsjs/go/models";
 import { extractTags, serializeTags } from "./filters";
 
-// computeEditDirty returns true when the in-pane form (tags / confidence /
-// note) diverges from the entry's persisted baseline. Extracted as a pure
-// helper so SampleEditPane stays a thin React wrapper and the dirty rule
-// is testable in isolation (spec §5.4 hinges on this — false negatives
-// here would let unsaved edits silently survive a prev/next jump).
+// in-pane フォーム (tags/confidence/note) が保存済み baseline と食い違うか。false
+// negative は未保存編集が prev/next jump で消える原因になる (spec §5.4)。
 //
-// Tag comparison passes the entry side through extractTags() to canonicalize
-// legacy parens / "alice,bob" (no space after comma) folders, then runs
-// serializeTags() on *both* sides so the comparison is against the canonical
-// "alice, bob" save format. The local `tags` side is not re-extracted —
-// TagInput.commit already rejects duplicates on input so the state never
-// holds them, and the order is preserved (a user-driven reorder still
-// flips dirty on). Only genuine user edits flip dirty on.
+// タグ比較は entry 側を extractTags で正規化 (旧括弧 / "alice,bob" 形式を吸収) し、
+// 両側を serializeTags して canonical な "alice, bob" 形式で比べる。local tags 側を
+// 再 extract しないのは、TagInput.commit が入力時に重複を弾き順序も保つため。
 export function computeEditDirty(
   entry: classification.Entry | null,
   tags: string[],

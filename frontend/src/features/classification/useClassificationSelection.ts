@@ -7,32 +7,22 @@ export type UseClassificationSelectionReturn = {
   toggleSelected: (filename: string) => void;
   extendSelectionTo: (filename: string, displayedOrder: string[]) => void;
   clearSelected: () => void;
-  // setSelected / resetForFolderSwitch are escape hatches the orchestrator
-  // needs so it can:
-  //   - prune the selection set inside commitFreshResult when the watcher
-  //     supplies a fresh entries snapshot (drop filenames that vanished),
-  //   - remove a single filename inside deleteOne (the user just trashed it),
-  //   - clear selection + anchor as part of resetEntriesDependentState (folder
-  //     switch / load failure / similar entries-dependent invalidations).
-  // The hook can't model these from the inside because they tie selection
-  // state to loadResult / folder mutations that live in the orchestrator.
+  // orchestrator 用の escape hatch: watcher commit での prune / deleteOne での
+  // 単一除去 / folder 切替時の全クリア。selection を loadResult / folder の変更に
+  // 結びつけるのは orchestrator 側なので hook 内からはモデル化できないため。
   setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
   resetForFolderSwitch: () => void;
 };
 
-// useClassificationSelection owns the multi-select set (`Set<filename>`) and
-// the shift-range anchor. The hook is shared-ref-free; the only cross-state
-// coupling is that the orchestrator drives reset on folder switch and prune
-// on watcher commits via the escape hatches above.
+// multi-select set (Set<filename>) と shift-range anchor を持つ。shared-ref-free。
 export function useClassificationSelection(): UseClassificationSelectionReturn {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  // Anchor for Shift+click range selection. Set on every toggle (single or
-  // ctrl); persists across shift-extends so the user can adjust the range.
+  // Shift+click 範囲選択の anchor。toggle ごとに set し、shift-extend をまたいで
+  // 残る (範囲を調整できるよう)。
   const [selectAnchor, setSelectAnchor] = useState<string | null>(null);
 
-  // Mirror anchor into a ref so extendSelectionTo's identity stays stable
-  // (otherwise every anchor change would re-create the callback and force
-  // a fresh prop-identity into downstream memoized components).
+  // anchor を ref にミラーして extendSelectionTo の identity を安定させる (毎 anchor
+  // 変更で callback が作り直され下流の memo 化 component に新 prop identity が流れるのを防ぐ)。
   const selectAnchorRef = useRef<string | null>(selectAnchor);
   useEffect(() => {
     selectAnchorRef.current = selectAnchor;
@@ -56,7 +46,7 @@ export function useClassificationSelection(): UseClassificationSelectionReturn {
   const extendSelectionTo = useCallback(
     (filename: string, displayedOrder: string[]) => {
       const anchor = selectAnchorRef.current;
-      // No anchor / either endpoint missing → degrade to a plain toggle.
+      // anchor 無し / 端点欠け → 単純 toggle に落とす。
       const startIdx = anchor != null ? displayedOrder.indexOf(anchor) : -1;
       const endIdx = displayedOrder.indexOf(filename);
       if (startIdx < 0 || endIdx < 0) {
@@ -77,7 +67,7 @@ export function useClassificationSelection(): UseClassificationSelectionReturn {
         for (const f of range) next.add(f);
         return next;
       });
-      // Anchor stays put so the user can re-shift to a different end-point.
+      // anchor は据え置き (別端点へ re-shift できるよう)。
     },
     [],
   );

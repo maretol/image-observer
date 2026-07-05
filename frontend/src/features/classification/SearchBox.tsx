@@ -7,9 +7,8 @@ export type SearchBoxProps = {
   debounceMs?: number;
 };
 
-// SearchBox debounces user input before forwarding to onChange so the grid
-// does not re-filter on every keystroke. The visible <input> stays
-// responsive (controlled by local state).
+// 入力を debounce してから onChange に渡す (keystroke ごとに grid を再フィルタしないため)。
+// 見える <input> は local state で即応。
 export function SearchBox({ value, onChange, debounceMs = 150 }: SearchBoxProps) {
   const [local, setLocal] = useState(value);
   useEffect(() => {
@@ -19,9 +18,8 @@ export function SearchBox({ value, onChange, debounceMs = 150 }: SearchBoxProps)
     if (local === value) return;
     const t = window.setTimeout(() => onChange(local), debounceMs);
     return () => window.clearTimeout(t);
-    // We intentionally exclude `value` and `onChange` from deps: changes from
-    // outside flow back through the first useEffect and would otherwise
-    // schedule redundant onChange calls.
+    // value / onChange をあえて deps から除外: 外部からの変更は最初の useEffect 経由で
+    // 戻るので、含めると余分な onChange を schedule してしまう。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [local, debounceMs]);
 

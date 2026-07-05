@@ -22,24 +22,19 @@ import {
   type ChangedPayload,
 } from "./watcherPolicy";
 
-// CLASSIFICATION_CHANGED_EVENT mirrors the Go-side
-// `watcher.ClassificationChangedEvent`. There is no auto-generated TS
-// namespace for the watcher package (Wails only emits TS for types that
-// appear in binding signatures, and EventsEmit payloads do not), so the
-// string literal is duplicated. A vitest assertion in
-// `watcherPolicy.test.ts` pins this constant to the same literal as the
-// Go-side test (`internal/watcher.TestClassificationChangedEventName`);
-// renaming one without the other trips CI (AGENTS.md D-1).
+// Go 側 watcher.ClassificationChangedEvent のミラー。watcher パッケージには自動生成の
+// TS namespace が無い (Wails は binding signature に出る型しか TS 化せず、EventsEmit の
+// payload は出ない) ので文字列リテラルを複製する。watcherPolicy.test.ts の vitest 断言が
+// Go 側テストと同じリテラルに pin する — 片方だけ rename すると CI が落ちる (AGENTS.md D-1)。
 export const CLASSIFICATION_CHANGED_EVENT = "classification:changed";
 
 type Props = {
-  // folderPath / watchMode are passed as values (not refs) so the watch
-  // dispatch effect can react to changes. The body reads refs to avoid
-  // capturing stale closure state — see dispatchWatchIntentRef below.
+  // folderPath / watchMode は値で渡す (ref でなく) ので watch dispatch effect が変化に
+  // 反応できる。body 側は stale closure を避けるため ref を読む (下の dispatchWatchIntentRef)。
   folderPath: string;
   watchMode?: string;
 
-  // shared refs (read & write)
+  // 共有 ref (read & write)
   folderRef: React.MutableRefObject<string>;
   watchModeRef: React.MutableRefObject<string | undefined>;
   requestGenRef: React.MutableRefObject<number>;
@@ -52,14 +47,14 @@ type Props = {
   pendingResultRef: React.MutableRefObject<PendingResult | null>;
   dispatchWatchIntentRef: React.MutableRefObject<() => void>;
 
-  // setters
+  // setter
   setLoadResult: React.Dispatch<
     React.SetStateAction<classification.LoadResult | null>
   >;
   setError: (msg: string | null) => void;
   setEditing: React.Dispatch<React.SetStateAction<EditingState>>;
 
-  // collaborators
+  // 協調先
   commitFreshResult: (
     fresh: classification.LoadResult,
     fnames: ReadonlySet<string>,
@@ -68,12 +63,10 @@ type Props = {
   toast: ToastFn;
 };
 
-// useClassificationWatcher owns the fsnotify auto-merge path (#19): the
-// watcher-event handler, the post-Start silent recheck, the Start/Stop IPC
-// dispatcher, and the two effects that drive them. See AGENTS.md §H-8 and
-// docs/spec-folder-watch.md for the full race-variable matrix; the inline
-// guards in this file are load-bearing copies of those rules. Do not
-// remove a guard without checking the corresponding entry in §H-8.
+// fsnotify auto-merge 経路 (#19): watcher-event handler / Start 後の silent recheck /
+// Start/Stop IPC dispatcher / それらを駆動する 2 effect を持つ。race 変数マトリクスは
+// AGENTS.md §H-8 / docs/spec-folder-watch.md。このファイルの inline guard はそのルールの
+// load-bearing な写しなので、§H-8 の該当項目を確認せず guard を消さないこと。
 export function useClassificationWatcher(props: Props): void {
   const {
     folderPath,
@@ -99,24 +92,19 @@ export function useClassificationWatcher(props: Props): void {
 
   // ─── fsnotify auto-merge (#19) ─────────────────────────────────────
   //
-  // handleWatcherPayload runs on every flushed "classification:changed"
-  // event from the Go watcher (see internal/watcher + docs/spec-folder-watch.md).
-  // It reads decision-relevant state via refs so its identity can change on
-  // each render without us needing to re-bind the EventsOn listener (see
-  // the mount-once subscription effect below + handlerRef indirection).
+  // handleWatcherPayload は flush された "classification:changed" event ごとに走る
+  // (internal/watcher + docs/spec-folder-watch.md)。判定 state を ref 経由で読むので、
+  // identity が毎 render 変わっても EventsOn を re-bind せずに済む (下の handlerRef 経由)。
   const handleWatcherPayload = useCallback(
     async (payload: ChangedPayload) => {
       if (watchModeRef.current === WATCH_MODE_OFF) {
-        // The user disabled monitoring; StopFolderWatch() can't recall
-        // events that were already dispatched into JS land. Drop them at
-        // the handler boundary so a payload in flight at the moment of
-        // off-switch doesn't auto-merge after the user opted out
-        // (PR #75 review thread#3).
+        // 監視無効化。StopFolderWatch() は既に JS へ dispatch 済みの event を戻せないので、
+        // off 切替の瞬間に in-flight な payload が opt-out 後に auto-merge しないよう handler
+        // 境界で drop する。
         return;
       }
       if (payload.folder !== folderRef.current) {
-        // Stale residual from a watcher that hadn't been torn down yet, or
-        // the user switched folders mid-flush. Drop quietly.
+        // まだ tear down されていない watcher の残り、または flush 途中の folder 切替。静かに drop。
         return;
       }
       const myGen = ++requestGenRef.current;
@@ -125,67 +113,46 @@ export function useClassificationWatcher(props: Props): void {
       try {
         fresh = await LoadClassification(folderRef.current);
       } catch (e) {
-        // Suppress this catch if the failure belongs to a stale request
-        // (newer payload already in flight, or folder switched out from
-        // under us). Without these guards a slow-failing older Load could
-        // wipe a successfully-displayed newer result (PR #75 review).
+        // 失敗が stale request のもの (新 payload が既に in-flight、または folder 切替) なら
+        // この catch を抑止。guard が無いと遅く失敗する古い Load が表示済みの新結果を消す。
         if (myGen !== requestGenRef.current) return;
         if (folderRef.current !== payload.folder) return;
-        // Also re-check watchMode: the entry-gate above ran before the
-        // await; if the user flipped to off while we were awaiting,
-        // surfacing the failure (with toast / setError) would be acting
-        // on monitoring the user opted out of (PR #75 8th, thread A).
+        // watchMode 再チェック: 上の entry-gate は await の前に走った。await 中に off に
+        // されたら、opt-out した監視に対して失敗を出すことになる。
         if (watchModeRef.current === WATCH_MODE_OFF) return;
-        // Mirror the manual-reload error path so a deleted / unreadable
-        // folder surfaces to the user instead of silently leaving a stale
-        // grid. Also drop the on-screen result — leaving it in place
-        // after a load failure invites the user to act on entries that
-        // no longer exist on disk.
+        // manual-reload の error 経路に合わせ、削除/読めない folder を stale grid のまま
+        // 放置せずユーザーに出す。表示中の結果も落とす (残すとディスクに無い entry を操作させる)。
         const msg = errorMessage(e);
         setError(msg);
         setLoadResult(null);
-        // Clear entries-dependent state alongside loadResult — same rule
-        // as loadInternal's catch (PR #75 13th, thread A).
+        // loadResult と一緒に entries 依存 state をクリア (loadInternal の catch と同じ)。
         resetEntriesDependentState();
         toast(`読み込みに失敗しました: ${msg}`, "error");
         logger.warn("classification", "auto-merge load failed", { err: msg });
         return;
       }
-      // Discard the success result for the same reasons.
+      // 同じ理由で success 結果も discard。
       if (myGen !== requestGenRef.current) return;
       if (folderRef.current !== payload.folder) return;
-      // Same off-during-await guard as the catch above — the entry-gate
-      // ran before LoadClassification. If watchMode flipped to off while
-      // awaiting, committing the result would auto-merge after the user
-      // opted out (PR #75 8th, thread A).
+      // catch と同じ off-during-await ガード。await 中に off にされたら、commit すると
+      // opt-out 後に auto-merge してしまう。
       if (watchModeRef.current === WATCH_MODE_OFF) return;
-      // Successful Load (including silent self-echo paths) is a
-      // confirmation that the folder is readable; clear any leftover
-      // error from a previous failed reload so the UI doesn't keep
-      // showing it after we've recovered (PR #75 review suppressed-c).
+      // 成功 Load (silent self-echo 含む) は folder が読める確認なので、前の失敗 reload の
+      // 残り error をクリア (回復後も出し続けないように)。
       setError(null);
 
-      // Self-echo / no-op detection. Our own Save/Delete IPCs cause watcher
-      // events too, and surfacing "外部で更新されました" for them is just
-      // noise (PR #75 review thread #3, spec §5.4). When entries content
-      // matches what we already display:
-      //   - mtime also equal → fully silent (true no-op or self-echo)
-      //   - mtime differs    → silent update so the user's next save still
-      //     uses the freshest expectedMtime in the conflict check
+      // self-echo / no-op 検出。自分の Save/Delete IPC も watcher event を起こし、それに
+      // "外部で更新されました" を出すのはノイズ (spec §5.4)。entries 内容が表示中と一致するとき:
+      //   - mtime も同じ → 完全に silent (真の no-op / self-echo)
+      //   - mtime 相違    → silent 更新 (次の save が conflict チェックで最新 expectedMtime を使えるよう)
       //
-      // entriesEquivalent compares both sides AFTER filtering out
-      // in-flight deletes — the local loadResult still has the entry the
-      // user just asked us to delete (our setLoadResult patch happens
-      // post-sidecar-save), while the fresh re-Load already lacks it. If
-      // the only difference is one of those in-flight deletes, treat as
-      // self-echo and skip the toast (PR #75 9th, thread J).
+      // entriesEquivalent は in-flight delete を除いた後で両側を比較する — local loadResult は
+      // まだ削除依頼した entry を持つ (setLoadResult patch は sidecar-save 後) が fresh re-Load は
+      // 既に欠く。差分がその in-flight delete だけなら self-echo とみなし toast を skip。
       const cur = loadResultRef.current;
-      // Scope in-flight delete filenames to payload.folder so a stale
-      // delete pending on a different folder can't suppress this folder's
-      // diff (PR #75 21st, thread A). Asymmetric strip: only the stale-cur
-      // side has the filename hidden, fresh is left untouched so an external
-      // re-creation during the IPC window still surfaces as a diff (PR #75
-      // 25th, thread D).
+      // in-flight delete filename を payload.folder に scope し、別 folder の stale delete が
+      // この folder の差分を抑止しないように。非対称 strip: cur 側だけ filename を隠し、fresh は
+      // 触らない (IPC 窓中の外部再作成を差分として surface するため)。
       const inFlightDeletes =
         inFlightDeletesRef.current.get(payload.folder) ?? null;
       const stripInFlight = (
@@ -205,9 +172,8 @@ export function useClassificationWatcher(props: Props): void {
         return;
       }
 
-      // formatChangeSummary always returns a non-empty string (PR #75
-      // review: counter-less anyChange payloads still warrant a generic
-      // notification, see watcherPolicy.ts).
+      // formatChangeSummary は常に非空文字列を返す (counter 無しの anyChange payload も
+      // 汎用通知に値する, watcherPolicy.ts)。
       toast(formatChangeSummary(payload), "info");
 
       const fnames = new Set(fresh.entries.map((e) => e.filename));
@@ -220,10 +186,8 @@ export function useClassificationWatcher(props: Props): void {
       });
       switch (action.kind) {
         case "defer":
-          // Park the fresh result *with* its folder + current generation
-          // so the deferral-close replay can discard it if the user
-          // switched folders or another commit landed meanwhile
-          // (PR #75 11th, suppressed-A).
+          // fresh を folder + 現 generation *ごと* park し、deferral-close replay が folder 切替や
+          // 別 commit 着地時に discard できるように。
           pendingResultRef.current = {
             fresh,
             folder: payload.folder,
@@ -259,57 +223,38 @@ export function useClassificationWatcher(props: Props): void {
     ],
   );
 
-  // silentRecheckAfterStart bridges the gap between the initial / restore
-  // LoadClassification and StartFolderWatch actually being live: files
-  // dropped into the folder during that window aren't in the cached entries
-  // nor the fsnotify stream. We re-Load (no loading flag flicker, no toast
-  // on success / silent on diff) and route the result through the same
-  // defer / mode / generation logic as a regular watcher payload so
-  // editing-open et al. are still honored (PR #75 9th, thread I).
+  // 初期 / 復元の LoadClassification と StartFolderWatch が live になるまでの隙間を埋める:
+  // その窓の間に folder に落ちたファイルは cached entries にも fsnotify stream にも無い。
+  // re-Load (loading flicker なし / 成功 toast なし / 差分 silent) し、通常 watcher payload と
+  // 同じ defer / mode / generation 論理に通して editing-open 等を尊重する。
   const silentRecheckAfterStart = useCallback(
     (folder: string) => {
-      // Defer while any loadInternal is awaiting. Without this we can
-      // race the initial load (same generation since silent recheck only
-      // snapshots, not bumps) — silent recheck commits its fresher
-      // snapshot first, then the older initial-load result lands and
-      // overwrites it (PR #75 12th, thread C). Waiting for the initial
-      // load to complete guarantees our subsequent read is strictly
-      // newer than its read (it happened-after), so even if we both
-      // commit at the same gen, last-write-wins is correctness-preserving.
-      // setTimeout yields to the event loop so the initial load's finally
-      // (which clears the flag + commits its result) fires first.
+      // loadInternal の await 中は defer。でないと初期 load と race する (silent recheck は
+      // snapshot だけで bump しないので同一 generation) — silent recheck が新 snapshot を先に
+      // commit し、その後古い初期 load 結果が着いて上書きする。初期 load 完了を待てば、その後の
+      // read は必ず newer (happened-after) なので同一 gen で両方 commit しても last-write-wins が
+      // 正当。setTimeout で event loop に譲り初期 load の finally を先に走らせる。
       if (initialLoadInFlightRef.current) {
         setTimeout(() => silentRecheckAfterStart(folder), 50);
         return;
       }
-      // Snapshot the current generation WITHOUT bumping (PR #75 11th,
-      // thread A). Two requirements to satisfy at once:
-      //   1) silent recheck must NOT supersede in-flight initial-load
-      //      paths (openFolder / auto-load on mount). If we bumped, the
-      //      ongoing `loadInternal` would see itself as stale and return
-      //      null, and openFolder's `postLoadFlow` (sidecar-create
-      //      prompt / child-sidecar merge prompt) would silently skip —
-      //      a real regression triggered by the Round 10 suppressed-A
-      //      fix that incorrectly bumped here.
-      //   2) silent recheck must NOT roll back a newer commit that
-      //      landed during our await. Snapshot + check at commit time
-      //      handles this: if anything else bumps the gen while we wait,
-      //      our myGen !== requestGenRef.current branches return.
-      // Snapshot satisfies both.
+      // 現 generation を bump せず snapshot する。同時に満たす 2 要件:
+      //   1) silent recheck は in-flight の初期 load 経路 (openFolder / mount auto-load) を
+      //      supersede してはならない。bump すると進行中の loadInternal が自分を stale と見て
+      //      null を返し、openFolder の postLoadFlow (sidecar 作成 / 子 sidecar merge prompt) が
+      //      silent に skip してしまう。
+      //   2) silent recheck は await 中に着いた newer commit を巻き戻してはならない。snapshot +
+      //      commit 時チェックで対応: 待つ間に他が gen を bump すれば myGen !== current で return。
       const myGen = requestGenRef.current;
       void LoadClassification(folder)
         .then((fresh) => {
           if (myGen !== requestGenRef.current) return;
-          // Stale guards mirror handleWatcherPayload.
+          // stale guard は handleWatcherPayload と同じ。
           if (folderRef.current !== folder) return;
           if (watchModeRef.current !== WATCH_MODE_AUTO) return;
           const cur = loadResultRef.current;
-          // See handleWatcherPayload: per-folder set, so a delete still in
-          // flight on a different folder can't suppress this one's diff
-          // (PR #75 21st, thread A).
-          // Asymmetric strip — only cur side is filtered, so an external
-          // re-creation racing our delete IPC is still detected as a diff
-          // (PR #75 25th, thread D; same reasoning as handleWatcherPayload).
+          // handleWatcherPayload 参照: per-folder set + 非対称 strip (別 folder の in-flight
+          // delete がこの差分を抑止せず、delete IPC と race する外部再作成も差分として検出)。
           const inFlightDeletes =
             inFlightDeletesRef.current.get(folder) ?? null;
           const stripInFlight = (
@@ -324,21 +269,16 @@ export function useClassificationWatcher(props: Props): void {
           if (entriesUnchanged && cur != null && cur.mtime === fresh.mtime) {
             return;
           }
-          // Reaching here means silent recheck observed a successful re-Load.
-          // Clear any stale error from a prior failed initial / manual reload
-          // — leaving it visible after recovery is the same UI artifact the
-          // watcher handler / performReplay success paths already clear
-          // (PR #75 16th, thread D).
+          // ここに来た = silent recheck が re-Load 成功を観測。前の失敗 initial / manual reload の
+          // stale error をクリア (回復後も残すと watcher handler / performReplay 成功経路と同じ UI artifact)。
           setError(null);
           if (entriesUnchanged) {
             setLoadResult(fresh);
             return;
           }
-          // A genuine diff existed between initial Load and watcher Start.
-          // No toast (silent — the user didn't ask, and it isn't strictly
-          // an "external change" event), but go through decideAutoMerge so
-          // an open editing popover / conflict / merge prompt parks the
-          // result instead of being clobbered.
+          // 初期 Load と watcher Start の間に本物の差分があった。toast なし (silent — user は
+          // 頼んでおらず厳密には「外部変更」でもない) だが、開いている editing / conflict / merge
+          // prompt が結果を潰されず park するよう decideAutoMerge に通す。
           const fnames = new Set(fresh.entries.map((e) => e.filename));
           const action = decideAutoMerge({
             editingOpen: editingRef.current.open,
@@ -349,8 +289,7 @@ export function useClassificationWatcher(props: Props): void {
           });
           switch (action.kind) {
             case "defer":
-              // Park with capturedGen so the replay can discard if another
-              // commit lands (PR #75 11th, suppressed-A).
+              // capturedGen ごと park し、別 commit が着いたら replay が discard できるように。
               pendingResultRef.current = {
                 fresh,
                 folder,
@@ -368,8 +307,7 @@ export function useClassificationWatcher(props: Props): void {
           }
         })
         .catch((e) => {
-          // Silent recheck stays silent on failure too — the user will
-          // see the next manual reload's error if there's a real problem.
+          // silent recheck は失敗時も silent — 本当に問題があれば次の manual reload の error で見える。
           if (myGen !== requestGenRef.current) return;
           logger.warn("watcher", "post-start silent recheck failed", {
             folder,
@@ -396,72 +334,45 @@ export function useClassificationWatcher(props: Props): void {
     ],
   );
 
-  // Lifecycle is split into two effects to avoid a Start/Stop IPC race when
-  // the user switches folders rapidly:
+  // ライフサイクルは 2 effect に分割し、folder 高速切替時の Start/Stop IPC race を避ける:
   //
-  //   1. Folder-watch effect (Start-only on the live path): Go-side
-  //      Manager.Start is itself re-entrant and tears down any previous
-  //      watch atomically. By NOT calling StopFolderWatch from this
-  //      effect's cleanup we keep the IPC sequence as Start("A") →
-  //      Start("B"), which Go serializes via mu. A mixed Stop+Start
-  //      sequence could re-order across Go goroutines and leave the wrong
-  //      watch running. The only explicit Stop here is when watchMode
-  //      flips to "off" or folderPath clears — both legitimate user-driven
-  //      transitions, not effect-cleanup-driven.
-  //   2. Event-subscription effect: stays mounted for the hook's lifetime,
-  //      reads the freshest handler through a ref so it never has to
-  //      re-subscribe on state changes. The cleanup only `unsub()`s the
-  //      listener — it deliberately does NOT call StopFolderWatch because
-  //      React.StrictMode's dev double-mount runs cleanup → re-setup, and
-  //      a Stop fired here could land in Go after the next mount's Start.
-  //      The final teardown on real app shutdown is handled by main.go's
-  //      OnShutdown → app.shutdown → Manager.Stop instead.
-  // dispatchWatchIntent is the single entry point for any Start/Stop IPC.
-  // Wails dispatches each Bind call into its own Go goroutine, so JS-side
-  // call ordering is NOT preserved at Go's mu lock — Start("A") → Start("B")
-  // from JS can land as Start("B") then Start("A"), leaving Go watching the
-  // wrong folder. To recover from any such reordering we re-evaluate the
-  // current intent (refs are synced render-time) after EVERY IPC completion
-  // and re-dispatch if it diverges. This converges to the latest intent
-  // regardless of arrival order:
-  //   - Start on same root + live goroutine: Go-side Manager.Start
-  //     short-circuits to no-op (no walk).
-  //   - Stop: idempotent.
-  // so re-dispatching is always safe — at worst a duplicate IPC.
+  //   1. Folder-watch effect (live 経路は Start のみ): Go 側 Manager.Start は再入可能で、
+  //      前の watch を atomic に tear down する。この effect の cleanup で StopFolderWatch を
+  //      呼ばないことで IPC を Start("A") → Start("B") に保つ (Go が mu で直列化)。Stop+Start
+  //      混在は Go goroutine 間で reorder し得て誤った watch が残る。ここで明示 Stop するのは
+  //      watchMode が "off" になるか folderPath が空になるときだけ。
+  //   2. Event-subscription effect: hook 生存中 mount したまま、最新 handler を ref 経由で読み
+  //      state 変更で re-subscribe しない。cleanup は unsub() だけで StopFolderWatch を呼ばない —
+  //      StrictMode の dev 二重 mount が cleanup → re-setup を走らせ、ここの Stop が次 mount の
+  //      Start の後に Go に着き得るため。実アプリ終了時の teardown は main.go の OnShutdown →
+  //      app.shutdown → Manager.Stop が行う。
   //
-  // Past variants this resolves (one per round, PR #75):
-  //   - Round 7 thread C: Start success-side stale check
-  //   - Round 10 suppressed-B: Start failure left Go without any watch
-  //     because Manager.Start tears down old root BEFORE Add'ing new
-  //   - Round 10 suppressed-C: mode-switch Stop completing after a
-  //     later Start arrived stopped the wrong watcher
-  //   - Round 10 suppressed-D: stale-start correction Stop completing
-  //     out of order with same effect
+  // dispatchWatchIntent は Start/Stop IPC の単一入口。Wails は各 Bind 呼び出しを別 goroutine に
+  // 投げるので、JS 側の呼び出し順は Go の mu lock で保たれない — JS の Start("A") → Start("B") が
+  // Start("B") → Start("A") と着地して Go が誤った folder を watch し得る。この reorder から回復する
+  // ため、IPC 完了ごとに現在の intent (ref は render 時同期) を再評価し、乖離していれば re-dispatch する。
+  // 到着順によらず最新 intent に収束する:
+  //   - 同一 root + live goroutine の Start: Manager.Start が no-op に短絡 (walk なし)。
+  //   - Stop: 冪等。
+  // なので re-dispatch は常に安全 — 最悪でも重複 IPC。
   //
-  // The ref itself is owned by the orchestrator (so the load hook can read
-  // it via .current to reconcile after manual reload). The assignment
-  // below replaces .current every render with the freshest closure — refs
-  // aren't part of React's render-immutable state model, so re-binding the
-  // function each render is safe and intentional.
+  // ref 自体は orchestrator が持つ (load hook が .current で manual reload 後の reconcile に読む)。
+  // 下の代入は毎 render で .current を最新 closure に差し替える — ref は render-immutable でないので安全。
   dispatchWatchIntentRef.current = () => {
     const folder = folderRef.current;
     const mode = watchModeRef.current;
     if (mode == null) {
-      // Settings haven't arrived yet; do nothing. Starting now would
-      // briefly run a watcher for a user who has explicitly persisted
-      // watchMode = "off". The effect re-fires once watchMode hydrates.
+      // settings 未着なので何もしない。今 Start すると off を永続化した user に一瞬 watcher が
+      // 走る。watchMode が hydrate すれば effect が再発火する。
       return;
     }
     if (!folder || mode === WATCH_MODE_OFF) {
-      // Drop any parked auto-merge result first — replaying it after
-      // off-switch would surprise a user who opted out (suppressed-g).
+      // park 済み auto-merge 結果をまず drop — off 切替後に replay すると opt-out した user を驚かせる。
       pendingResultRef.current = null;
       void StopFolderWatch()
         .then(() => {
-          // After Stop completes, intent may have moved back to auto /
-          // a folder. Re-check and re-dispatch so the latest intent is
-          // honored even if this Stop landed at Go after a later Start
-          // (PR #75 10th, suppressed-C / -D).
+          // Stop 完了後、intent が auto / folder に戻っているかもしれない。この Stop が later
+          // Start の後に Go に着いても最新 intent が尊重されるよう再チェック + re-dispatch。
           if (
             folderRef.current &&
             watchModeRef.current === WATCH_MODE_AUTO
@@ -470,10 +381,9 @@ export function useClassificationWatcher(props: Props): void {
           }
         })
         .catch((e) => {
-          // Swallow into the log so an unhandled rejection doesn't
-          // bubble up (PR #75 review suppressed-f).
+          // unhandled rejection が bubble しないよう log に飲み込む。
           logger.warn("watcher", "stop failed", { err: errorMessage(e) });
-          // Same intent-reconcile pass on error.
+          // error 時も同じ intent-reconcile。
           if (
             folderRef.current &&
             watchModeRef.current === WATCH_MODE_AUTO
@@ -489,21 +399,19 @@ export function useClassificationWatcher(props: Props): void {
         const curFolder = folderRef.current;
         const curMode = watchModeRef.current;
         if (curMode === WATCH_MODE_AUTO && curFolder === folder) {
-          // Intent matches what we just told Go. Bridge the initial
-          // LoadClassification ↔ watch-live gap with a silent recheck
-          // (PR #75 9th, thread I).
+          // intent が Go に伝えたものと一致。初期 LoadClassification ↔ watch-live の隙間を
+          // silent recheck で埋める。
           silentRecheckAfterStart(folder);
           return;
         }
-        // Intent moved while we were awaiting. Reconcile by re-dispatching.
+        // await 中に intent が動いた。re-dispatch で reconcile。
         dispatchWatchIntentRef.current();
       })
       .catch((e) => {
         const curFolder = folderRef.current;
         const curMode = watchModeRef.current;
         if (curFolder === folder && curMode === WATCH_MODE_AUTO) {
-          // Current intent matches the one we just failed to start —
-          // surface the failure to the user.
+          // 現 intent が今 Start に失敗したものと一致 — 失敗をユーザーに出す。
           const msg = errorMessage(e);
           toast(
             "自動監視を開始できませんでした (再読み込みボタンで手動更新してください)",
@@ -512,25 +420,22 @@ export function useClassificationWatcher(props: Props): void {
           logger.warn("watcher", "start failed", { folder, err: msg });
           return;
         }
-        // Intent moved AND our Start failed. Manager.Start tears down
-        // any prior watch BEFORE Add'ing the new root, so a stale failure
-        // means Go currently has no watch at all — we must re-dispatch
-        // to (re-)establish the latest intent (PR #75 10th, suppressed-B).
+        // intent が動き、かつ Start 失敗。Manager.Start は新 root を Add する前に前の watch を
+        // tear down するので、stale 失敗 = Go は今 watch を全く持たない — 最新 intent を
+        // (再)確立するため re-dispatch する。
         dispatchWatchIntentRef.current();
       });
   };
 
   useEffect(() => {
     dispatchWatchIntentRef.current();
-    // folderPath / watchMode are dependencies but the body reads from refs
-    // (which are render-time synced) to keep the dispatcher itself
-    // closure-free. toast / silentRecheckAfterStart are stable useCallbacks
-    // so omitting them from deps is intentional.
+    // folderPath / watchMode は deps だが body は ref (render 時同期) を読み dispatcher を
+    // closure-free に保つ。toast / silentRecheckAfterStart は stable なので deps 省略は意図的。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folderPath, watchMode]);
 
-  // Keep a ref to the latest handler so the EventsOn subscription below can
-  // bind once and never need to re-bind on state-derived identity changes.
+  // 最新 handler を ref に保ち、下の EventsOn subscription が一度 bind したら state 由来の
+  // identity 変化で re-bind せずに済むように。
   const handlerRef = useRef(handleWatcherPayload);
   useEffect(() => {
     handlerRef.current = handleWatcherPayload;
@@ -545,13 +450,10 @@ export function useClassificationWatcher(props: Props): void {
     );
     return () => {
       unsub();
-      // No explicit StopFolderWatch here. React.StrictMode runs cleanup
-      // → re-setup on the dev double-mount; queuing a Stop here would
-      // race with the next mount's StartFolderWatch and could land in
-      // Go *after* the new Start, leaving dev silently unmonitored
-      // (PR #75 review). For real app shutdown the watcher is torn down
-      // by main.go's OnShutdown calling app.shutdown → Manager.Stop,
-      // so the Go goroutine doesn't leak either way.
+      // ここで明示 StopFolderWatch しない。StrictMode の dev 二重 mount は cleanup → re-setup を
+      // 走らせ、ここの Stop が次 mount の StartFolderWatch と race して Go に *後* から着き、dev が
+      // silent に unmonitored になり得る。実アプリ終了時は main.go の OnShutdown → app.shutdown →
+      // Manager.Stop が tear down するので goroutine は leak しない。
     };
   }, []);
 }

@@ -1,22 +1,13 @@
-// Pure-function helpers for the Card right-click context menu (#58).
-// Kept separate from CardContextMenu.tsx so vitest can exercise the mode
-// decision without spinning up jsdom + React render.
+// Card 右クリックメニューの純粋ヘルパ (#58)。DOM 無しで vitest にかけられるよう分離。
 
 export type CardContextMenuMode = "single" | "bulk";
 
-// Visual sanity ceiling for the "split-open" path. 8 panels in a row already
-// gets cramped on a 1080p display; beyond that we suggest "tabs" instead.
-// Shared with ClassificationView's bulk-toolbar so the disabled-threshold
-// stays in lockstep (spec §11-E).
+// "split-open" の上限。1080p で 8 枚横並びが限界、超えたら "tabs" を勧める。
+// ClassificationView の bulk-toolbar と揃える (spec §11-E)。
 export const SPLIT_OPEN_LIMIT = 8;
 
-// computeCardContextMenuMode decides whether the right-click menu shown on
-// `filename` should present single-item actions or bulk-selection actions.
-//
-// Spec §11-D: right-clicking a card that is NOT in the current selection
-// does NOT mutate the selection — we just fall back to single mode. This
-// avoids the Finder-style "selection collapses to 1" behavior that can
-// surprise users mid-multi-select.
+// spec §11-D: 選択外の card を右クリックしても選択を変えず single に落ちる
+// (Finder 的な「選択が 1 個に collapse」を避けるため)。
 export function computeCardContextMenuMode(
   selectedFilenames: readonly string[],
   filename: string,
@@ -25,9 +16,7 @@ export function computeCardContextMenuMode(
   return selectedFilenames.includes(filename) ? "bulk" : "single";
 }
 
-// canBulkSplitOpen — true when "N 件をパネル分割で開く" should be enabled in
-// bulk mode. Mirrors the existing bulk-toolbar check so the menu and the
-// toolbar stay consistent.
+// bulk モードで "N 件をパネル分割で開く" を有効にするか。toolbar 側と揃える。
 export function canBulkSplitOpen(selectedCount: number): boolean {
   return selectedCount > 0 && selectedCount <= SPLIT_OPEN_LIMIT;
 }

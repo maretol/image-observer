@@ -1,8 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 
-// Hook that owns the per-folder accordion-collapse state. The set of
-// collapsed group keys is exposed both as a Set (for O(1) lookup during
-// render) and as an array (for state persistence).
+// フォルダごとの accordion 折りたたみ state。collapsed キーを Set (render の O(1) 照合)
+// と array (永続化) の両方で公開する。
 export function useDirectoryGroups(initialCollapsed: string[] = []) {
   const [collapsedList, setCollapsedList] =
     useState<string[]>(initialCollapsed);
@@ -17,8 +16,7 @@ export function useDirectoryGroups(initialCollapsed: string[] = []) {
 
   const expandAll = useCallback(() => setCollapsedList([]), []);
 
-  // collapseAll takes the full list of currently displayed group keys (the hook
-  // itself does not know about uncollapsed groups). Caller passes them in.
+  // hook は表示中のグループを知らないので、表示中の全キーを呼び出し側が渡す。
   const collapseAll = useCallback((keys: string[]) => {
     setCollapsedList(Array.from(new Set(keys)));
   }, []);

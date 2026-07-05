@@ -1,37 +1,25 @@
 import type { classification } from "../../../wailsjs/go/models";
 
-// ROOT_GROUP_KEY is the canonical key for files that live directly under the
-// parent folder (not in a subdirectory). Persisted to state.json; do not
-// change without bumping the state schema.
+// 親フォルダ直下 (サブディレクトリ無し) のファイル用キー。state.json に永続化される
+// ので、state schema を bump せずに変えないこと。
 export const ROOT_GROUP_KEY = ".";
 
-// ROOT_GROUP_LABEL is the human-readable name shown in the accordion header
-// for the root group. Localized only here so changes are one-place.
 export const ROOT_GROUP_LABEL = "(直下)";
 
 export type DirectoryGroup = {
-  key: string;          // ROOT_GROUP_KEY or relative POSIX path (e.g. "child1", "child1/sub")
-  label: string;        // display string (ROOT_GROUP_LABEL for root, otherwise key)
+  key: string; // ROOT_GROUP_KEY か相対 POSIX パス ("child1", "child1/sub")
+  label: string;
   entries: classification.Entry[];
 };
 
-// groupKeyOf returns the directory portion of a filename (entry.filename),
-// using ROOT_GROUP_KEY for files with no directory part.
-//
-// Examples:
-//   "a.jpg"           → "."
-//   "child1/x.png"    → "child1"
-//   "child1/sub/y.gif"→ "child1/sub"
 export function groupKeyOf(filename: string): string {
   const slash = filename.lastIndexOf("/");
   if (slash < 0) return ROOT_GROUP_KEY;
   return filename.slice(0, slash);
 }
 
-// groupByDirectory partitions entries into directory-keyed groups, preserving
-// each group's original entry order. Group order in the returned array is:
-// ROOT_GROUP_KEY first (if present), then the rest sorted lexicographically
-// by key. This gives a stable, predictable accordion layout.
+// ディレクトリキーで分割。順序は ROOT_GROUP_KEY 先頭 → 残りをキー昇順 (アコーディオン
+// を安定させるため)。各グループ内は元の entry 順を保つ。
 export function groupByDirectory(
   entries: classification.Entry[],
 ): DirectoryGroup[] {
