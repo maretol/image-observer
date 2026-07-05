@@ -132,14 +132,16 @@ type DuplicateReport struct {
 
 ### 5.1 Card の caution バッジ
 
-- `DuplicateReport.pairs` のいずれかに filename が含まれる Card のサムネ右上
-  (既存 `.cls-card-edit` = 左上系と重ならない位置) に ⚠ バッジを表示。
+- `DuplicateReport.pairs` のいずれかに filename が含まれる Card のサムネ **左下** に ⚠ バッジを
+  表示 (他 3 隅は checkbox = 左上 / 編集 = 右上 / `.cls-card-preview` 予約 = 右下 が使用)。
+  警告なので `.cls-card-edit` の hover-reveal にせず**常時表示**。
 - 新規 CSS クラス `.cls-card-dup-warn` (App.css に定義、H-4 で grep 確認)。
 - インライン SVG アイコン (`shared/icons/` に `WarnIcon` 新設。外部ライブラリなし)。
 - `title` / `aria-label` = 「ダブりの可能性があります (クリックで確認)」。
-- バッジは `<button>` とし、クリックで §5.3 確認モーダルを開く。`tabIndex={-1}`
-  (thumb が `role="button"` のため、内側 interactive 要素は Tab 巡回から除外 = H-1 既存方針)。
+- バッジは `<button>` とし、クリックで §5.3 確認モーダルを開く。`tabIndex` は付けない
+  (thumb 内の既存 interactive 要素 = checkbox / 編集ボタンと同じ扱いに揃える)。
   `stopPropagation()` で thumb クリック (プレビュー / 選択) と分離 (H-2)。
+  `:focus-visible` スタイルあり (H-1)。
 
 ### 5.2 CardContextMenu (単一モード)
 
@@ -311,11 +313,17 @@ entries 依存 state** なので、既存 `resetEntriesDependentState` に clear
 | CheckDuplicates 失敗 | IPC reject | — | gen / folder | 同 gate 後、report は据え置かず null 化はしない (前回結果を保持、D6)。ログのみ |
 | dismiss 成功 | モーダルのボタン → IPC resolve | 対象ペア | folder (await 中に切替) / report が別世代に差替 | `folderRef.current === captured` check → 現 report から該当ペアを **filename ペアで** local 除去 (再 Check しない。hash ペアは Go 側で永続除外済みなので次回 Check とも整合) |
 | dismiss 失敗 | IPC reject | — | folder | folder check 後 error トースト。report 不変 |
-| 削除成功 (deleteOne) | 既存削除フロー | 削除 filename | in-flight Check が削除済みファイルを含む | 削除後の Load 再取得経路が検出 kick (bump) を通るため専用処理なし。加えて report から該当 filename を含むペアを local 除去 (次の report 到着までのバッジ残留を防ぐ) |
+| 削除成功 (deleteOne) | 既存削除フロー | 削除 filename | in-flight Check が削除済みファイルを含む | deleteOne の local patch / 再 Load で entries の filename 集合が変わる → kick effect が bump + 再 Check する (専用処理なし。削除ファイルのペアは新 report に載らない) |
 | 設定変更 (threshold / algo / mode) | 設定ダイアログの UpdateSettings 成功 | 新 threshold / algo / mode | in-flight Check が旧 threshold / 旧 algo | mode=off → bump + report を null 化。mode=auto / threshold / algo 変更 → bump + 再 kick (threshold・algo は Go が settings.Load() で読むため、bump 後の再 kick で新値が自然に効く) |
 | フォルダ切替 / Load 失敗 | openFolder / loadInternal catch | — | 旧フォルダの report 残留 | `resetEntriesDependentState` 内で report null 化 + bump (in-flight Check を stale 化)。folder 切替は既存フローが同ヘルパを呼ぶ (PR #75 Round 14) |
 | unmount | ClassificationView unmount | — | 該当軸なし | state は hook と共に破棄。IPC 結果は gen gate で自然に無視 |
 
+- **kick の実装は effect 一本化**: 「Load 成功 / watcher 反映 / 削除 / 設定変更」の各行は
+  個別の配線ではなく、`useDuplicateCheck` 内の単一 effect
+  (deps = folderPath / entries の **filename 集合キー** / mode / threshold) が担う。
+  filename 集合キーなのは、メタデータ編集 (tags / note) の entries identity 変化で
+  無駄な再 Check IPC を出さないため。folder 切替直後の旧 loadResult 残留は
+  `loadResult.folderPath !== folderPath` guard で kick しない。
 - **dirty / touched / inflight 軸**: duplicateReport はユーザー編集を持たない読み取り専用
   state なので dirty / touched は該当なし (検討済み)。inflight は gen gate で処理。
 - **spinner**: 検出中インジケータは Phase 1 では出さない (該当軸なし)。将来出すなら
@@ -380,7 +388,8 @@ entries 依存 state** なので、既存 `resetEntriesDependentState` に clear
 
 - バッジ対象集合の純関数 (`report.pairs` → `Set<filename>`): 空 / 複数ペア / 同一ファイルが
   複数ペアに出るケース。
-- dismiss 後の local 除去純関数 (ペア除去 + バッジ集合再計算 + 「ペアが尽きたらモーダル閉」判定)。
+- dismiss 後の local 除去純関数 (`removePair`、無順序一致 / 非破壊)。「ペアが尽きたら
+  モーダルを閉じる」は ClassificationView の effect (`dupModalPairs.length === 0` で close)。
 - `useDuplicateCheck` を renderHook + IPC mock で: gen gate (後着 stale report 破棄) /
   folder gate / mode off で kick しない / `resetEntriesDependentState` 相当で clear
   (#110 B の `useAutoSaveQueue` テストと同じ流儀)。
@@ -470,18 +479,23 @@ Phase 1 の内部 algo は dhash 固定だが、**キャッシュパス / dismis
 | `internal/imgdecode/decode.go` (新規、thumb から移設) | `Decode(path, ext) (image.Image, error)` |
 | `internal/thumb/` | decode.go 削除 + imgdecode 参照へ差し替え |
 | `internal/imghash/` (新規) | dHash / 距離 / キャッシュ index / dismiss repo / `Service.Check` / `Service.Dismiss` / worker pool (pHash は Phase 2) |
-| `internal/settings/settings.go` | `DuplicateDetectMode` / `DuplicateThreshold` (additive + 検証) |
-| `app.go` | `CheckDuplicates` / `DismissDuplicatePair` 薄い委譲 |
+| `internal/watcher/classify.go` | `_duplicates.json` / `.tmp` を ignore (self-echo ループ防止, §7.2) |
+| `internal/settings/settings.go` | `DuplicateDetectMode` / `DuplicateThreshold` (additive + 検証 + threshold の欠落 probe) |
+| `app.go` | `CheckDuplicates` / `DismissDuplicatePair` 薄い委譲 (mode gate + settings 解決) |
 | `frontend/src/features/classification/useDuplicateCheck.ts` (新規) | 検出 kick / gate / report state / dismiss (§8) |
 | `frontend/src/features/classification/duplicateBadge.ts` (新規) | バッジ集合 / dismiss 除去の純関数 (vitest 対象) |
 | `frontend/src/features/classification/DuplicatePairsModal.tsx` (新規) | 確認モーダル |
 | `frontend/src/features/classification/Card.tsx` | ⚠ バッジ (`.cls-card-dup-warn`) |
-| `frontend/src/features/classification/CardContextMenu.tsx` | 「ダブり候補を確認…」項目 |
+| `frontend/src/features/classification/DirectoryGroup.tsx` | duplicateSet / onShowDuplicates の Card への配線 |
+| `frontend/src/features/classification/CardContextMenu.tsx` | 「ダブり候補を確認…」項目 (バッジ表示中のみ) |
+| `frontend/src/features/classification/ClassificationView.tsx` | バッジ集合 / モーダル state / メニュー配線 |
 | `frontend/src/features/classification/useClassification.ts` | `resetEntriesDependentState` に report clear 追加 + 子フック配線 |
-| `frontend/src/features/settings/` | 一覧セクションに mode segment + しきい値入力 (algo segment は Phase 2) |
+| `frontend/src/App.tsx` | settings 値 (mode / threshold) を useClassification へ |
+| `frontend/src/features/settings/sections/ListSection.tsx` | 一覧セクションに mode segment + しきい値入力 (algo segment は Phase 2) |
 | `frontend/src/features/settings/duplicateDetect.ts` (新規) | D-1 共通定数 (mode / 既定しきい値、watchMode.ts と同流儀。algo 定数は Phase 2) |
+| `frontend/src/shared/messages/ja.ts` | 設定 UI の文言キー (settings.list.dupDetect.* / dupThreshold.*) |
 | `frontend/src/shared/icons/WarnIcon.tsx` (新規) | ⚠ インライン SVG |
-| `frontend/src/App.css` | `.cls-card-dup-warn` ほか新規クラス |
+| `frontend/src/App.css` | `.cls-card-dup-warn` / `.dup-pairs-*` / `.dup-pair-*` |
 
 - `.claude/context.md` / `docs/todo.md`: パッケージ境界 (§11) / H 節に追従 1 行ずつ。
 
