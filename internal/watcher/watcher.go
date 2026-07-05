@@ -1,24 +1,14 @@
-// Package watcher monitors a single folder (recursively) for file system
-// changes that should refresh the classification ("list") tab UI. See
-// docs/spec-folder-watch.md for the full design.
+// Package watcher は 1 フォルダを再帰監視し、分類 ("list") タブを更新すべき file system 変更を検出する
+// (spec-folder-watch.md)。
 //
-// The package wraps github.com/gofsnotify/fsnotify and adds:
-//   - OS-agnostic recursive watching (Linux inotify and Windows
-//     ReadDirectoryChangesW handled uniformly by enumerating subdirectories
-//     ourselves and Add'ing each — Linux inotify has no native recursive mode)
-//   - 200ms debounce + burst coalescing → a single emit() per quiet window
-//   - filter (spec §7.2): emit on image-file Create/Remove/Rename, sidecar
-//     events, dir Create (with recursive Add of descendants), and dir /
-//     non-image Remove/Rename (treated as anyChange so the frontend re-Loads
-//     when a subtree disappears). Image-file Write events do not emit on
-//     their own — counters stay unchanged — but they DO extend the debounce
-//     timer so a large image's Create→Write→Write… sequence keeps the quiet
-//     window open until writes settle. Chmod-only and hidden paths are
-//     silently ignored.
+// gofsnotify/fsnotify をラップし以下を足す:
+//   - OS 非依存の再帰監視 (subdir を自前で列挙し各々 Add — Linux inotify に再帰モードは無い)
+//   - 200ms debounce + burst coalescing → quiet window ごとに emit() 1 回
+//   - フィルタ (spec §7.2): 画像 Create/Remove/Rename / sidecar / dir Create (子孫を再帰 Add) /
+//     dir・非画像 Remove/Rename (subtree 消失で anyChange) で emit。画像 Write は emit しないが debounce
+//     timer は延ばす (大画像の Create→Write… が落ち着くまで待つ)。Chmod のみ / hidden は無視。
 //
-// The watcher is not responsible for re-loading classification entries; it
-// only signals that "something inside the folder changed". The frontend
-// reloads via LoadClassification on receipt of the emitted payload.
+// watcher は分類 entry を再読込しない。変化を signal するだけで frontend が LoadClassification する。
 package watcher
 
 import (
@@ -33,22 +23,16 @@ import (
 	"image-observer/internal/logging"
 )
 
-// DefaultDebounce is the quiet-window length applied before a coalesced
-// event is flushed to the emit callback. Picked to absorb camera bulk-copy
-// bursts (~100 files/sec) while keeping UI feedback brisk. See spec §7.3.
+// DefaultDebounce は coalesce した event を emit する前の quiet-window 長。カメラの一括コピー
+// burst (~100 files/sec) を吸収しつつ UI feedback を素早く保つ値 (spec §7.3)。
 const DefaultDebounce = 200 * time.Millisecond
 
-// ClassificationChangedEvent is the Wails event name used to push debounced
-// changes from the Go watcher to the React frontend. It is duplicated on the
-// frontend (`features/classification/useClassification.ts ::
-// CLASSIFICATION_CHANGED_EVENT`); both sides ship a literal-equality test so
-// a one-sided rename trips CI rather than slipping into a silent drift
-// (AGENTS.md D-1).
+// ClassificationChangedEvent は debounce 済み変更を frontend へ push する Wails event 名。frontend の
+// CLASSIFICATION_CHANGED_EVENT に複製され、両側の literal 等価テストで片側 rename を CI 落ちにする (D-1)。
 const ClassificationChangedEvent = "classification:changed"
 
-// ChangedPayload is the snapshot delivered to emit() (and onward to the
-// frontend via Wails EventsEmit). Per-path detail is intentionally omitted —
-// the frontend re-Loads the folder to get the authoritative entries.
+// ChangedPayload は emit() が frontend へ渡す snapshot。path 単位の詳細は省く — frontend が folder を
+// re-Load して authoritative な entries を得る。
 type ChangedPayload struct {
 	Folder         string `json:"folder"`
 	AddedFiles     int    `json:"addedFiles"`
@@ -57,14 +41,11 @@ type ChangedPayload struct {
 	SidecarChanged bool   `json:"sidecarChanged"`
 }
 
-// EmitFunc is the callback the Manager invokes after each debounce flush.
-// In production it's wired to runtime.EventsEmit; in tests it captures into
-// a channel.
+// EmitFunc は Manager が各 debounce flush 後に呼ぶ callback。本番は runtime.EventsEmit、テストは channel。
 type EmitFunc func(ChangedPayload)
 
-// Manager owns at most one active watch. Start/Stop are safe to call from
-// multiple goroutines and Start may be called repeatedly with different
-// roots — the previous watch is torn down first.
+// Manager は最大 1 つの active watch を持つ。Start/Stop は複数 goroutine から安全で、Start は別 root で
+// 繰り返し呼べる (前の watch を先に tear down)。
 type Manager struct {
 	emit     EmitFunc
 	debounce time.Duration
@@ -79,84 +60,48 @@ type watchState struct {
 	stop    chan struct{}
 	done    chan struct{}
 
-	// watchedDirs tracks every directory we've successfully Add'd to the
-	// fsnotify Watcher. Used to detect "this Remove/Rename event is for a
-	// path we know was a directory" reliably, instead of relying on
-	// w.Remove's return value (which is timing-dependent — Linux inotify
-	// processes IN_IGNORED asynchronously, so by the time we hand-call
-	// w.Remove on the IN_DELETE the watch may already be gone internally
-	// and we'd get a misleading "not in watch list" error). Only written
-	// by the loop goroutine (Create branch) and by Start (before the loop
-	// starts); no concurrent access.
+	// watchedDirs は Add 成功した dir を追い、Remove/Rename が dir か file かを確実に判別するため
+	// (w.Remove の返り値は timing 依存 — inotify の IN_IGNORED 非同期処理で watch が先に消える)。書くのは
+	// loop goroutine (Create 分岐) と Start だけで並行アクセスなし。
 	watchedDirs map[string]struct{}
 
-	// stopRequested is set true by stopLocked *before* closing the watcher.
-	// The loop checks it on the Events-channel-closed path to decide
-	// whether to flush pending events (explicit Stop = discard / treat the
-	// close as user intent) versus log + flush (unexpected backend
-	// failure). Read from a different goroutine, hence atomic.
+	// stopRequested は stopLocked が watcher close の *前* に true にする。loop は Events-channel-closed 時に
+	// これで明示 Stop (pending discard) と想定外 backend 失敗 (log + flush) を区別する。atomic (別 goroutine 読み)。
 	stopRequested atomic.Bool
 }
 
-// NewManager constructs a Manager with the default debounce window.
+// NewManager は既定 debounce window で Manager を作る。
 func NewManager(emit EmitFunc) *Manager {
 	return NewManagerWithDebounce(emit, DefaultDebounce)
 }
 
-// NewManagerWithDebounce is for tests / callers that need a custom flush
-// window. Production code should use NewManager.
+// NewManagerWithDebounce はカスタム flush window が要るテスト / 呼び出し側用。本番は NewManager。
 func NewManagerWithDebounce(emit EmitFunc, d time.Duration) *Manager {
 	return &Manager{emit: emit, debounce: d}
 }
 
-// Start begins watching root. If a watch is already active on the same root
-// with a live loop goroutine, this is a no-op. If a different root is active,
-// or the previous loop has already exited (e.g. fsnotify backend died), the
-// stale state is torn down first and a fresh watch is built.
-//
-// Returns an error if the root itself cannot be added to fsnotify; the
-// caller degrades to manual reload in that case — see spec §5.5. Hidden
-// subdirectories are skipped; non-fatal Add failures on visible
-// descendants are logged and the walk continues (a partial watch beats
-// none).
+// Start は root の監視を始める。同 root + live loop なら no-op。別 root か loop exit 済み (zombie) なら
+// stale state を先に tear down する。root の Add 失敗は error (caller は manual reload に degrade, spec §5.5)。
+// hidden subdir は skip、可視子孫の Add 失敗は log して続行 (部分 watch > ゼロ)。
 func (m *Manager) Start(root string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Same-root + live goroutine: no-op. The existing watch was already
-	// validated when it started, so we can skip the dir/symlink checks
-	// for this branch. Done before any validation so a transient failure
-	// to Lstat the same root (e.g. a temporary permission glitch) doesn't
-	// tear down a working watch. Checking via the done channel keeps this
-	// lock-free on the loop side.
+	// 同 root + live goroutine: no-op。既存 watch は検証済みなので dir/symlink チェックを skip し、一時的な
+	// Lstat 失敗で動作中 watch を tear down しない。done channel 判定で loop 側を lock-free に保つ。
 	if m.state != nil && m.state.root == root && !goroutineExited(m.state) {
 		return nil
 	}
 
-	// Intent has moved to a different root (or the existing state is a
-	// zombie whose loop already exited). Tear down the old watch BEFORE
-	// validating the new root — otherwise a validation failure on the new
-	// root would leave the old watcher running while the JS-side intent
-	// has already moved away, breaking the "current folder only"
-	// invariant (JS treats the new root's Start failure as degraded mode
-	// + manual reload; Go must not silently keep watching the old root).
+	// 別 root へ移った (or zombie)。新 root 検証の *前* に旧 watch を tear down する — でないと新 root の
+	// 検証失敗時に旧 watcher が走り続け「現 folder のみ」不変条件を破る。
 	if m.state != nil {
 		_ = m.stopLocked()
 	}
 
-	// Reject non-directory roots up front. inotify (and therefore
-	// fsnotify.Watcher.Add) happily watches single files, so without this
-	// check Start would succeed on a file path and then never deliver any
-	// "image added in folder" events — appearing healthy but doing nothing.
-	//
-	// Lstat (not Stat) so a symlink-to-dir root is rejected too: the
-	// subsequent filepath.WalkDir(root, ...) lstats the root itself and
-	// would see a symlink (not a dir), skipping descent and leaving
-	// nested subdirectory watches unset. The classification scanner
-	// (internal/classification/scanner.go) has the same Lstat-at-root
-	// constraint, so admitting symlink roots in the watcher without
-	// aligning the scanner would emit events for nested changes the
-	// scanner can never surface.
+	// 非 dir root を拒否。inotify は単一ファイルも watch できるので、無いと file path で Start が成功し
+	// 何も event を出さず健全に見えて何もしない。Lstat で symlink-to-dir も拒否 — WalkDir は symlink root の
+	// descent を skip しネスト watch が未設定になるし、scanner (同じ Lstat 制約) が surface できない event を出す。
 	info, err := os.Lstat(root)
 	if err != nil {
 		return fmt.Errorf("watcher: lstat root %q: %w", root, err)
@@ -174,15 +119,11 @@ func (m *Manager) Start(root string) error {
 		return fmt.Errorf("watcher: NewWatcher: %w", err)
 	}
 
-	// watchedDirs is populated by addSubtree during the initial walk and
-	// extended by the loop's Create branch.
+	// watchedDirs は初期 walk で addSubtree が埋め、loop の Create 分岐が拡張する。
 	watchedDirs := make(map[string]struct{})
 
-	// Root must succeed: without it we can't see top-level changes (image
-	// add/remove directly in `root`). Descendants are best-effort. The
-	// initial walk uses the collect-free overload — at Start time no
-	// inotify Create events are queued for discovered images, so there is
-	// nothing to dedup against.
+	// root は成功必須: 無いと top-level 変更 (root 直下の画像 add/remove) が見えない。子孫は best-effort。
+	// 初期 walk は collect なし版 — Start 時は発見画像への inotify Create が queue されず dedup 対象が無い。
 	if !addSubtree(w, root, watchedDirs) {
 		_ = w.Close()
 		return fmt.Errorf("watcher: cannot watch root %q", root)
@@ -201,10 +142,8 @@ func (m *Manager) Start(root string) error {
 	return nil
 }
 
-// goroutineExited reports whether the loop for st has already returned.
-// Used by Start to detect zombie states (loop ended via a backend-channel
-// close without a paired Stop) so we don't no-op into a non-functional
-// watch.
+// goroutineExited は st の loop が既に return したか報告する。Start が zombie state (Stop 無しに loop 終了) を
+// 検出し機能しない watch へ no-op しないため。
 func goroutineExited(st *watchState) bool {
 	select {
 	case <-st.done:
@@ -214,7 +153,7 @@ func goroutineExited(st *watchState) bool {
 	}
 }
 
-// Stop tears down the active watch (if any). Idempotent.
+// Stop は active な watch を tear down する。冪等。
 func (m *Manager) Stop() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -226,23 +165,15 @@ func (m *Manager) stopLocked() error {
 		return nil
 	}
 	st := m.state
-	// Order matters here:
-	//   1) Mark stopRequested so the loop's Events-channel-close branch
-	//      can tell our explicit Stop from an unexpected backend failure.
-	//   2) close(st.stop) signals the select to wake on the stop case
-	//      directly — only useful if the loop is idle. If the loop is
-	//      blocked in fsnotify's internal read, this alone doesn't help.
-	//   3) st.watcher.Close() forces fsnotify to close Events/Errors, which
-	//      unblocks the loop's select via the !ok branch.
-	// Both 2) and 3) converge on the loop's defer close(done).
-	//
-	// Skipping close(st.stop) when it's already closed handles the zombie
-	// path: Start saw a dead goroutine and called stopLocked to clean up.
+	// 順序が重要:
+	//   1) stopRequested を立て、loop が明示 Stop と backend 失敗を区別できるように。
+	//   2) close(st.stop) で idle な loop の select を起こす (fsnotify read で block 中はこれだけでは効かない)。
+	//   3) st.watcher.Close() で Events/Errors を閉じ loop の select を !ok 分岐で unblock。
+	// 既に閉じた st.stop の close を skip するのは zombie 経路対応 (Start が dead goroutine を掃除する場合)。
 	st.stopRequested.Store(true)
 	select {
 	case <-st.stop:
-		// already closed (zombie cleanup) — st.watcher.Close still runs
-		// to release fsnotify resources idempotently.
+		// 既に閉じている (zombie cleanup) — st.watcher.Close は fsnotify リソース解放のため冪等に走る。
 	default:
 		close(st.stop)
 	}
@@ -253,15 +184,9 @@ func (m *Manager) stopLocked() error {
 	return err
 }
 
-// Current returns the root of the last-built watcher state, or "" when no
-// state exists (= Stop'd, or never Started). A non-empty return does NOT
-// guarantee the loop goroutine is still running — root vanish or a backend
-// close leaves `m.state` as a "zombie" with `goroutineExited(st) == true`
-// until the next Stop or Start tears it down. Callers that need "is
-// monitoring actually live for this folder?" should ALSO check that the
-// next Start would no-op (i.e., not consult Current alone). Used by tests
-// / debug callers; production code tracks the intended folder
-// independently via folderRef on the JS side instead of polling this.
+// Current は最後に建てた watcher state の root、無ければ "" を返す。非空でも loop が live とは限らない
+// (root 消失 / backend close で zombie になりうる)。テスト / debug 用で、本番は JS 側 folderRef が意図
+// folder を独立追跡する。
 func (m *Manager) Current() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -271,15 +196,13 @@ func (m *Manager) Current() string {
 	return m.state.root
 }
 
-// loop runs in its own goroutine for the duration of one watch. It coalesces
-// raw fsnotify events into a single ChangedPayload per quiet window and
-// invokes emit() exactly once per flush.
+// loop は 1 watch の間、自前 goroutine で走る。raw fsnotify event を quiet window ごとに 1 つの
+// ChangedPayload に coalesce し、flush ごとに emit() をちょうど 1 回呼ぶ。
 func (m *Manager) loop(st *watchState) {
 	defer close(st.done)
 
-	// Capture errCh locally so we can set it to nil when fsnotify closes
-	// the Errors channel — otherwise the closed channel stays
-	// always-ready and `continue` produces a tight CPU loop.
+	// errCh を local 化し fsnotify が Errors を閉じたとき nil にできるように — でないと閉じた channel が
+	// 常時 ready で continue が tight CPU loop になる。
 	errCh := st.watcher.Errors
 
 	var (
@@ -324,15 +247,9 @@ func (m *Manager) loop(st *watchState) {
 				if timer != nil {
 					timer.Stop()
 				}
-				// stopLocked sets stopRequested before triggering the
-				// watcher.Close that drains this channel. Distinguish:
-				//   - explicit Stop → discard pending (a trailing flush
-				//     after StopFolderWatch returned would emit
-				//     "classification:changed" the user no longer wants)
-				//   - unexpected backend close (fsnotify died,
-				//     max_watches overflow, etc.) → log + flush whatever
-				//     we accumulated so the user at least gets the
-				//     partial result; spec §10.2
+				// stopLocked は Close の前に stopRequested を立てる。区別:
+				//   - 明示 Stop → pending discard (trailing flush は不要な event を emit する)
+				//   - 想定外 backend close (fsnotify 死 / max_watches overflow) → log + flush で部分結果を渡す (spec §10.2)
 				if !st.stopRequested.Load() {
 					logging.Warn("watcher",
 						"events channel closed unexpectedly",
@@ -346,34 +263,16 @@ func (m *Manager) loop(st *watchState) {
 			if classifyAndAccumulate(&pending, ev, st) {
 				resetTimer()
 			}
-			// Root vanished: a Remove / Rename on the watched root itself
-			// (e.g. the user deleted or moved the folder out from under
-			// us) leaves Linux inotify's watch dangling via IN_IGNORED;
-			// we'd keep this goroutine alive forever waiting on a dead
-			// fd, and since Manager.Start short-circuits on same-root +
-			// live goroutine, the next openFolder of the same path would
-			// also no-op. Flush whatever was pending so the frontend at
-			// least re-Loads (and surfaces the absence), then tear down
-			// the fsnotify resources before exiting — leaving the Watcher
-			// open until the next explicit Stop/Start would leak its fd
-			// and reader goroutine for the entire window the user spends
-			// in the now-orphaned folder. stopLocked() detects
-			// `stopRequested` to remain idempotent if the user happens to
-			// call Stop concurrently while the loop is already on its way
-			// out.
+			// root 消失: watched root 自身の Remove/Rename は inotify watch を IN_IGNORED で dangling にし、
+			// goroutine が dead fd を永遠に待ち Start も同 root で短絡して次の openFolder が no-op になる。
+			// pending を flush (不在を surface) し exit 前に fsnotify を tear down する — 開いたままだと fd と
+			// reader goroutine が leak する。stopLocked は stopRequested を見るので並行 Stop でも冪等。
 			if (ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename)) && ev.Name == st.root {
 				if timer != nil {
 					timer.Stop()
 				}
-				// Stop concurrency: if an explicit Stop landed before we
-				// got here, honour the "discard pending" contract — the
-				// user already asked monitoring off and a trailing
-				// "watch root vanished" warn + flush after
-				// StopFolderWatch returned would be doubly misleading
-				// (no callback wanted, and root vanish is a noisy state
-				// for a folder we no longer care about). Mirrors the
-				// timer / Events !ok / st.stop branches that all skip
-				// the trailing flush on stopRequested.
+				// Stop 並行: 明示 Stop 済みなら "discard pending" 契約を守る (trailing の warn + flush は
+				// 監視 off 済み folder には noisy)。timer / Events !ok / st.stop 分岐と同じ扱い。
 				if st.stopRequested.Load() {
 					return
 				}
@@ -381,41 +280,27 @@ func (m *Manager) loop(st *watchState) {
 					"folder", st.root, "op", ev.Op.String())
 				pending.anyChange = true
 				flush()
-				// Mark stopRequested so the !ok branch above (which
-				// fires once st.watcher.Close drains the Events channel)
-				// treats the close as intentional and skips its log +
-				// flush duplication. The actual goroutine termination is
-				// via the `return` below — Close just releases
-				// fsnotify's internal goroutine / fd.
+				// stopRequested を立て、上の !ok 分岐が close を意図的と扱い log + flush の重複を skip するように。
+				// goroutine 終了は下の return、Close は fsnotify 内部の goroutine / fd 解放だけ。
 				st.stopRequested.Store(true)
 				_ = st.watcher.Close()
 				return
 			}
 		case err, ok := <-errCh:
 			if !ok {
-				// fsnotify closed Errors. Don't return (Events may still
-				// be live); disable this case to avoid spinning.
+				// fsnotify が Errors を閉じた。return しない (Events はまだ live かも); spin を避けこの case を無効化。
 				errCh = nil
 				continue
 			}
 			logging.Warn("watcher", "channel error", "err", err.Error())
-			// We can't reliably distinguish a benign warning from a
-			// lost-event indicator (e.g. inotify IN_Q_OVERFLOW would
-			// arrive here in some fsnotify forks). Be safe and flag
-			// anyChange so the next flush prompts the frontend to
-			// re-Load — without this, a queue overflow silently leaves
-			// the listing stale even though we know our event stream is
-			// incomplete.
+			// benign warning と lost-event (IN_Q_OVERFLOW 等) を確実に区別できないので、安全側で anyChange を
+			// 立て re-Load させる — でないと queue overflow で listing が silent に stale になる。
 			pending.anyChange = true
 			resetTimer()
 		case <-timerCh:
 			timerCh = nil
-			// Stop and the debounce timer can both become ready in the
-			// same select tick. Go picks a ready case at random, so even
-			// after stopLocked has set stopRequested + closed st.stop,
-			// this branch can still win and flush pending events —
-			// violating the "explicit Stop discards pending" contract
-			// enforced by the Events !ok and st.stop branches above.
+			// Stop と timer が同 tick で両方 ready のとき Go はランダム選択するので、stopLocked 後でもこの分岐が
+			// 勝って "明示 Stop は pending discard" 契約を破りうる。stopRequested で防ぐ。
 			if st.stopRequested.Load() {
 				return
 			}
@@ -424,10 +309,8 @@ func (m *Manager) loop(st *watchState) {
 			if timer != nil {
 				timer.Stop()
 			}
-			// Same rationale as the Events !ok branch above — explicit
-			// Stop drops pending events. We arrive here when the stop
-			// signal wins the select before watcher.Close drains the
-			// Events channel.
+			// 上の Events !ok 分岐と同じ理由 — 明示 Stop は pending を捨てる。watcher.Close が Events を
+			// drain する前に stop signal が select に勝つとここに来る。
 			return
 		}
 	}

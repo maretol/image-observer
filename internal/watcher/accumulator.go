@@ -1,22 +1,13 @@
 package watcher
 
-// changedAccumulator collects events between debounce flushes.
+// changedAccumulator は debounce flush 間の event を集める。
 //
-// anyChange distinguishes "we got an interesting event that doesn't bump a
-// counter" (e.g. a new subdirectory was created) from "no events at all",
-// so empty() can suppress no-op emits.
+// anyChange は「counter を増やさない interesting event (新規 subdir 等)」と「event 皆無」を区別し、
+// empty() が no-op emit を抑止できるように。
 //
-// discoveredImagePaths is a per-window dedup set: when a directory-Create
-// event runs addSubtreeCollect, every image file the walk turns up is both
-// counted into addedFiles AND parked here. A subsequent inotify Create for
-// one of those paths (race between the walk and concurrent writers
-// dropping files into the just-created dir) is then consumed instead of
-// double-counted.
-//
-// removedPaths is a per-window dedup set for Remove/Rename. Inotify fires
-// multiple events for a removed/renamed entry (parent's IN_DELETE plus the
-// path's own IN_DELETE_SELF / IN_IGNORED); without dedup the second event
-// over-counts. The map is wiped by reset().
+// discoveredImagePaths / removedPaths は per-window dedup set。dir-Create の walk が見つけた画像への
+// 後続 inotify Create、および 1 削除で inotify が出す複数 event (IN_DELETE + IN_DELETE_SELF / IN_IGNORED)
+// の二重計上を防ぐ。map は reset() で消える。
 type changedAccumulator struct {
 	addedFiles           int
 	removedFiles         int

@@ -11,18 +11,13 @@ import (
 	"image-observer/internal/imgfile"
 )
 
-// FileScanner enumerates the image files under a folder. As of Phase 4 v1.2 the
-// scanner walks subdirectories recursively and returns paths relative to the
-// scanned root using POSIX separators ("/"), e.g. "a.jpg" or "child1/x.png".
-//
-// Symlinks are NOT followed (filepath.WalkDir uses Lstat-style entries), which
-// avoids the need for inode tracking and loop detection. Hidden directories
-// (names starting with ".") are skipped wholesale.
+// FileScanner はフォルダ配下の画像を再帰列挙し、root からの相対 POSIX path を返す ("child1/x.png")。
+// symlink は辿らず (inode 追跡 / loop 検出が不要)、hidden dir (先頭 ".") は skip。
 type FileScanner interface {
 	ListImageFiles(folderPath string) ([]string, error)
 }
 
-// NewFileScanner returns the default scanner backed by filepath.WalkDir.
+// NewFileScanner は filepath.WalkDir を使う既定 scanner を返す。
 func NewFileScanner() FileScanner {
 	return fsScanner{}
 }
@@ -30,23 +25,21 @@ func NewFileScanner() FileScanner {
 type fsScanner struct{}
 
 func (fsScanner) ListImageFiles(folderPath string) ([]string, error) {
-	// Surface a clean error when the root itself is missing or unreadable;
-	// downstream WalkDir errors at this entry are otherwise swallowed by the
-	// "best-effort" branch below.
+	// root 自体が無い/読めないとき clean error を出す (でないと下の best-effort 分岐が飲み込む)。
 	if _, err := os.Stat(folderPath); err != nil {
 		return nil, fmt.Errorf("stat root: %w", err)
 	}
 	var out []string
 	err := filepath.WalkDir(folderPath, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			// Best-effort: skip this entry but keep walking siblings.
+			// best-effort: この entry は skip し兄弟の walk は続ける。
 			if d != nil && d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
 		}
 		if path == folderPath {
-			return nil // root itself
+			return nil // root 自身
 		}
 		name := d.Name()
 		if isHiddenName(name) {
@@ -75,11 +68,8 @@ func (fsScanner) ListImageFiles(folderPath string) ([]string, error) {
 	return out, nil
 }
 
-// isHiddenName treats names starting with "." as hidden. Windows-only Hidden
-// attribute is not supported here; we accept that as a pragmatic limit since
-// image folders rarely depend on it. Sidecar files (_classification.*) start
-// with "_" rather than "." so they are excluded by the imgfile.IsImage filter
-// instead, not this function.
+// isHiddenName は先頭 "." の名前を hidden 扱いする。Windows の Hidden 属性は非対応 (稀なので許容)。
+// sidecar (_classification.*) は "_" 始まりなので imgfile.IsImage フィルタ側で除外される。
 func isHiddenName(name string) bool {
 	return strings.HasPrefix(name, ".")
 }

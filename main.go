@@ -22,19 +22,13 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// Version is the build-time release tag, injected via:
-//
-//	go build -ldflags "-X main.Version=v0.1.0"
-//
-// (Wails forwards `-ldflags` from `wails build`.) Untagged builds (local
-// `wails dev` / `wails build` without a flag) leave it as the dev sentinel.
+// Version は build 時の release tag。-ldflags "-X main.Version=..." で注入、未タグ build は "dev" のまま。
 var Version = "dev"
 
 func main() {
-	// Logging first: any later panic / state-load issue should land in the file.
+	// まず logging: 以降の panic / state-load 問題をファイルに残すため。
 	if err := logging.Init(); err != nil {
-		// Logging itself failed; the user has no log file to inspect, so fall
-		// back to stderr (visible in dev terminal, ignored in packaged builds).
+		// logging 自体が失敗。log ファイルが無いので stderr に fallback。
 		log.Printf("logging init failed: %v", err)
 	}
 	defer logging.Close()
@@ -44,15 +38,14 @@ func main() {
 			logging.Error("app", "panic recovered",
 				"value", fmt.Sprint(r),
 				"stack", string(debug.Stack()))
-			// Re-raise so the process still exits non-zero.
+			// 再 raise してプロセスが非ゼロ終了するように。
 			panic(r)
 		}
 	}()
 
 	logging.Info("app", "starting", "version", Version)
 
-	// Apply persisted user settings: e.g., the log level the user picked in
-	// the settings UI overrides the env-var-resolved level chosen at Init().
+	// 永続ユーザー設定を適用 (settings UI の log level が Init() の env-var 解決を上書き)。
 	userSettings := settings.Load()
 	if lvl, ok := logging.ParseLevel(userSettings.LogLevel); ok {
 		logging.SetLevel(lvl)
@@ -61,8 +54,7 @@ func main() {
 			"multiSelectMode", userSettings.MultiSelectMode)
 	}
 
-	// Worker pool sizing happens once at startup; settings UI marks worker-count
-	// changes as restart-required (see thumb.InitWorkerPool's safety note).
+	// worker pool は起動時 1 回。worker 数変更は再起動必須 (thumb.InitWorkerPool 参照)。
 	thumb.InitWorkerPool(userSettings.ThumbnailWorkerCount)
 	logging.Info("app", "thumb worker pool sized",
 		"workerCount", thumb.CurrentWorkerCount(),
@@ -70,8 +62,7 @@ func main() {
 
 	app := NewApp()
 
-	// Load persisted state up front so we can size the window before showing it.
-	// Window position needs runtime API and is restored after startup.
+	// window 表示前にサイズを決めるため永続 state を先に load。位置は runtime API が要るので startup 後に復元。
 	persisted := state.Load()
 
 	width := persisted.Window.Width
@@ -95,50 +86,34 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup: func(ctx context.Context) {
 			app.startup(ctx)
-			// With the never-positioned sentinel (first launch / missing state)
-			// there is no real geometry to restore, so let Wails use its default
-			// placement — skip both the Win32 restore and the fallback
-			// WindowSetPosition (issue #129 review: applying (-1,-1) would shove
-			// the window into the top-left corner).
+			// never-positioned sentinel (初回 / state 欠落) は復元 geometry が無いので Wails 既定 placement に
+			// 任せ restore を skip する (#129: (-1,-1) 適用で左上隅に押し込まれる)。
 			posUnset := persisted.Window.X == state.WindowPositionUnset &&
 				persisted.Window.Y == state.WindowPositionUnset
 			if !posUnset {
-				// Windows: restore the full native placement (issue #129). The
-				// Wails-runtime path below lands the window on the primary
-				// monitor on multi-monitor Windows (the bug we fix);
-				// SetWindowPlacement puts it back on the correct monitor and
-				// also captures the restore rect even while maximized.
-				// winplacement.Restore is a no-op (ok=false) on non-Windows,
-				// where we keep the #86 fallback.
+				// Windows: native placement をフル復元 (#129)。下の Wails-runtime 経路は multi-monitor で
+				// primary monitor に置いてしまう。winplacement.Restore は非 Windows で no-op (ok=false → #86 fallback)。
 				if winplacement.Restore(persisted.Window) {
 					return
 				}
-				// Real negative coordinates (a secondary monitor left of /
-				// above the primary) are valid and must be restored on this
-				// fallback path too (issue #129 review).
+				// 本物の負座標 (左/上の secondary monitor) は有効なのでこの fallback でも復元 (#129)。
 				runtime.WindowSetPosition(ctx, persisted.Window.X, persisted.Window.Y)
 			}
-			// Restore maximized state last so the unmaximize button falls back
-			// to the persisted Width/Height/X/Y geometry (issue #86). The
-			// frontend's polling freezes those four fields while
-			// WindowIsMaximised is true, so they stay representative of the
-			// most recent non-maximized session.
+			// 最大化 state は最後に復元し unmaximize が永続 geometry に戻るように (#86)。frontend polling は
+			// 最大化中この 4 field を凍結するので非最大化 session の値のまま。
 			if persisted.Window.Maximized {
 				runtime.WindowMaximise(ctx)
 			}
 		},
 		OnBeforeClose: func(_ context.Context) (prevent bool) {
-			// Windows: capture the native placement while the window still
-			// exists (OnShutdown is too late — the HWND may be gone) and persist
-			// only the window field (issue #129). winplacement.Capture is a
-			// no-op (ok=false) on non-Windows, where the frontend polling owns
-			// the window geometry (#86), so nothing is saved here.
+			// Windows: window がまだ存在する間に native placement を捕捉 (OnShutdown は遅すぎ HWND 消失の恐れ)、
+			// window field だけ永続化 (#129)。Capture は非 Windows で no-op (ok=false — frontend polling が所有, #86)。
 			if w, ok := winplacement.Capture(); ok {
 				if err := state.SaveWindow(w); err != nil {
 					logging.Warn("app", "save window placement failed", "err", err.Error())
 				}
 			}
-			return false // allow the window to close
+			return false // window を閉じさせる
 		},
 		OnShutdown: func(ctx context.Context) {
 			app.shutdown(ctx)

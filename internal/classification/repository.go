@@ -12,36 +12,30 @@ import (
 	"strings"
 )
 
-// SidecarRepository abstracts CSV/JSON I/O so Service can be tested with
-// in-memory implementations. The default implementation is fileRepo below.
+// SidecarRepository は CSV/JSON I/O を抽象化し Service を in-memory 実装でテストできるようにする。
+// 既定実装は下の fileRepo。
 type SidecarRepository interface {
-	// Load reads either _classification.json (preferred) or _classification.csv
-	// from folderPath. Returns Source="none" with nil Data when neither exists.
-	// Mtime is the UnixMilli of _classification.json (0 if absent or CSV-only).
-	// We use milliseconds, not nanoseconds, because UnixNano (~1.78e18 in 2026)
-	// exceeds JavaScript Number.MAX_SAFE_INTEGER (~9e15) and would lose precision
-	// when round-tripped through Wails IPC, breaking conflict detection.
+	// Load は _classification.json (優先) か .csv を読む。どちらも無ければ Source="none" + nil Data。
+	// Mtime は UnixMilli (CSV / 無しは 0)。ナノ秒でなくミリ秒なのは UnixNano が JS の
+	// Number.MAX_SAFE_INTEGER を超え IPC で精度を失い conflict 検出が壊れるため。
 	Load(folderPath string) (LoadOutput, error)
 
-	// SaveJSON writes _classification.json atomically with a .bak rotation.
-	// If expectedMtime > 0 the on-disk mtime is checked first and ErrConflict
-	// is returned on mismatch. expectedMtime == 0 forces overwrite.
-	// Returns the new mtime on success.
+	// SaveJSON は _classification.json を .bak rotation 付きで atomic に書く。expectedMtime > 0 なら
+	// 先に on-disk mtime を確認し不一致で ErrConflict。0 は強制上書き。成功時は新 mtime を返す。
 	SaveJSON(folderPath string, c *Classification, expectedMtime int64) (int64, error)
 
-	// CreateJSON writes a brand-new _classification.json. Returns
-	// ErrAlreadyExists if a JSON file is already there.
+	// CreateJSON は新規 _classification.json を書く。既にあれば ErrAlreadyExists。
 	CreateJSON(folderPath string, c *Classification) (int64, error)
 }
 
-// LoadOutput is the raw repository result before merging with on-disk files.
+// LoadOutput は on-disk ファイルとマージする前の raw な repository 結果。
 type LoadOutput struct {
 	Data   *Classification
 	Source string // "json" | "csv" | "none"
 	Mtime  int64
 }
 
-// NewFileRepository returns the default repository backed by the local filesystem.
+// NewFileRepository は local filesystem を使う既定 repository を返す。
 func NewFileRepository() SidecarRepository {
 	return fileRepo{}
 }
@@ -79,20 +73,13 @@ func (fileRepo) SaveJSON(folderPath string, c *Classification, expectedMtime int
 	bakPath := filepath.Join(folderPath, BackupJSON)
 	tmpPath := filepath.Join(folderPath, TempJSON)
 
-	// Conflict check: if expectedMtime is set, compare against current mtime.
+	// conflict check: expectedMtime があれば現在の mtime と比較。
 	if expectedMtime > 0 {
 		info, err := os.Stat(jsonPath)
 		switch {
 		case err == nil:
-			// A directory now occupies the sidecar path (e.g. the user
-			// or an external tool replaced the file with a same-named
-			// dir between Load and Save). Mtime may even match by
-			// coincidence, so the equality check below isn't enough.
-			// The subsequent backup / WriteFile / Rename would fail
-			// with an opaque IO error far from the actual cause;
-			// surface it as ErrConflict so the frontend's standard
-			// conflict dialog gives the user a choice, same as the
-			// file-gone case below (PR #75 25th, thread B).
+			// sidecar path を dir が占めている (Load↔Save 間に同名 dir へ差し替え)。後続の IO は原因から
+			// 遠いエラーで失敗するので、file-gone 同様 ErrConflict として surface し標準 dialog で選ばせる。
 			if info.IsDir() {
 				return 0, ErrConflict
 			}
@@ -100,21 +87,15 @@ func (fileRepo) SaveJSON(folderPath string, c *Classification, expectedMtime int
 				return 0, ErrConflict
 			}
 		case os.IsNotExist(err):
-			// The file went away entirely between Load and Save (the
-			// user was editing, an external delete removed the sidecar).
-			// expectedMtime was non-zero, meaning the caller observed
-			// the file at Load — re-creating it silently here would
-			// silently overwrite whatever caused the delete (e.g. an
-			// AI tool resetting state). Surface as ErrConflict so the
-			// frontend's standard conflict dialog gives the user a
-			// choice (PR #75 16th, thread E).
+			// Load↔Save 間にファイルが消えた (外部 delete)。silent 再作成は delete の原因を上書きするので、
+			// ErrConflict として surface し標準 dialog で選ばせる。
 			return 0, ErrConflict
 		default:
 			return 0, fmt.Errorf("stat for conflict check: %w", err)
 		}
 	}
 
-	// Backup existing JSON (best-effort; missing is fine for first save).
+	// 既存 JSON を backup (best-effort; 初回 save で無いのは OK)。
 	if _, err := os.Stat(jsonPath); err == nil {
 		if err := copyFile(jsonPath, bakPath); err != nil {
 			return 0, fmt.Errorf("backup: %w", err)

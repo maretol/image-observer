@@ -6,11 +6,10 @@ import (
 	"golang.org/x/image/draw"
 )
 
-// resize produces a target×target RGBA according to cfg.Mode.
-// - "letterbox": preserve aspect, fit within the box, transparent padding
-// - "crop":      preserve aspect, fill the box, center-crop
-//
-// Output is always cfg.GenerateSize × cfg.GenerateSize.
+// resize は cfg.Mode に従い target×target RGBA を作る。
+// - "letterbox": アスペクト保持で box 内に fit、透明 padding
+// - "crop":      アスペクト保持で box を fill、center-crop
+// 出力は常に cfg.GenerateSize × cfg.GenerateSize。
 func resize(src image.Image, cfg Config) image.Image {
 	target := cfg.GenerateSize
 	bounds := src.Bounds()
@@ -23,9 +22,7 @@ func resize(src image.Image, cfg Config) image.Image {
 
 	switch cfg.Mode {
 	case "crop":
-		// Scale source so its shorter side maps to target, then center-crop.
-		// Drawing into rect (offX, offY, offX+scaledW, offY+scaledH) where the
-		// box is target×target effectively crops the overflow.
+		// 短辺を target に合わせ center-crop。box を rect に描くことで overflow が crop される。
 		scale := float64(target) / float64(minInt(sw, sh))
 		scaledW := int(float64(sw) * scale)
 		scaledH := int(float64(sh) * scale)
@@ -37,7 +34,7 @@ func resize(src image.Image, cfg Config) image.Image {
 			src, bounds, draw.Src, nil,
 		)
 	default: // "letterbox"
-		// Scale source so its longer side maps to target; pad with transparent.
+		// 長辺が target に合うよう scale し透明で pad。
 		scale := float64(target) / float64(maxInt(sw, sh))
 		dstW := int(float64(sw) * scale)
 		dstH := int(float64(sh) * scale)

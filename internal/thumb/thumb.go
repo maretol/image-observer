@@ -22,7 +22,7 @@ type Result struct {
 	MimeType string `json:"mimeType"`
 }
 
-// Get returns a thumbnail for the given image path. See spec-thumbnail.md §3.3.
+// Get は画像 path のサムネイルを返す (spec-thumbnail.md §3.3)。
 func Get(path string, size int, mode string) (Result, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -54,10 +54,8 @@ func Get(path string, size int, mode string) (Result, error) {
 
 	inputExt := strings.ToLower(filepath.Ext(abs))
 
-	// AVIF: Go に in-tree デコーダが無いため (spec-avif-support §7 D1=A) downscale
-	// したサムネイルを生成できない。元バイト列をそのまま返し、WebView 側に縮小
-	// 表示を委ねる (§4.4 / D3)。WebP→PNG フォールバックと同じく「エラーではなく
-	// 仕様上の正常動作」。元ファイルが実体なのでディスクキャッシュは行わない。
+	// AVIF: Go に in-tree デコーダが無く downscale できない (spec-avif-support §7 D1=A)。元バイト列を
+	// そのまま返し WebView に縮小表示を委ねる (§4.4 / D3)。実体を返すので disk cache もしない。
 	if inputExt == ".avif" {
 		data, err := os.ReadFile(abs)
 		if err != nil {

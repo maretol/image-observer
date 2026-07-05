@@ -17,16 +17,11 @@ import (
 	"unicode/utf8"
 )
 
-// StateSchemaVersion is bumped to 6: replaces the single `Layout` field with
-// `Viewers []ViewerState` + `ActiveViewerID` so the user can keep multiple
-// independent viewer layouts (issue #11). v5 payloads are migrated lossless
-// (the single layout is wrapped into one viewer); earlier versions fall back
-// to DefaultData.
+// StateSchemaVersion は 6: v5 の単一 Layout を Viewers + ActiveViewerID に置換し複数 viewer layout を
+// 保てるように (#11)。v5 は lossless に migrate、それ以前は DefaultData に fallback。
 const StateSchemaVersion = 6
 
-// Multi-viewer constants. MaxViewers ties to the `Ctrl+Shift+2..9` keybinding
-// range (= 8 viewers selectable by digit). MaxNameLen is rune-counted, not
-// byte-counted, so Japanese names get 32 characters' worth of latitude.
+// maxViewers=8 は Ctrl+Shift+2..9 のキーバインド範囲。maxNameLen は byte でなく rune 数 (日本語名も 32 文字)。
 const (
 	maxViewers           = 8
 	maxNameLen           = 32
@@ -43,33 +38,24 @@ type StateData struct {
 	List           ListTabState  `json:"list"`
 }
 
-// ViewerState is one user-named viewer. Each viewer holds an independent BSP
-// layout; switching viewers is purely a UI-level swap of the `Layout` shown.
+// ViewerState は 1 ユーザー命名 viewer。各 viewer は独立 BSP layout を持つ。
 type ViewerState struct {
 	ID     string      `json:"id"`
 	Name   string      `json:"name"`
 	Layout LayoutState `json:"layout"`
 }
 
-// ListTabState holds per-folder UI state for the list (classification) tab.
-//
-// CollapsedGroups (v3): the directory-group keys (POSIX relative paths from
-// the parent folder, "." for the parent's direct files) that the user has
-// collapsed in the accordion view.
+// ListTabState は list (分類) タブの folder ごと UI state。CollapsedGroups は折りたたんだ directory-group
+// キー (親からの POSIX 相対 path、親直下は ".")。
 type ListTabState struct {
 	FolderPath      string          `json:"folderPath"`
 	Filter          ListFilterState `json:"filter"`
 	CollapsedGroups []string        `json:"collapsedGroups"`
 }
 
-// ListFilterState mirrors the frontend filter store. Tags are an OR set;
-// Confidence is one of "all" | "high" | "mid" | "low".
-//
-// UntaggedOnly (#116) shows only entries with no tags and is mutually exclusive
-// with Tags at the UI layer. It was added additively without a schema bump:
-// pre-#116 v6 payloads lack the key and unmarshal to false (lossless), and an
-// older binary reading a newer payload simply ignores the unknown field — so
-// v6 stays forward/backward compatible (see docs/spec-untagged-filter.md §5.3).
+// ListFilterState は frontend の filter store をミラー。Tags は OR set、Confidence は
+// "all" | "high" | "mid" | "low"。UntaggedOnly (#116) はタグ無し entry のみ表示し Tags と排他 —
+// schema bump なしの加算追加で v6 は前後方互換 (spec-untagged-filter.md §5.3)。
 type ListFilterState struct {
 	Tags         []string `json:"tags"`
 	UntaggedOnly bool     `json:"untaggedOnly"`
@@ -77,19 +63,9 @@ type ListFilterState struct {
 	Query        string   `json:"query"`
 }
 
-// WindowState holds the persisted window geometry.
-//
-// Width / Height / X / Y are the *non-maximized* (restore) geometry. Maximized
-// is a separate bool so the user can close the app while maximized and have it
-// reopen maximized while still retaining the size to fall back to when they
-// hit the restore button.
-//
-// Who writes this field depends on the platform (see docs/spec-window-placement.md
-// §8 sync model): on Windows the Go OnBeforeClose Win32 capture (issue #129) is
-// the sole writer — GetWindowPlacement's rcNormalPosition is the restore rect
-// even while maximized. On non-Windows the frontend polling owns it and freezes
-// width/height/x/y while WindowIsMaximised is true so a maximized-at-close
-// session does not overwrite the restore geometry with the maximized size (#86).
+// WindowState は永続 window geometry。X/Y/W/H は *非最大化* (restore) 値で Maximized は別 bool
+// (最大化のまま閉じても restore サイズを保持)。writer は platform 依存: Windows は Go の Win32 capture
+// (#129)、非 Windows は frontend polling (#86) (spec-window-placement.md §8)。
 type WindowState struct {
 	Width     int  `json:"width"`
 	Height    int  `json:"height"`
@@ -98,36 +74,30 @@ type WindowState struct {
 	Maximized bool `json:"maximized,omitempty"`
 }
 
-// WindowPositionUnset is the X/Y sentinel DefaultData seeds when no window has
-// ever been positioned. Restore paths must skip applying the position only when
-// *both* X and Y equal this sentinel; real negative coordinates (a secondary
-// monitor left of / above the primary) are valid and must be restorable
-// (issue #129 review). Single-sourced here so DefaultData and main.go cannot
-// drift (AGENTS.md D-2).
+// WindowPositionUnset は未配置 window の X/Y sentinel。restore は X と Y が *両方* この値のときだけ位置適用を
+// skip する — 本物の負座標 (左/上の secondary monitor) は有効 (#129)。D-2: DefaultData と main.go の
+// drift 防止に single-source。
 const WindowPositionUnset = -1
 
-// LayoutState is the persisted form of one viewer's BSP layout tree. ActiveID
-// points to the leaf currently focused (mirrors `Layout.activeId` in TS).
+// LayoutState は 1 viewer の BSP layout tree の永続形。ActiveID は focus 中の leaf (TS Layout.activeId ミラー)。
 type LayoutState struct {
 	Root     LayoutNodeState `json:"root"`
 	ActiveID string          `json:"activeId"`
 }
 
-// LayoutNodeState is the JSON-serialized form of a SplitNode or LeafNode.
-// kind determines which fields are valid; the others are zero-valued and
-// omitted via `omitempty` where possible. ActiveIndex intentionally has no
-// omitempty so 0 (a valid value for populated leaves) survives round-trips.
+// LayoutNodeState は SplitNode / LeafNode の JSON 直列化形。kind で有効 field が決まる。ActiveIndex は
+// あえて omitempty なし — populated leaf の有効値 0 を round-trip で残すため。
 type LayoutNodeState struct {
 	Kind string `json:"kind"` // "split" | "leaf"
 	ID   string `json:"id"`
 
-	// SplitNode-only.
+	// SplitNode 専用。
 	Direction string           `json:"direction,omitempty"` // "row" | "col"
 	Ratio     float64          `json:"ratio,omitempty"`
 	A         *LayoutNodeState `json:"a,omitempty"`
 	B         *LayoutNodeState `json:"b,omitempty"`
 
-	// LeafNode-only.
+	// LeafNode 専用。
 	Tabs        []TabState `json:"tabs,omitempty"`
 	ActiveIndex int        `json:"activeIndex"`
 }
@@ -144,14 +114,12 @@ const (
 	defaultRootKey = "root-0"
 )
 
-// stateFilePathOverride lets tests redirect away from the user config dir.
+// stateFilePathOverride はテストが user config dir 外へ redirect するため。
 var stateFilePathOverride string
 
-// stateMu serializes state.json read-modify-write across goroutines. The Wails
-// SaveState binding (frontend, debounced) and the OnBeforeClose SaveWindow
-// capture (#129) run on independent goroutines; without this lock SaveWindow's
-// Load→Save could lose a concurrent Save's viewer/list update (or vice versa).
-// All exported Load/Save/SaveWindow take it; the *Locked helpers assume it held.
+// stateMu は state.json の read-modify-write を直列化する。frontend SaveState と OnBeforeClose の
+// SaveWindow (#129) が別 goroutine で走り、無いと Load→Save が並行更新を取りこぼす。exported な
+// Load/Save/SaveWindow が取得し *Locked helper は保持前提。
 var stateMu sync.Mutex
 
 func stateFilePath() (string, error) {
@@ -165,8 +133,7 @@ func stateFilePath() (string, error) {
 	return filepath.Join(base, "image-observer", "state.json"), nil
 }
 
-// DefaultData returns the in-memory defaults used when state.json is missing
-// or invalid. Exposed so callers (main.go, tests) can construct fresh state.
+// DefaultData は state.json が無い/不正なときの in-memory defaults を返す。
 func DefaultData() StateData {
 	v := defaultViewer()
 	return StateData{
@@ -209,40 +176,27 @@ func defaultLayoutState() LayoutState {
 	return LayoutState{Root: root, ActiveID: defaultRootKey}
 }
 
-// fallbackViewerIDCounter monotonically tags `crypto/rand`-failure fallback
-// IDs so that even in that exceedingly rare case (entropy unavailable) we
-// don't hand out colliding viewer IDs — `validateState` rejects duplicate
-// IDs as corrupt and would drop the user's entire viewer set to defaults.
+// fallbackViewerIDCounter は crypto/rand 失敗時の fallback ID を一意に保つ — 衝突 ID は validateState が
+// corrupt 扱いし viewer set 全体を defaults に落とすため。
 var fallbackViewerIDCounter atomic.Uint64
 
-// newViewerID returns a per-viewer identifier. Frontend uses
-// `crypto.randomUUID()`; on the Go side (DefaultData / v5 migration) we
-// produce a 16-byte UUID-v4-shaped hex string with a `v-` prefix so the
-// origin is greppable in logs / state.json. The spec only requires
-// uniqueness, not RFC-4122 wire compliance — both forms ride the same
-// `string` JSON field and validateState only checks emptiness + uniqueness.
+// newViewerID は viewer 識別子を返す。`v-` prefix 付き UUID-v4 風 hex で、logs / state.json で origin を
+// grep できるように。spec は一意性のみ要求 (RFC 準拠不要)。
 func newViewerID() string {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {
-		// Extremely rare path. Mix wall-clock nanoseconds with a
-		// process-local counter so successive fallback IDs stay unique
-		// (a static "viewer-fallback" string would collide on the second
-		// call and trigger a defaults-fallback validateState rejection).
+		// 連続 fallback を一意に保つ (固定文字列だと 2 度目で衝突し validateState が defaults に落とす)。
 		c := fallbackViewerIDCounter.Add(1)
 		return fmt.Sprintf("v-fallback-%d-%d", time.Now().UnixNano(), c)
 	}
-	// Set version (4) and variant (10xx) bits so the string is recognizable
-	// as a UUID even though we skip RFC dashes.
+	// version (4) と variant (10xx) bit を立て、RFC dash を省いても UUID と分かるように。
 	buf[6] = (buf[6] & 0x0f) | 0x40
 	buf[8] = (buf[8] & 0x3f) | 0x80
 	return "v-" + hex.EncodeToString(buf[:])
 }
 
-// Load returns the persisted session state, falling back to DefaultData on
-// any failure (missing file, parse error, version mismatch, validation failure).
-//
-// v5 payloads are migrated to v6 in-memory before validation runs; older
-// versions are not migrated and yield a default-data fallback.
+// Load は永続 session state を返す。失敗 (欠落 / parse / version 不一致 / 検証失敗) は DefaultData に
+// fallback。v5 は v6 に migrate、それ以前は fallback。
 func Load() StateData {
 	stateMu.Lock()
 	defer stateMu.Unlock()
@@ -263,8 +217,7 @@ func loadLocked() StateData {
 		return DefaultData()
 	}
 
-	// Peek at the version field so we can route to the v5 migration before
-	// the strict v6 unmarshal would fail on the missing `viewers` field.
+	// strict v6 unmarshal が viewers 欠落で失敗する前に v5 migration へ振り分けられるよう version を覗く。
 	var probe struct {
 		Version int `json:"version"`
 	}
@@ -303,11 +256,9 @@ func loadLocked() StateData {
 	}
 }
 
-// validateState applies soft fixes (clamp into range, sanitize names) and
-// returns an error when the structure is too corrupt to recover (caller falls
-// back to defaults).
+// validateState は soft fix (範囲 clamp / 名前 sanitize) を適用し、回復不能なほど壊れていれば error を返す (caller が defaults に fallback)。
 func validateState(s *StateData) error {
-	// Window sanity.
+	// Window の sanity。
 	if s.Window.Width < 200 {
 		s.Window.Width = 1024
 	}
@@ -315,7 +266,7 @@ func validateState(s *StateData) error {
 		s.Window.Height = 768
 	}
 
-	// Viewers: enforce 1..maxViewers, unique IDs, sanitized names, valid layouts.
+	// Viewers: 1..maxViewers / 一意 ID / sanitize 名 / 有効 layout を強制。
 	if len(s.Viewers) == 0 {
 		s.Viewers = []ViewerState{defaultViewer()}
 	}
@@ -338,7 +289,7 @@ func validateState(s *StateData) error {
 		}
 	}
 
-	// Resolve activeViewerId.
+	// activeViewerId を解決。
 	if !slices.ContainsFunc(s.Viewers, func(v ViewerState) bool { return v.ID == s.ActiveViewerID }) {
 		s.ActiveViewerID = s.Viewers[0].ID
 	}
@@ -361,13 +312,11 @@ func validateState(s *StateData) error {
 	return nil
 }
 
-// sanitizeViewerName trims, drops control characters, and rune-truncates to
-// maxNameLen. Empty results fall back to "ビューア N" using the supplied
-// index (0-based, displayed as 1-based).
+// sanitizeViewerName は trim + 制御文字除去 + maxNameLen 切り詰め。空なら index (0-based) を 1-based に
+// して "ビューア N" に fallback。
 func sanitizeViewerName(raw string, index int) string {
 	trimmed := strings.TrimSpace(raw)
-	// Drop control characters (newline / tab / etc) — viewer names live in a
-	// single-line UI.
+	// 制御文字 (改行 / tab 等) を除去 — viewer 名は 1 行 UI。
 	cleaned := strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
 			return -1
@@ -378,16 +327,15 @@ func sanitizeViewerName(raw string, index int) string {
 		return fmt.Sprintf(defaultViewerNamePat, index+1)
 	}
 	if utf8.RuneCountInString(cleaned) > maxNameLen {
-		// Truncate at rune boundary.
+		// rune 境界で切る。
 		runes := []rune(cleaned)
 		cleaned = string(runes[:maxNameLen])
 	}
 	return cleaned
 }
 
-// validateLayoutTree walks the layout tree, applying soft fixes for ratio /
-// activeIndex / zoom and rejecting structural problems (missing kind, duplicate
-// id, missing children) that warrant a default fallback.
+// validateLayoutTree は layout tree を walk し ratio / activeIndex / zoom を soft fix、構造的問題
+// (kind 欠落 / id 重複 / child 欠落) は拒否する。
 func validateLayoutTree(l *LayoutState) error {
 	if l.Root.Kind == "" {
 		return errors.New("layout root has no kind")
@@ -396,13 +344,11 @@ func validateLayoutTree(l *LayoutState) error {
 	if err := walkLayoutNode(&l.Root, seen); err != nil {
 		return err
 	}
-	// activeId resolution: must point to a leaf in the tree; otherwise
-	// default to the first DFS leaf.
+	// activeId 解決: tree 内の leaf を指す必要がある; でなければ DFS 先頭 leaf を既定にする。
 	leafIDs := []string{}
 	collectLeafIDs(&l.Root, &leafIDs)
 	if len(leafIDs) == 0 {
-		// Should not happen — at minimum the root must be a leaf or contain
-		// leaves. Treat as corrupt.
+		// 起きない想定 — 少なくとも root は leaf か leaf を含むはず。corrupt 扱い。
 		return errors.New("layout has no leaves")
 	}
 	if !slices.Contains(leafIDs, l.ActiveID) {
@@ -431,7 +377,7 @@ func walkLayoutNode(n *LayoutNodeState, seen map[string]struct{}) error {
 		if n.A == nil || n.B == nil {
 			return errors.New("split missing children")
 		}
-		// Soft fix: clamp ratio.
+		// soft fix: ratio を clamp。
 		n.Ratio = clampRatio(n.Ratio)
 		if err := walkLayoutNode(n.A, seen); err != nil {
 			return err
@@ -448,8 +394,7 @@ func walkLayoutNode(n *LayoutNodeState, seen map[string]struct{}) error {
 		} else if n.ActiveIndex < 0 || n.ActiveIndex >= len(n.Tabs) {
 			n.ActiveIndex = 0
 		}
-		// Reset obviously bad zoom values; frontend treats zoom<=0 as
-		// "needs initial fit".
+		// 明らかに不正な zoom を reset; frontend は zoom<=0 を「初期 fit が必要」と扱う。
 		for j := range n.Tabs {
 			t := &n.Tabs[j]
 			if t.Zoom > 0 && (t.Zoom < 0.01 || t.Zoom > 100) {
@@ -477,7 +422,7 @@ func collectLeafIDs(n *LayoutNodeState, out *[]string) {
 }
 
 func clampRatio(r float64) float64 {
-	if r != r { // NaN check
+	if r != r { // NaN チェック
 		return 0.5
 	}
 	if r < minRatio {
@@ -489,8 +434,7 @@ func clampRatio(r float64) float64 {
 	return r
 }
 
-// Save atomically writes the given state to state.json. Serialized with Load /
-// SaveWindow via stateMu so concurrent writers do not lose each other's updates.
+// Save は state を state.json に atomic に書く。stateMu で Load / SaveWindow と直列化する。
 func Save(s StateData) error {
 	stateMu.Lock()
 	defer stateMu.Unlock()
@@ -516,24 +460,9 @@ func saveLocked(s StateData) error {
 	return os.Rename(tmp, path)
 }
 
-// SaveWindow persists only the window geometry, preserving every other field of
-// the most recently saved session state.
-//
-// It re-reads the current state via Load (same validation / default-fallback as
-// startup), overwrites the Window field, and atomically rewrites the file. This
-// lets a writer that knows only the window geometry — the Go OnBeforeClose Win32
-// placement capture (issue #129) — update the window without clobbering the
-// viewer / layout / list state that the frontend owns. On Windows the frontend
-// deliberately stops polling geometry, so Go is the sole writer of the window
-// field there (see docs/spec-window-placement.md §8 sync model).
-//
-// Load never fails (it falls back to DefaultData), so a SaveWindow into a
-// missing / corrupt state file seeds defaults + the given window — acceptable
-// because the frontend rewrites the full state during the next session.
-//
-// The load+save is done under stateMu so it is atomic with respect to a
-// concurrent frontend Save (the read-modify-write cannot interleave and lose
-// the other writer's update).
+// SaveWindow は window geometry だけを永続化し他 field を保持する。load+save を stateMu 下で行うため
+// 並行 frontend Save と取りこぼし無く interleave する。Windows では Go の Win32 capture が window field の
+// 唯一の writer (#129, spec-window-placement.md §8)。
 func SaveWindow(w WindowState) error {
 	stateMu.Lock()
 	defer stateMu.Unlock()

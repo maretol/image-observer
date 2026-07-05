@@ -28,8 +28,7 @@ type Info struct {
 	MimeType string `json:"mimeType"`
 }
 
-// ReadInfo returns image dimensions and mime type without loading pixel data.
-// Used for pre-flight checks (e.g., size threshold) before opening a tab.
+// ReadInfo は pixel data を読まずに寸法と mime type を返す。タブを開く前の pre-flight (サイズ閾値等) 用。
 func ReadInfo(path string) (Info, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -53,8 +52,7 @@ func ReadInfo(path string) (Info, error) {
 	return Info{Width: w, Height: h, MimeType: mimeForInput(inputExt)}, nil
 }
 
-// Read returns the original image bytes plus its dimensions.
-// See spec-tab-imageview-3a.md §3.2 for behavior.
+// Read は元画像のバイト列と寸法を返す (spec-tab-imageview-3a.md §3.2)。
 func Read(path string) (Result, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -137,10 +135,9 @@ func decodeImageDimensions(path, ext string) (int, int, error) {
 		}
 		return cfg.Width, cfg.Height, nil
 	case ".avif":
-		// Go に in-tree avif デコーダが無く、cgo 回避方針 (context.md) のため
-		// デコーダ依存も追加しない (spec-avif-support §7 D1=A)。寸法は 0 を返し、
-		// フロントが <img>.naturalWidth/Height で補完する (§4.3 A1)。error に
-		// すると Read 全体が落ち、WebView が表示できる avif まで表示不能になる。
+		// Go に in-tree avif デコーダが無く cgo も避ける (spec-avif-support §7 D1=A)。寸法 0 を返し
+		// フロントが <img>.naturalWidth/Height で補完 (§4.3 A1)。error にすると WebView が表示できる
+		// avif まで Read ごと落ちる。
 		return 0, 0, nil
 	}
 	return 0, 0, fmt.Errorf("unsupported extension: %s", ext)

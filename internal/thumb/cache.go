@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// cacheRootOverride lets tests redirect cache writes away from the user cache dir.
+// cacheRootOverride はテストが cache 書き込みを user cache dir 外へ redirect するため。
 var cacheRootOverride string
 
 func cacheRoot() (string, error) {
@@ -35,8 +35,7 @@ func cacheFilePath(root string, cfg Config, key string, outputExt string) string
 	return filepath.Join(dir, key[2:]+outputExt)
 }
 
-// outputExtFor maps an input image extension to the cache file's extension.
-// WebP falls back to PNG because Go has no in-tree WebP encoder (spec §3.6).
+// outputExtFor は入力拡張子を cache ファイルの拡張子に対応させる。WebP は encoder が無く PNG に fallback (spec §3.6)。
 func outputExtFor(inputExt string) string {
 	ext := strings.ToLower(inputExt)
 	switch ext {

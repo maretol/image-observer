@@ -4,12 +4,8 @@ import (
 	"encoding/json"
 )
 
-// v5StateData mirrors the v5 on-disk schema. Defined privately here (not as a
-// renamed alias of the live StateData) so the v6 type can drop the single
-// `Layout` field cleanly without dragging legacy shapes into the rest of the
-// codebase. Only the fields v5 actually wrote are present.
-//
-// v5 schema source: state.go @ commit before #11 (tag-able as `state v5`).
+// v5StateData は v5 の on-disk schema をミラー。private に定義し v6 型が単一 Layout field を綺麗に
+// 落とせるように (legacy 形を codebase 全体に引きずらない)。
 type v5StateData struct {
 	Version int          `json:"version"`
 	Window  WindowState  `json:"window"`
@@ -18,10 +14,8 @@ type v5StateData struct {
 	List    ListTabState `json:"list"`
 }
 
-// migrateV5 wraps the v5 single-layout payload into one viewer so users keep
-// their existing splits / tabs / zoom intact when upgrading. Validation is
-// run by the caller (Load) afterward — this function does no normalization
-// of its own.
+// migrateV5 は v5 の単一 layout を 1 viewer に包む (既存 split / tab / zoom を保つ)。検証は caller (Load)
+// が行い、ここでは正規化しない。
 func migrateV5(raw []byte) (StateData, error) {
 	var v5 v5StateData
 	if err := json.Unmarshal(raw, &v5); err != nil {

@@ -9,8 +9,7 @@ import (
 	"image/png"
 )
 
-// encodeImage encodes img as the given outputExt (".jpg", ".png", ".gif").
-// Per spec §3.6, WebP sources are written as PNG (caller selects ".png").
+// encodeImage は img を outputExt (".jpg" / ".png" / ".gif") で encode する。WebP source は PNG で書く (caller が ".png" を選ぶ, spec §3.6)。
 func encodeImage(img image.Image, outputExt string) ([]byte, error) {
 	var buf bytes.Buffer
 	switch outputExt {
