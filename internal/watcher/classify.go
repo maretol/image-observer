@@ -9,6 +9,7 @@ import (
 
 	"image-observer/internal/classification"
 	"image-observer/internal/imgfile"
+	"image-observer/internal/imghash"
 )
 
 // classifyAndAccumulate は raw fsnotify event 1 つを検査し acc を更新する。timer を reset すべきとき
@@ -22,6 +23,26 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, st *watch
 	// 落ち root-vanish 分岐が発火せず dead fd に loop が張り付く。
 	if ev.Name != st.root && isHiddenName(base) {
 		return false
+	}
+
+	// ダブり dismiss sidecar (_duplicates.json / .tmp) には反応しない — アプリ自身が dismiss 操作で
+	// tmp + rename 書きするため、反応すると dismiss → event → 再 Load の self-echo ループになる
+	// (spec-duplicate-detection.md §7.2)。同名 *dir* は SidecarJSON と同じ理屈で dir 分岐へ落とす
+	// (watch leak 防止)。
+	if base == imghash.DuplicatesJSON || base == imghash.TempDuplicatesJSON {
+		pathIsDir := false
+		if ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename) {
+			_, pathIsDir = st.watchedDirs[ev.Name]
+		} else if ev.Op.Has(fsnotify.Create) {
+			if info, err := os.Lstat(ev.Name); err == nil &&
+				info.Mode()&os.ModeSymlink == 0 && info.IsDir() {
+				pathIsDir = true
+			}
+		}
+		if !pathIsDir {
+			return false
+		}
+		// pathIsDir == true: 下の dir 分岐へ落とす。
 	}
 
 	// Sidecar JSON: chmod 以外の event で flag を立てる — ただし `_classification.json` という名の *dir* は
