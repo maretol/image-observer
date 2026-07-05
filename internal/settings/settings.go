@@ -45,6 +45,12 @@ const (
 	WatchModeOff  = "off"  // watcher を開始しない; 手動 reload
 )
 
+// SettingsData.DuplicateDetectMode の許容値 (#136, spec-duplicate-detection.md §7.1)。
+const (
+	DuplicateDetectAuto = "auto" // 既定: folder を開いたらダブり検出を自動実行
+	DuplicateDetectOff  = "off"  // 検出しない (ハッシュ計算も IPC も走らない)
+)
+
 // 数値 field の既定 / 境界 (garbage を弾きつつ正当な調整は妨げない緩さ)。MaxThumbnailWorkerCount を
 // export するのは thumb の auto (NumCPU/2) 分岐を同じ上限に抑えるため。
 const (
@@ -59,6 +65,11 @@ const (
 	defaultUIScalePercent = 100
 	minUIScalePercent     = 75
 	maxUIScalePercent     = 150
+	// DuplicateThreshold はダブり判定のハミング距離上限 (0 = 知覚的に同一のみ)。0 が正当値なので
+	// 「欠落」との区別は Load の probe で行う (EditAutoSave と同じ理屈)。
+	defaultDuplicateThreshold = 5
+	minDuplicateThreshold     = 0
+	maxDuplicateThreshold     = 16
 )
 
 // SettingsData.LogLevel の許容値。
@@ -85,6 +96,11 @@ var validThumbnailModes = map[string]struct{}{
 var validWatchModes = map[string]struct{}{
 	WatchModeAuto: {},
 	WatchModeOff:  {},
+}
+
+var validDuplicateDetectModes = map[string]struct{}{
+	DuplicateDetectAuto: {},
+	DuplicateDetectOff:  {},
 }
 
 // defaultTagColors は tagColors 未設定時の seed palette (frontend が同一リテラルを持つ)。未 export なのは
@@ -120,6 +136,11 @@ type SettingsData struct {
 	// EditAutoSave は save モードを駆動 (#105)。true (既定) = blur/radio で自動 save、false = 手動のみ。
 	// 欠落 (#105 前 build) と明示 false は Load の probe で区別する。
 	EditAutoSave bool `json:"editAutoSave"`
+	// DuplicateDetectMode / DuplicateThreshold はダブり検出を駆動 (#136,
+	// spec-duplicate-detection.md §7.1)。threshold は 0 が正当値 (知覚的に同一のみ) のため、
+	// 欠落 (#136 前 build) は Load の probe で既定 5 に倒す。
+	DuplicateDetectMode string `json:"duplicateDetectMode"`
+	DuplicateThreshold  int    `json:"duplicateThreshold"`
 }
 
 // settingsFilePathOverride はテストが user config dir 外へ redirect するため。
@@ -151,6 +172,8 @@ func DefaultSettings() SettingsData {
 		UIScalePercent:       defaultUIScalePercent,
 		WatchMode:            WatchModeAuto,
 		EditAutoSave:         true,
+		DuplicateDetectMode:  DuplicateDetectAuto,
+		DuplicateThreshold:   defaultDuplicateThreshold,
 	}
 }
 
@@ -246,6 +269,13 @@ func Validate(s *SettingsData) error {
 	if _, ok := validWatchModes[s.WatchMode]; !ok {
 		return errors.New("invalid watchMode: " + s.WatchMode)
 	}
+	if _, ok := validDuplicateDetectModes[s.DuplicateDetectMode]; !ok {
+		return errors.New("invalid duplicateDetectMode: " + s.DuplicateDetectMode)
+	}
+	if s.DuplicateThreshold < minDuplicateThreshold || s.DuplicateThreshold > maxDuplicateThreshold {
+		return fmt.Errorf("duplicateThreshold out of range (%d..%d)",
+			minDuplicateThreshold, maxDuplicateThreshold)
+	}
 	for k, v := range s.TagColors {
 		if !isValidHexColor(v) {
 			return fmt.Errorf("tagColors[%q] is not a valid #rrggbb color: %q", k, v)
@@ -284,6 +314,12 @@ func applyFieldDefaults(s *SettingsData, probe map[string]json.RawMessage) {
 	if _, ok := validWatchModes[s.WatchMode]; !ok {
 		s.WatchMode = WatchModeAuto
 	}
+	if _, ok := validDuplicateDetectModes[s.DuplicateDetectMode]; !ok {
+		s.DuplicateDetectMode = DuplicateDetectAuto
+	}
+	if s.DuplicateThreshold < minDuplicateThreshold || s.DuplicateThreshold > maxDuplicateThreshold {
+		s.DuplicateThreshold = defaultDuplicateThreshold
+	}
 	// nil (field 無し) は defaults を seed。明示的な空 {} は「override 無し」の保存値としてそのまま保持
 	// (frontend が DEFAULT_PALETTE に fallback する)。
 	if s.TagColors == nil {
@@ -307,6 +343,20 @@ func applyFieldDefaults(s *SettingsData, probe map[string]json.RawMessage) {
 			var bp *bool
 			if err := json.Unmarshal(raw, &bp); err != nil || bp == nil {
 				s.EditAutoSave = true
+			}
+		}
+	}
+	// DuplicateThreshold: 0 が正当値 (知覚的に同一のみ) なので、欠落 (#136 前 build の JSON) が
+	// encoding/json のゼロ値 0 として silent に「最厳格」に化けないよう probe で区別する
+	// (EditAutoSave と同じ理屈)。JSON null も欠落同様に既定へ倒す。
+	if probe != nil {
+		raw, present := probe["duplicateThreshold"]
+		if !present {
+			s.DuplicateThreshold = defaultDuplicateThreshold
+		} else {
+			var ip *int
+			if err := json.Unmarshal(raw, &ip); err != nil || ip == nil {
+				s.DuplicateThreshold = defaultDuplicateThreshold
 			}
 		}
 	}
