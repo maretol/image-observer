@@ -121,7 +121,10 @@ see `internal/thumb/thumb.go`
 | `.gif` | `image/gif.DecodeAll` で `*gif.GIF` を取得し `Image[0]` を採用 | 1 コマ目のみ |
 | `.webp` | `golang.org/x/image/webp.Decode` | アニメ WebP は標準ライブラリでは1コマ目のみ取得される |
 
-ファイルオープン → デコード → `image.Image` を返す関数 `decodeImage(path, ext) (image.Image, error)` を 1 つ提供。
+ファイルオープン → デコード → `image.Image` を返す関数を 1 つ提供。当初は thumb 内の
+`decodeImage(path, ext)` だったが、#136 (ダブり検出) がデコード経路を共有するため
+`internal/imgdecode.Decode(path, ext) (image.Image, error)` へ移設した
+(spec-duplicate-detection.md §3。デコード仕様自体は本節のまま)。
 
 ### 3.5 リサイズ (`thumb_resize.go`)
 
