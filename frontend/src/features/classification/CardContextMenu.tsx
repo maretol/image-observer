@@ -34,6 +34,8 @@ export type CardContextMenuProps = {
   // single モードのアクション。
   onOpenInViewer: (viewerId: string) => void;
   onCopy: () => void;
+  // ダブり候補の確認 (#136)。null = 対象 card にダブり候補が無い (項目自体を出さない)。
+  onShowDuplicates: (() => void) | null;
   onEnterSelectionMode: () => void;
   onDelete: () => void;
 
@@ -70,6 +72,7 @@ export function CardContextMenu({
   bulkDstViewerId,
   onOpenInViewer,
   onCopy,
+  onShowDuplicates,
   onEnterSelectionMode,
   onDelete,
   onOpenManyInTabs,
@@ -84,6 +87,7 @@ export function CardContextMenu({
           activeViewerId,
           onOpenInViewer,
           onCopy,
+          onShowDuplicates,
           onEnterSelectionMode,
           onDelete,
         )
@@ -253,6 +257,7 @@ function buildSingleEntries(
   activeViewerId: string,
   onOpenInViewer: (viewerId: string) => void,
   onCopy: () => void,
+  onShowDuplicates: (() => void) | null,
   onEnterSelectionMode: () => void,
   onDelete: () => void,
 ): MenuEntry[] {
@@ -278,6 +283,15 @@ function buildSingleEntries(
     label: "コピー",
     onClick: onCopy,
   });
+  // ダブり候補の確認 (#136)。バッジが出ている card のみ (「この画像に対する操作」グループ)。
+  if (onShowDuplicates) {
+    entries.push({
+      kind: "item",
+      key: "show-duplicates",
+      label: "ダブり候補を確認…",
+      onClick: onShowDuplicates,
+    });
+  }
   entries.push({ kind: "divider", key: "div-after-image-actions" });
   entries.push({
     kind: "item",

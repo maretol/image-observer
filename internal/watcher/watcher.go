@@ -34,11 +34,14 @@ const ClassificationChangedEvent = "classification:changed"
 // ChangedPayload は emit() が frontend へ渡す snapshot。path 単位の詳細は省く — frontend が folder を
 // re-Load して authoritative な entries を得る。
 type ChangedPayload struct {
-	Folder         string `json:"folder"`
-	AddedFiles     int    `json:"addedFiles"`
-	RemovedFiles   int    `json:"removedFiles"`
-	RenamedFiles   int    `json:"renamedFiles"`
-	SidecarChanged bool   `json:"sidecarChanged"`
+	Folder       string `json:"folder"`
+	AddedFiles   int    `json:"addedFiles"`
+	RemovedFiles int    `json:"removedFiles"`
+	RenamedFiles int    `json:"renamedFiles"`
+	// ContentChanged は既存画像への Write (同名上書き)。entries 集合は変わらないので counter は
+	// 増えないが、ダブり検出の再判定 kick に使う (#136, spec-duplicate-detection §8.1)。
+	ContentChanged bool `json:"contentChanged"`
+	SidecarChanged bool `json:"sidecarChanged"`
 }
 
 // EmitFunc は Manager が各 debounce flush 後に呼ぶ callback。本番は runtime.EventsEmit、テストは channel。
@@ -223,6 +226,7 @@ func (m *Manager) loop(st *watchState) {
 			"added", payload.AddedFiles,
 			"removed", payload.RemovedFiles,
 			"renamed", payload.RenamedFiles,
+			"content", payload.ContentChanged,
 			"sidecar", payload.SidecarChanged)
 	}
 	resetTimer := func() {

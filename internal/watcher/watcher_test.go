@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gofsnotify/fsnotify"
+
+	"image-observer/internal/imghash"
 )
 
 // These tests rely on the host's real fsnotify backend (inotify on Linux,
@@ -118,6 +120,33 @@ func TestStart_NewImage_Emits(t *testing.T) {
 	}
 }
 
+// 既存画像への Write のみの window でも contentChanged: true で emit される (同名上書き。
+// ダブり検出 #136 の再判定 kick 用, spec-folder-watch §4.2)。counter は増えない。
+func TestStart_ImageOverwriteEmitsContentChanged(t *testing.T) {
+	dir := t.TempDir()
+	img := filepath.Join(dir, "a.png")
+	writeImage(t, img)
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(dir); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	if err := os.WriteFile(img, []byte("overwritten-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := cap.waitForPayload(t, 1, time.Second)
+	if !got[0].ContentChanged {
+		t.Errorf("ContentChanged: got false, want true (payloads=%+v)", got)
+	}
+	if got[0].AddedFiles != 0 || got[0].RemovedFiles != 0 {
+		t.Errorf("counters should stay 0 for overwrite: %+v", got[0])
+	}
+}
+
 func TestStart_BurstCoalescedIntoOnePayload(t *testing.T) {
 	dir := t.TempDir()
 	cap := newCaptured()
@@ -162,6 +191,48 @@ func TestStart_NonImageIgnored(t *testing.T) {
 	}
 
 	cap.expectNoPayload(t, shortDebounce*4)
+}
+
+// _duplicates.json (ダブり dismiss sidecar) はアプリ自身が tmp + rename で書くので、全 lifecycle
+// (tmp Create → tmp Rename → 上書き → Remove) で emit しない — 反応すると dismiss → event →
+// 再 Load の self-echo loop になる (#136, spec-duplicate-detection.md §7.2)。
+func TestStart_DuplicatesSidecarIgnored(t *testing.T) {
+	dir := t.TempDir()
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(dir); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// addDismissed と同じ書き順: tmp に書いて rename。
+	tmp := filepath.Join(dir, imghash.TempDuplicatesJSON)
+	target := filepath.Join(dir, imghash.DuplicatesJSON)
+	if err := os.WriteFile(tmp, []byte(`{"version":1,"dismissed":[]}`), 0o644); err != nil {
+		t.Fatalf("write tmp: %v", err)
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	// 2 回目の dismiss (上書き) と削除も無反応であること。
+	if err := os.WriteFile(tmp, []byte(`{"version":1,"dismissed":[]}`), 0o644); err != nil {
+		t.Fatalf("write tmp again: %v", err)
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		t.Fatalf("rename again: %v", err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	cap.expectNoPayload(t, shortDebounce*4)
+
+	// ignore で watcher 自体が死んでいないこと (画像は引き続き emit される)。
+	writeImage(t, filepath.Join(dir, "alive.png"))
+	payloads := cap.waitForPayload(t, 1, 2*time.Second)
+	if payloads[0].AddedFiles < 1 {
+		t.Errorf("image create after ignore should still count: %+v", payloads[0])
+	}
 }
 
 func TestStart_HiddenDirIgnored(t *testing.T) {

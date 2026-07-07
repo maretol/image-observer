@@ -115,6 +115,17 @@ export const ja = {
   "settings.list.watch.auto.hint": "外部で追加 / 削除された画像と分類データの変更を自動反映",
   "settings.list.watch.off.label": "オフ",
   "settings.list.watch.off.hint": "再読み込みボタンを押した時だけ更新",
+  "settings.list.dupDetect.label": "ダブり検出",
+  "settings.list.dupDetect.fieldHint":
+    "知覚的ハッシュで見た目の似た画像ペアを検出し、Card に警告バッジを表示します。判定結果はバッジのクリックで確認・除外できます",
+  "settings.list.dupDetect.auto.label": "自動",
+  "settings.list.dupDetect.auto.hint":
+    "フォルダを開いたとき / 内容が変わったときに自動判定",
+  "settings.list.dupDetect.off.label": "オフ",
+  "settings.list.dupDetect.off.hint": "判定しない (ハッシュ計算も行わない)",
+  "settings.list.dupThreshold.label": "ダブり判定しきい値",
+  "settings.list.dupThreshold.fieldHint":
+    "ハッシュ距離がこの値以下のペアをダブり候補とみなします。小さいほど厳密 (0 = 知覚的に同一のみ)",
   "settings.list.autoSave.label": "タグ・note の保存方法",
   "settings.list.autoSave.fieldHint":
     "自動: 各入力からフォーカスが外れたとき / confidence を変更したときに保存。手動: 保存ボタンまたは Cmd/Ctrl+Enter で保存します",

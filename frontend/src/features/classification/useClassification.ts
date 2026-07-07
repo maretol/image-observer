@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { classification } from "../../../wailsjs/go/models";
+import type { imghash } from "../../../wailsjs/go/models";
 import { state as wstate } from "../../../wailsjs/go/models";
 import { useToastFn } from "../../shared/components/Toast";
 import type { ConfirmFn } from "../viewer-grid/useViewerSet";
@@ -16,6 +17,7 @@ import { useClassificationReplay } from "./useClassificationReplay";
 import { useClassificationSelection } from "./useClassificationSelection";
 import { useClassificationWatcher } from "./useClassificationWatcher";
 import { useDirectoryGroups } from "./useDirectoryGroups";
+import { useDuplicateCheck } from "./useDuplicateCheck";
 
 // テスト / 既存呼び出し向けの re-export。正の宣言は ./useClassificationWatcher (それを
 // 消費する EventsOn subscription の隣) にある。
@@ -90,6 +92,9 @@ export type UseClassificationReturn = {
   // 1 枚をゴミ箱へ送り sidecar に反映。消えたら true (呼び出し側が該当 viewer タブも閉じる)。
   // キャンセル / sidecar 前の失敗 (ファイル無傷) は false。
   deleteOne: (filename: string) => Promise<boolean>;
+  // ダブり候補ペア (dismiss 除外済み, #136)。null = 未検出 (off / 初回前 / クリア直後)。
+  duplicatePairs: imghash.DuplicatePair[] | null;
+  dismissDuplicatePair: (fileA: string, fileB: string) => Promise<void>;
   persistableState: {
     folderPath: string;
     filter: {
@@ -112,6 +117,11 @@ type Opts = {
   // settings ロード中は undefined で、watch effect はその間あえて待つ — off を永続化した
   // ユーザーに Start が一瞬走ったり、直後に Start したい settings ロードと Stop が race する。
   watchMode?: string;
+  // DUPLICATE_DETECT_AUTO / _OFF リテラル (duplicateDetect.ts、Go 側と D-1 pin, #136)。
+  // watchMode と同じくロード中 undefined は kick を待つ。threshold は Go が settings から
+  // 読むが、変更時の再判定トリガとして渡す (spec-duplicate-detection.md §8.1)。
+  duplicateDetectMode?: string;
+  duplicateThreshold?: number;
 };
 
 // list-tab feature のオーケストレータ。共有 state + ref を先頭で宣言し、以下の子フックを
@@ -207,6 +217,24 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // 巻き戻さないようにする。
   const pendingResultRef = useRef<PendingResult | null>(null);
 
+  // ダブり検出 (#136)。kick / gate / report は子フックが持つ (同期モデルは
+  // docs/spec-duplicate-detection.md §8)。resetDuplicates は下の resetEntriesDependentState に
+  // 参加する — duplicatePairs も entries 依存 state (filename を指す) のため。
+  // notifyContentChanged は watcher handler が同名上書き payload で呼ぶ (spec §8.1)。
+  const {
+    duplicatePairs,
+    dismissDuplicatePair,
+    resetDuplicates,
+    notifyContentChanged,
+  } = useDuplicateCheck({
+    folderPath,
+    folderRef,
+    loadResult,
+    duplicateDetectMode: opts.duplicateDetectMode,
+    duplicateThreshold: opts.duplicateThreshold,
+    toast,
+  });
+
   // entries リストに意味が結びつく state (編集中ファイル / conflict draft / merge prompt /
   // park 済み auto-merge 結果 / filename-keyed 選択) を全クリアする。error 経路で
   // setLoadResult(null) と一緒に呼び、operate 対象の entries が消えたとき依存 state が残らないように:
@@ -222,7 +250,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     setMergePrompt({ open: false, preview: null, folderPath: "" });
     pendingResultRef.current = null;
     resetSelectionForFolderSwitch();
-  }, [resetSelectionForFolderSwitch]);
+    // duplicatePairs も filename-keyed (#136)。残すと旧 folder のバッジが新 folder の同名
+    // ファイルに誤表示される。
+    resetDuplicates();
+  }, [resetSelectionForFolderSwitch, resetDuplicates]);
 
   // 非同期 Load による setLoadResult / setError commit を gate し、out-of-order 完了が
   // 新結果を巻き戻さないようにする。bump 箇所:
@@ -333,6 +364,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     setEditing,
     commitFreshResult,
     resetEntriesDependentState,
+    notifyDuplicateContentChanged: notifyContentChanged,
     toast,
   });
 
@@ -450,6 +482,8 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       resolveMergeSkip,
       resolveMergeCancel,
       deleteOne,
+      duplicatePairs,
+      dismissDuplicatePair,
       persistableState,
     }),
     [
@@ -488,6 +522,8 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       resolveMergeSkip,
       resolveMergeCancel,
       deleteOne,
+      duplicatePairs,
+      dismissDuplicatePair,
       persistableState,
     ],
   );

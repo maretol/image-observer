@@ -11,6 +11,7 @@ import (
 
 	"image-observer/internal/classification"
 	"image-observer/internal/imgfile"
+	"image-observer/internal/imghash"
 	"image-observer/internal/imgread"
 	"image-observer/internal/logging"
 	"image-observer/internal/settings"
@@ -23,6 +24,7 @@ type App struct {
 	ctx            context.Context
 	classification *classification.Service
 	watch          *watcher.Manager
+	duplicates     *imghash.Service
 }
 
 func NewApp() *App {
@@ -31,6 +33,7 @@ func NewApp() *App {
 			classification.NewFileRepository(),
 			classification.NewFileScanner(),
 		),
+		duplicates: imghash.NewService(),
 	}
 	// Manager を早期構築し Start/Stop binding が常に非 nil receiver を持つように。EventsEmit は ctx が
 	// 要るので emit callback は a を閉じ込み a.ctx を lazy 読み。event 名は watcher が単一ソースで frontend が
@@ -169,6 +172,47 @@ func (a *App) DeleteImage(folderPath, filename string) error {
 	}
 	logging.Info("imgfile", "deleted",
 		"folder", cleanedFolder, "filename", cleanedName, "mode", "trash")
+	return nil
+}
+
+// CheckDuplicates は一覧の表示 entry 群 (filenames = POSIX 相対 path) からダブり候補ペアを返す
+// (spec-duplicate-detection.md §6.1)。しきい値と mode は settings から読む (フロントから渡さない)。
+// mode=off は空 report — フロント gate と二重防御で、off 中はハッシュ計算を走らせない。
+func (a *App) CheckDuplicates(folderPath string, filenames []string) (imghash.DuplicateReport, error) {
+	s := settings.Load()
+	if s.DuplicateDetectMode == settings.DuplicateDetectOff {
+		return imghash.DuplicateReport{
+			FolderPath: folderPath,
+			Pairs:      []imghash.DuplicatePair{},
+			Skipped:    []string{},
+		}, nil
+	}
+	// ctx は shutdown で in-flight Check を打ち切るため (同一 folder の supersede は Service 内部)。
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	report, err := a.duplicates.Check(ctx, folderPath, filenames, s.DuplicateThreshold)
+	if err != nil {
+		// supersede / shutdown の cancel は正常系 (フロントは gen gate で破棄) なので warn を出さない。
+		if !errors.Is(err, context.Canceled) {
+			logging.Warn("imghash", "check failed", "folder", folderPath, "err", err.Error())
+		}
+		return imghash.DuplicateReport{}, err
+	}
+	return report, nil
+}
+
+// DismissDuplicatePair は「fileA/fileB はダブりではない」を _duplicates.json に永続化する
+// (spec-duplicate-detection.md §6.2)。冪等。
+func (a *App) DismissDuplicatePair(folderPath, fileA, fileB string) error {
+	if err := a.duplicates.Dismiss(folderPath, fileA, fileB); err != nil {
+		logging.Error("imghash", "dismiss failed",
+			"folder", folderPath, "fileA", fileA, "fileB", fileB, "err", err.Error())
+		return err
+	}
+	logging.Info("imghash", "pair dismissed",
+		"folder", folderPath, "fileA", fileA, "fileB", fileB)
 	return nil
 }
 

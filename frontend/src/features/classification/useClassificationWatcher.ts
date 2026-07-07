@@ -60,6 +60,9 @@ type Props = {
     fnames: ReadonlySet<string>,
   ) => void;
   resetEntriesDependentState: () => void;
+  // 同名上書き (payload.contentChanged) のダブり再判定 kick (useDuplicateCheck,
+  // spec-duplicate-detection §8.1)。
+  notifyDuplicateContentChanged: () => void;
   toast: ToastFn;
 };
 
@@ -87,6 +90,7 @@ export function useClassificationWatcher(props: Props): void {
     setEditing,
     commitFreshResult,
     resetEntriesDependentState,
+    notifyDuplicateContentChanged,
     toast,
   } = props;
 
@@ -106,6 +110,11 @@ export function useClassificationWatcher(props: Props): void {
       if (payload.folder !== folderRef.current) {
         // まだ tear down されていない watcher の残り、または flush 途中の folder 切替。静かに drop。
         return;
+      }
+      if (payload.contentChanged) {
+        // 同名上書き (集合不変・内容変化) はこの下の再 Load では検知できない (entries 等価 +
+        // mtime 等価で silent に落ちる) ため、ここでダブり再判定を kick する (spec-duplicate-detection §8.1)。
+        notifyDuplicateContentChanged();
       }
       const myGen = ++requestGenRef.current;
 
@@ -212,6 +221,7 @@ export function useClassificationWatcher(props: Props): void {
       inFlightDeletesRef,
       loadResultRef,
       mergePromptOpenRef,
+      notifyDuplicateContentChanged,
       pendingResultRef,
       requestGenRef,
       resetEntriesDependentState,
