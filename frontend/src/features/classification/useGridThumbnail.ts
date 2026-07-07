@@ -3,14 +3,10 @@ import { GetThumbnail } from "../../../wailsjs/go/main/App";
 import { toBytes } from "../../shared/utils/base64";
 import { createThumbCache, type ThumbCacheValue } from "./thumbnailCache";
 
-// Module-level live thumbnail params, seeded with the historical defaults so
-// the first GetThumbnail call before settings load still works. App.tsx calls
-// setThumbnailParams() once settings finish loading and on every update.
-//
-// Caveat: changing these does NOT invalidate already-cached entries (cards
-// already loaded keep their previous-size object URL until eviction). New
-// IntersectionObserver hits use the new params. This is acceptable for v1
-// since size changes are rare; revisit if a "rebuild thumbnails" UX is added.
+// module レベルの live サムネパラメータ (settings ロード前の初回 GetThumbnail 用に
+// 既定値を seed)。App.tsx が settings ロード後と更新ごとに setThumbnailParams() する。
+// 注意: 変更しても既にキャッシュ済みの entry は invalidate されない (旧サイズの
+// object URL を eviction まで保持)。size 変更は稀なので v1 では許容。
 let thumbSize = 256;
 let thumbMode = "letterbox";
 
@@ -19,18 +15,12 @@ export function setThumbnailParams(size: number, mode: string) {
   if (mode === "letterbox" || mode === "crop") thumbMode = mode;
 }
 
-// Maximum thumbnail entries held in memory. Each entry stores a Blob (raw
-// bytes) referenced by an object URL; with 256px JPG/PNG thumbs that runs
-// ~30-150KB per entry, so 500 caps roughly at 15-75MB. Overflow evicts the
-// least-recently-used entry and revokes its object URL so the underlying
-// Blob can be reclaimed. The Go side keeps its own disk cache so re-fetching
-// after eviction is cheap.
+// メモリ保持するサムネ上限。1 entry ~30-150KB (256px JPG/PNG) なので 500 で ~15-75MB。
+// 溢れたら LRU を evict + object URL revoke。Go 側にディスクキャッシュがあり再取得は安い。
 const CACHE_MAX = 500;
 
-// Defer revoke so a freshly-evicted URL whose <img> hasn't finished fetching
-// yet still has time to resolve. With IO triggering the load and no other
-// lazy delay on the <img>, the browser starts fetching immediately on commit;
-// 5s is generous head room before the underlying Blob is dropped.
+// revoke を遅延させ、evict 直後で <img> の取得が終わっていない URL に猶予を与える。
+// commit で即 fetch が始まるので 5s あれば十分。
 const REVOKE_DELAY_MS = 5000;
 
 const cache = createThumbCache(CACHE_MAX, (url) => {
@@ -65,11 +55,8 @@ function load(path: string): Promise<ThumbCacheValue> {
   return p;
 }
 
-// useGridThumbnail returns the thumbnail object URL for a path once an
-// IntersectionObserver reports the element as visible.
-//
-// Intended use: render the wrapper div with the returned ref, and an <img>
-// child whose `src` is the returned `url` (or a placeholder when null).
+// IntersectionObserver が要素を可視と報告したら、その path のサムネ object URL を返す。
+// 使い方: 返り ref を wrapper div に、返り url を <img> の src に (null 時は placeholder)。
 export function useGridThumbnail(path: string) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [url, setUrl] = useState<string | null>(null);
@@ -78,8 +65,7 @@ export function useGridThumbnail(path: string) {
   );
 
   useEffect(() => {
-    // Reset when the path changes — this matters when filtering reorders cards
-    // and a card's underlying entry shifts.
+    // path 変更時に reset (フィルタが card を並べ替えて entry がずれるとき重要)。
     setUrl(null);
     setState("idle");
 

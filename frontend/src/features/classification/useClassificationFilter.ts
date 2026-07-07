@@ -17,17 +17,11 @@ type Opts = {
   loadResult: classification.LoadResult | null;
 };
 
-// useClassificationFilter owns the list-tab filter state (tag set / confidence
-// bucket / free-text query) and the memoized `filteredEntries`. It does not
-// touch any of the orchestrator's shared refs because filter changes are
-// purely client-side — no IPC, no race window — and recompute is driven only
-// by loadResult identity + filter identity.
+// list-tab の filter state (tag / confidence / query) と memoized filteredEntries を
+// 持つ。filter 変更は client-side のみ (IPC / race 窓なし) なので shared ref に触らない。
 export function useClassificationFilter(opts: Opts): UseClassificationFilterReturn {
-  // untaggedOnly and tags are mutually exclusive (#116). A persisted or
-  // hand-edited session could restore both set; normalize at hydration so the
-  // untagged mode wins and the tag set is dropped — otherwise the UI would show
-  // both the "未分類" chip and tag chips active at once (storage form → display
-  // form, AGENTS.md E-1).
+  // untaggedOnly と tags は排他 (#116)。永続 / 手編集 session は両方 set で復元され
+  // うるので hydration で untagged を優先し tags を落とす (storage 形 → 表示形, AGENTS.md E-1)。
   const initialUntaggedOnly = opts.initial?.untaggedOnly ?? false;
   const initial: ListTabFilter = {
     tags: initialUntaggedOnly ? [] : (opts.initial?.tags ?? []),
@@ -42,8 +36,7 @@ export function useClassificationFilter(opts: Opts): UseClassificationFilterRetu
     setFilterState((cur) => ({ ...cur, ...patch }));
   }, []);
 
-  // Selecting a real tag leaves the untagged-only mode (they are mutually
-  // exclusive — see ListTabFilter doc / spec-untagged-filter.md §4.4).
+  // 実タグ選択で untagged-only を抜ける (排他, spec-untagged-filter.md §4.4)。
   const toggleTag = useCallback((tag: string) => {
     setFilterState((cur) => {
       const has = cur.tags.includes(tag);
@@ -55,8 +48,7 @@ export function useClassificationFilter(opts: Opts): UseClassificationFilterRetu
     });
   }, []);
 
-  // Toggling the "未分類" chip flips untaggedOnly; turning it on clears any
-  // selected tags so the two never co-exist.
+  // on にするとき tags をクリアして両者が共存しないようにする。
   const toggleUntagged = useCallback(() => {
     setFilterState((cur) =>
       cur.untaggedOnly
@@ -84,10 +76,8 @@ export function useClassificationFilter(opts: Opts): UseClassificationFilterRetu
   };
 }
 
-// normalizeConfidence is filter-local: it coerces the session-restored
-// confidence string to one of the typed buckets, falling back to "all" on
-// unknown values. Lives here (not in filters.ts) because the only consumer
-// is this hook's initial state.
+// session 復元の confidence 文字列を型付き bucket に矯正 (不明は "all")。唯一の利用者が
+// この hook の初期 state なので filters.ts でなくここに置く。
 function normalizeConfidence(c: string): Confidence | "all" {
   switch (c) {
     case "high":

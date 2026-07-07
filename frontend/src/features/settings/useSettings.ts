@@ -18,9 +18,7 @@ export type UseSettingsReturn = {
   reset: () => Promise<void>;
 };
 
-// Loads settings on mount and exposes optimistic-but-Go-confirmed update /
-// reset operations. The dialog and any feature that needs settings consumes
-// this hook.
+// mount 時に settings をロードし、Go 確認付きの update / reset を公開する。
 export function useSettings(): UseSettingsReturn {
   const [data, setData] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);

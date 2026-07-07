@@ -2,15 +2,8 @@ import { useCallback } from "react";
 import type { TopTab } from "../../topTab";
 import type { useViewerSet } from "./useViewerSet";
 
-// useListToViewerHandlers builds the three "open from list-tab" callbacks
-// (single image, bulk-as-tabs, bulk-as-split) that the ClassificationView
-// reaches through. Each callback resolves the source path against the
-// classification folder, dispatches to the matching useViewerSet open* method,
-// activates the chosen viewer, and switches the top-tab to "viewer".
-//
-// Lives in viewer-grid/ (rather than classification/) because the producer is
-// the viewer side — consumers (Card / SampleModal / bulk action bar) only
-// supply the filename + viewerId.
+// ClassificationView が使う「list-tab から開く」3 callback (単一 / bulk-tabs / bulk-split)。
+// consumer は filename + viewerId だけ渡すので、producer 側の viewer-grid/ に置く (classification/ でなく)。
 
 type Opts = {
   folderPath: string;

@@ -36,8 +36,7 @@ type CacheEntry = {
 // LRU "touch on access" は delete + set で先頭 → 末尾の移動で表現する。
 const cache = new Map<string, CacheEntry>();
 
-// hit なら url を返し、entry を LRU の最新位置に touch する (= 直近使用)。
-// miss なら null。
+// hit なら url を返しつつ LRU 最新位置に touch (= 直近使用)。miss は null。
 export function getCachedPreview(path: string): string | null {
   const e = cache.get(path);
   if (!e) return null;
@@ -95,7 +94,7 @@ function scheduleRevoke(url: string): void {
   setTimeout(() => URL.revokeObjectURL(url), PREVIEW_REVOKE_DELAY_MS);
 }
 
-// test 用 reset。本番コードから呼ばない (export 名に __ プレフィクス)。
+// test 用 reset。
 export function __resetPreviewCacheForTests(): void {
   for (const [, e] of cache) {
     URL.revokeObjectURL(e.url);

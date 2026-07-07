@@ -1,19 +1,12 @@
-// UI message catalog (ja). Single source of truth for user-facing Japanese
-// strings, so UI wording can be changed in one place (#83). This is the i18n
-// precursor: locale switching (en etc.) is #16 — for now there is exactly one
-// catalog and `t()` reads it directly.
+// UI メッセージカタログ (ja)。文言を一箇所で変えられる (#83)。locale 切替 (en 等)
+// は #16 — 今はこの 1 カタログを t() が直接読む。
 //
-// Structure: a FLAT, dot-separated key space (`<feature>.<context>.<use>`),
-// `as const` so `MessageKey = keyof typeof ja` yields a literal union and tsc
-// flags typos / removed keys at every call site. Values may contain
-// `{placeholder}` tokens filled by `t(key, params)`.
+// フラットなドット区切りキー (`<feature>.<context>.<use>`) + `as const` で、
+// MessageKey がリテラル union になり tsc がタイポ / 削除キーを検出する。
 //
-// Scope (Phase 1, #83 案 A): shared dialogs + the settings dialog and its
-// sections. Not yet migrated (Phase 2): KeybindingsTable (a self-contained data
-// table) and the feature views (classification / viewer-grid / App). A few text
-// blocks that interleave inline <code>/<strong> mid-sentence are intentionally
-// left in place — a flat string catalog can't represent embedded markup; those
-// need a richer formatter, deferred with the rest.
+// スコープ (Phase 1, #83 案 A): 共有ダイアログ + 設定ダイアログ。未移行 (Phase 2):
+// KeybindingsTable と feature view。文中に <code>/<strong> を挟むブロックは、
+// フラットカタログで表現できずリッチな formatter が要るため据え置き。
 export const ja = {
   // --- common ---------------------------------------------------------------
   "common.ok": "OK",
@@ -122,6 +115,17 @@ export const ja = {
   "settings.list.watch.auto.hint": "外部で追加 / 削除された画像と分類データの変更を自動反映",
   "settings.list.watch.off.label": "オフ",
   "settings.list.watch.off.hint": "再読み込みボタンを押した時だけ更新",
+  "settings.list.dupDetect.label": "ダブり検出",
+  "settings.list.dupDetect.fieldHint":
+    "知覚的ハッシュで見た目の似た画像ペアを検出し、Card に警告バッジを表示します。判定結果はバッジのクリックで確認・除外できます",
+  "settings.list.dupDetect.auto.label": "自動",
+  "settings.list.dupDetect.auto.hint":
+    "フォルダを開いたとき / 内容が変わったときに自動判定",
+  "settings.list.dupDetect.off.label": "オフ",
+  "settings.list.dupDetect.off.hint": "判定しない (ハッシュ計算も行わない)",
+  "settings.list.dupThreshold.label": "ダブり判定しきい値",
+  "settings.list.dupThreshold.fieldHint":
+    "ハッシュ距離がこの値以下のペアをダブり候補とみなします。小さいほど厳密 (0 = 知覚的に同一のみ)",
   "settings.list.autoSave.label": "タグ・note の保存方法",
   "settings.list.autoSave.fieldHint":
     "自動: 各入力からフォーカスが外れたとき / confidence を変更したときに保存。手動: 保存ボタンまたは Cmd/Ctrl+Enter で保存します",

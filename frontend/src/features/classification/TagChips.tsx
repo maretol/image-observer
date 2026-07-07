@@ -6,8 +6,7 @@ import { readableTextColor, tagColor } from "./colors";
 export type TagChipsProps = {
   entries: classification.Entry[];
   selected: string[];
-  // untaggedActive: the "未分類" chip is the active filter (mutually exclusive
-  // with `selected`). #116.
+  // "未分類" chip がアクティブフィルタ (selected と排他)。#116
   untaggedActive: boolean;
   onToggle: (tag: string) => void;
   onToggleUntagged: () => void;
@@ -22,19 +21,17 @@ export function TagChips({
   onToggleUntagged,
   onClear,
 }: TagChipsProps) {
-  // One pass over entries yields both the per-tag counts and the untagged
-  // total (avoids running extractTags twice — #120 review).
+  // 1 パスで per-tag counts と untagged 総数を得る (extractTags の 2 度実行を避ける)。
   const { sorted, untagged } = useMemo(() => {
     const { counts, untagged } = summarizeTags(entries);
     const sorted = Array.from(counts.entries()).sort((a, b) => {
-      // Most-used first; tie-break by tag name.
+      // 多用順、同数はタグ名で tie-break。
       if (b[1] !== a[1]) return b[1] - a[1];
       return a[0].localeCompare(b[0]);
     });
     return { sorted, untagged };
   }, [entries]);
 
-  // "すべて" is active only when neither a tag nor the untagged filter is set.
   const allActive = selected.length === 0 && !untaggedActive;
 
   return (

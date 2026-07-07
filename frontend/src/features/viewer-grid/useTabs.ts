@@ -1,6 +1,5 @@
-// Tab data type and factory. The state-managing hook moved to useViewerGrid.ts
-// in Phase 3b. This module is kept only for the type/factory so multiple files
-// can share the Tab shape without circular imports.
+// Tab の型と factory。state 管理フックは Phase 3b で useViewerGrid.ts へ移動。circular import
+// なしで Tab 形を共有するため型/factory だけここに残す。
 
 export type Tab = {
   path: string;

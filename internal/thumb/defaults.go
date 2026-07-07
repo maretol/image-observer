@@ -2,7 +2,7 @@ package thumb
 
 import "runtime"
 
-// v1 defaults. Will be replaced by a settings module in Phase H (per spec-thumbnail.md §3.8).
+// v1 の既定。Phase H で settings module に置き換え予定 (spec-thumbnail.md §3.8)。
 var (
 	defaultDisplaySize  = 256
 	defaultMode         = "letterbox"
@@ -10,13 +10,8 @@ var (
 	jpegQuality         = 85
 )
 
-// maxAutoWorkers caps the auto (NumCPU/2) worker count so a very large NUMA
-// host does not end up with a pool wider than the explicit-setting upper
-// bound (`internal/settings.MaxThumbnailWorkerCount` = 64). Keeping the auto
-// branch and the explicit branch on the same ceiling makes the "auto vs
-// explicit" choice a true choice — without this, auto could silently spawn
-// more workers than any value the user could type into the settings UI.
-// `TestThumbDefaultsMatchSettings` (in thumb_test.go) guards the equality.
+// maxAutoWorkers は auto (NumCPU/2) worker 数を cap する。settings.MaxThumbnailWorkerCount と同値に保ち、
+// 大きい host でも auto が明示設定より多い worker を生まないように。TestThumbDefaultsMatchSettings が等価を守る。
 const maxAutoWorkers = 64
 
 func defaultWorkerCount() int {

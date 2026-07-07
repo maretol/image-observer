@@ -32,14 +32,14 @@ export function TabBar({
 }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
 
-  // Vertical wheel → horizontal scroll on the tab bar.
-  // Attached as non-passive so we can preventDefault and avoid the page scrolling.
+  // tab bar 上の縦ホイール → 横スクロール。非 passive で attach し preventDefault してページ
+  // スクロールを防ぐ。
   useEffect(() => {
     const el = barRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       if (e.deltaY === 0) return;
-      if (e.shiftKey) return; // user-initiated horizontal scroll, leave to browser
+      if (e.shiftKey) return; // ユーザー主導の横スクロール、browser に任せる
       e.preventDefault();
       el.scrollLeft += e.deltaY;
     };
@@ -47,7 +47,7 @@ export function TabBar({
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  // Middle-click on a tab closes it. preventDefault stops middle-click autoscroll.
+  // タブ中クリックで閉じる。preventDefault で中クリック autoscroll を止める。
   const onTabMouseDown = (e: React.MouseEvent, index: number) => {
     if (e.button === 1) {
       e.preventDefault();
@@ -56,15 +56,14 @@ export function TabBar({
   };
 
   const onTabPointerDown = (e: React.PointerEvent, index: number, path: string) => {
-    if (e.button !== 0) return; // only primary
-    // Suppress the browser's default text-selection-on-drag.
+    if (e.button !== 0) return; // 主ボタンのみ
+    // browser の drag 時 text 選択を抑止。
     e.preventDefault();
     onStartDrag(leafId, index, path, e);
   };
 
-  // Roving tabindex with Left/Right/Home/End for the tab strip. The newly
-  // focused tab also becomes active (standard "follow focus" tabs pattern,
-  // matching the click behaviour here since switching tabs is cheap).
+  // tab strip の roving tabindex (Left/Right/Home/End)。focus した tab は active にもなる
+  // (標準の follow-focus パターン、切替が安いので click 挙動と揃える)。
   const onTabKeyDown = (e: React.KeyboardEvent, index: number) => {
     let next: number | null = null;
     if (e.key === "ArrowLeft") next = index > 0 ? index - 1 : tabs.length - 1;
@@ -75,7 +74,7 @@ export function TabBar({
     if (next === null) return;
     e.preventDefault();
     onSelect(next);
-    // Move DOM focus to match aria-selected = focused tab.
+    // aria-selected = focused tab に合わせ DOM focus を移す。
     const bar = barRef.current;
     const target = bar?.querySelector<HTMLElement>(`[${DATA_TAB}="${next}"]`);
     target?.focus();
@@ -104,11 +103,9 @@ export function TabBar({
             tabIndex={i === activeIndex ? 0 : -1}
             onClick={(e) => {
               onSelect(i);
-              // onPointerDown calls preventDefault to suppress text selection
-              // during DnD, which also blocks the default focus shift on
-              // mousedown. Without this manual focus(), DOM focus stays on
-              // the previously active tab while aria-selected / tabIndex=0
-              // move to the new one, and the next arrow key lands wrong.
+              // onPointerDown が DnD 用に preventDefault して text 選択を抑止するが、mousedown での
+              // 既定の focus 移動も止まる。この手動 focus() が無いと DOM focus は前の active tab に
+              // 残り、aria-selected / tabIndex=0 だけ新 tab に移って次の矢印キーが誤爆する。
               e.currentTarget.focus();
             }}
             onMouseDown={(e) => onTabMouseDown(e, i)}

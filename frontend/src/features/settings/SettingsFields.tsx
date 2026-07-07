@@ -18,9 +18,7 @@ export function Field({
   );
 }
 
-// Segment is a generic radio-button group. Pass `value` and onChange typed to
-// the option value type (string | number). Uses opt.value directly in onChange
-// so number values survive without parseInt parsing on the event.
+// 汎用 radio グループ。onChange で opt.value を直接使うので、number 値が parseInt なしで残る。
 export function Segment<T extends string | number>({
   name,
   options,
@@ -55,13 +53,10 @@ export function Segment<T extends string | number>({
   );
 }
 
-// NumberInput keeps the in-progress value in local string state and only
-// commits (calls onChange) on blur or Enter. Without this, every keystroke
-// would fire UpdateSettings — which (a) races so a delayed response can
-// overwrite the latest user input, and (b) sends `Number("") === 0` mid-edit
-// which Go's Validate rejects (clamped fields like maxImagePixelsMP have a
-// >0 lower bound). On commit the value is clamped to [min, max] so out-of-
-// range entries are silently corrected rather than rejected.
+// 入力途中の値を local string state に持ち、commit (onChange) は blur / Enter 時のみ。
+// でないと keystroke ごとに UpdateSettings が走り (a) 遅延応答が最新入力を上書きする race、
+// (b) 編集途中の Number("") === 0 が Go の Validate に弾かれる (maxImagePixelsMP 等は下限 >0)。
+// commit 時に [min, max] へ clamp するので範囲外は拒否でなく silent 修正。
 export function NumberInput({
   value,
   min,
@@ -78,12 +73,11 @@ export function NumberInput({
   onChange: (n: number) => void;
 }) {
   const [text, setText] = useState(String(value));
-  // Esc sets this immediately before triggering blur so the resulting onBlur
-  // skips its commit. Without it, setText() is asynchronous (React schedules
-  // the re-render) but blur() fires synchronously, so onBlur reads the
-  // unreverted DOM value and commits the user's edit instead of reverting.
+  // Esc は blur を起こす直前にこれを立て、onBlur が commit を skip するように。setText() は
+  // 非同期 (React が再 render を schedule) だが blur() は同期発火するので、これが無いと onBlur が
+  // revert 前の DOM 値を読んで revert でなく commit してしまう。
   const skipNextBlurRef = useRef(false);
-  // Sync external value changes (e.g. "既定値に戻す") into the local buffer.
+  // 外部の value 変更 ("既定値に戻す" 等) を local buffer に同期。
   useEffect(() => {
     setText(String(value));
   }, [value]);
@@ -96,7 +90,7 @@ export function NumberInput({
     }
     const n = Number(raw);
     if (!Number.isFinite(n) || raw.trim() === "") {
-      // Bad / empty — revert the visible text but leave value untouched.
+      // 不正/空 — 表示 text だけ revert し value は触らない。
       setText(String(value));
       return;
     }
@@ -118,10 +112,10 @@ export function NumberInput({
         onBlur={(e) => commit(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
-            (e.target as HTMLInputElement).blur(); // triggers commit via onBlur
+            (e.target as HTMLInputElement).blur(); // onBlur 経由で commit
           } else if (e.key === "Escape") {
             skipNextBlurRef.current = true;
-            (e.target as HTMLInputElement).blur(); // commit() sees the flag and reverts
+            (e.target as HTMLInputElement).blur(); // commit() が flag を見て revert
           }
         }}
       />

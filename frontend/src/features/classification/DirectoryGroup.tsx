@@ -5,7 +5,7 @@ import type { classification } from "../../../wailsjs/go/models";
 
 export type DirectoryGroupProps = {
   group: DirectoryGroupModel;
-  totalCount: number; // number of entries in this group BEFORE filtering
+  totalCount: number; // フィルタ前のこのグループの entry 数
   collapsed: boolean;
   folderPath: string;
   isSelected: (filename: string) => boolean;
@@ -13,15 +13,15 @@ export type DirectoryGroupProps = {
   showCheckbox: boolean;
   modifierEnabled: boolean;
   onToggle: (key: string) => void;
-  // Multi-viewer (#11): Card thumb clicks now route to onClickPreview (single
-  // path); the previous onClickThumb prop has been removed.
   onClickEdit: (filename: string) => void;
   onClickPreview: (filename: string) => void;
   onToggleSelect: (filename: string) => void;
   onExtendSelectionTo: (filename: string) => void;
-  // Card right-click → ClassificationView positions CardContextMenu at
-  // (clientX, clientY) and routes the menu's "削除" action. (#47 §5.1)
+  // Card 右クリック → ClassificationView が (x, y) に CardContextMenu を出す (#47 §5.1)。
   onRequestCardContextMenu: (filename: string, x: number, y: number) => void;
+  // ダブり候補 filename の集合 (#136)。含まれる Card に ⚠ バッジ。
+  duplicateSet: ReadonlySet<string>;
+  onShowDuplicates: (filename: string) => void;
 };
 
 export function DirectoryGroup({
@@ -39,6 +39,8 @@ export function DirectoryGroup({
   onToggleSelect,
   onExtendSelectionTo,
   onRequestCardContextMenu,
+  duplicateSet,
+  onShowDuplicates,
 }: DirectoryGroupProps) {
   const filteredCount = group.entries.length;
   return (
@@ -75,6 +77,8 @@ export function DirectoryGroup({
               onRequestContextMenu={(x, y) =>
                 onRequestCardContextMenu(entry.filename, x, y)
               }
+              duplicateWarn={duplicateSet.has(entry.filename)}
+              onShowDuplicates={() => onShowDuplicates(entry.filename)}
             />
           ))}
         </div>

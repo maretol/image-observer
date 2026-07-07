@@ -1,5 +1,4 @@
-// Persistence: serialize / deserialize the BSP tree to / from the Wails-
-// generated state shape (state.LayoutState).
+// 永続化: BSP tree を Wails 生成の state 形 (state.LayoutState) と相互変換する。
 
 import type { state } from "../../../../wailsjs/go/models";
 import type { Tab } from "../useTabs";
@@ -72,13 +71,9 @@ export function serializeLayout(layout: Layout): LayoutState {
   };
 }
 
-// Hydrate Layout from the Wails-generated persistence shape (state.LayoutState).
-// The generated TS types are wider than our domain types — `kind` and
-// `direction` are `string` instead of narrow unions, `activeIndex` is required
-// instead of optional, and tabs are TabState class instances rather than
-// plain objects. Runtime fields match 1:1 (Go only writes "split"/"leaf" and
-// "row"/"col"); the recursion below exists to produce TS-narrow values
-// without a blanket `as unknown as` cast at every boundary.
+// Wails 生成の永続形 (state.LayoutState) から Layout を復元する。生成 TS 型は domain 型より
+// 広い (kind / direction が narrow union でなく string、activeIndex が必須、tabs が class instance)。
+// 実行時の値は 1:1 一致するので、下の再帰は境界ごとの as unknown as cast なしで TS-narrow な値を作るためにある。
 export function layoutFromPersisted(ls: state.LayoutState): Layout {
   return deserializeLayout({
     root: narrowPersistedNode(ls.root),
@@ -107,10 +102,10 @@ function narrowPersistedNode(n: state.LayoutNodeState): LayoutNodeState {
 
 export function deserializeLayout(state: LayoutState): Layout {
   const root = deserializeNode(state.root);
-  // Resolve activeId; fall back to first leaf in DFS order.
+  // activeId を解決。無効なら DFS 順の先頭 leaf に fallback。
   const leaves = enumerateLeaves(root);
   if (leaves.length === 0) {
-    // Shouldn't happen (root is a leaf or a split with leaves), but be safe.
+    // 起きない想定 (root は leaf か leaf を持つ split) だが安全策。
     const blank = emptyLeaf();
     return { root: blank, activeId: blank.id };
   }

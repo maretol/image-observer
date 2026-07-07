@@ -8,20 +8,19 @@ import {
 } from "./shared/utils/keybindings";
 import type { TopTab } from "./topTab";
 
-// useGlobalKeybindings wires the App-level keyboard shortcuts (Phase H4 + #7
-// + #11):
+// useGlobalKeybindings は App レベルのキーボードショートカットを配線する
+// (Phase H4 + #7 + #11):
 //
-//   Ctrl+Shift+1     → switch to the "list" top-tab
-//   Ctrl+Shift+2..9 → switch to the (N-1)th viewer
-//   Ctrl+W           → close the active tab in the active viewer panel
-//   Ctrl+Tab / Ctrl+Shift+Tab → cycle tabs within the active panel
-//   Ctrl+0 / Ctrl+1  → fit / actual-size (relayed via zoomCommandBus)
-//   Ctrl+= / Ctrl+- → zoom in / out
+//   Ctrl+Shift+1     → "一覧" トップタブへ切替
+//   Ctrl+Shift+2..9 → (N-1) 番目のビューアへ切替
+//   Ctrl+W           → アクティブパネルのアクティブタブを閉じる
+//   Ctrl+Tab / Ctrl+Shift+Tab → アクティブパネル内でタブを巡回
+//   Ctrl+0 / Ctrl+1  → フィット / 実寸 (zoomCommandBus 経由)
+//   Ctrl+= / Ctrl+- → ズームイン / アウト
 //
-// The window keydown listener is registered exactly once with an empty deps
-// array; live state is read through refs that are kept in sync at render
-// time. Re-creating the listener on every state change would risk dropping
-// a key during the unmount/remount window.
+// window の keydown リスナは空 deps で一度だけ登録し、生きた state は render 時に
+// 同期する ref 経由で読む。state 変更のたびにリスナを再生成すると、
+// unmount/remount の隙にキーを取りこぼす恐れがある。
 
 type Opts = {
   topTab: TopTab;
@@ -39,8 +38,8 @@ export function useGlobalKeybindings({
   const topTabRef = useRef(topTab);
   const settingsOpenRef = useRef(settingsOpen);
   const viewerRef = useRef(viewer);
-  // Render-time sync: the keydown handler reads through these refs, so they
-  // must reflect the latest state on every render (no useEffect delay).
+  // keydown ハンドラは ref 経由で読むので、毎 render で最新 state を反映する
+  // (useEffect の遅延を挟まないため)。
   topTabRef.current = topTab;
   settingsOpenRef.current = settingsOpen;
   viewerRef.current = viewer;
@@ -48,13 +47,11 @@ export function useGlobalKeybindings({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e.target)) return;
-      if (settingsOpenRef.current) return; // dialog has its own Esc handler
+      if (settingsOpenRef.current) return; // ダイアログ側に Esc ハンドラがある
 
-      // Global top-tab switching (#7 + #11). Ctrl+Shift+1 → list,
-      // Ctrl+Shift+2..9 → N-1th viewer (so Ctrl+Shift+2 still means "first
-      // viewer", preserving the old single-viewer keybinding's meaning).
-      // e.code is layout-independent; e.key would be the shifted character
-      // on most layouts.
+      // (N-1) オフセットは Ctrl+Shift+2 が従来の単一ビューア時代と同じ「最初の
+      // ビューア」を指すように (#7 + #11)。e.code を使うのはレイアウト非依存に
+      // するため (e.key だと shift 後の文字になる)。
       if (isPrimaryModifier(e) && e.shiftKey) {
         if (e.code === "Digit1") {
           e.preventDefault();
@@ -63,7 +60,7 @@ export function useGlobalKeybindings({
         }
         const digitMatch = /^Digit([2-9])$/.exec(e.code);
         if (digitMatch) {
-          const idx = Number(digitMatch[1]) - 2; // Digit2 → viewer index 0
+          const idx = Number(digitMatch[1]) - 2; // Digit2 → ビューア index 0
           const viewerLive = viewerRef.current;
           if (idx >= 0 && idx < viewerLive.viewers.length) {
             e.preventDefault();
@@ -83,7 +80,6 @@ export function useGlobalKeybindings({
 
       if (!isPrimaryModifier(e)) return;
 
-      // Ctrl+W: close active tab
       if ((e.key === "w" || e.key === "W") && !e.shiftKey) {
         e.preventDefault();
         if (activeLeaf.activeIndex >= 0) {
@@ -91,7 +87,6 @@ export function useGlobalKeybindings({
         }
         return;
       }
-      // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs in active panel
       if (e.key === "Tab") {
         e.preventDefault();
         const n = activeLeaf.tabs.length;
@@ -101,25 +96,21 @@ export function useGlobalKeybindings({
         viewerLive.setActiveTab(activeLeaf.id, next);
         return;
       }
-      // Ctrl+0: fit to viewport
       if (e.key === "0") {
         e.preventDefault();
         zoomCommandBus.emit("fit");
         return;
       }
-      // Ctrl+1: actual size (100%)
       if (e.key === "1") {
         e.preventDefault();
         zoomCommandBus.emit("actualSize");
         return;
       }
-      // Ctrl+= / Ctrl++ : zoom in (also accept "+" shifted)
       if (e.key === "=" || e.key === "+") {
         e.preventDefault();
         zoomCommandBus.emit("in");
         return;
       }
-      // Ctrl+- : zoom out
       if (e.key === "-") {
         e.preventDefault();
         zoomCommandBus.emit("out");

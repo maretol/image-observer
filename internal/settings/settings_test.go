@@ -51,6 +51,12 @@ func TestLoad_Missing_ReturnsDefaults(t *testing.T) {
 	if !s.EditAutoSave {
 		t.Errorf("EditAutoSave default: got %v, want true", s.EditAutoSave)
 	}
+	if s.DuplicateDetectMode != DuplicateDetectAuto {
+		t.Errorf("DuplicateDetectMode default: got %q, want %q", s.DuplicateDetectMode, DuplicateDetectAuto)
+	}
+	if s.DuplicateThreshold != defaultDuplicateThreshold {
+		t.Errorf("DuplicateThreshold default: got %d, want %d", s.DuplicateThreshold, defaultDuplicateThreshold)
+	}
 	if len(s.TagColors) == 0 {
 		t.Errorf("TagColors default should be a non-empty map (defaultTagColors)")
 	}
@@ -75,6 +81,8 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	in.UIScalePercent = 125
 	in.WatchMode = WatchModeOff
 	in.EditAutoSave = false
+	in.DuplicateDetectMode = DuplicateDetectOff
+	in.DuplicateThreshold = 0
 	if err := Save(in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -111,6 +119,12 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	}
 	if out.EditAutoSave != false {
 		t.Errorf("EditAutoSave: got %v, want false (round-trip preserves explicit false)", out.EditAutoSave)
+	}
+	if out.DuplicateDetectMode != DuplicateDetectOff {
+		t.Errorf("DuplicateDetectMode: got %q", out.DuplicateDetectMode)
+	}
+	if out.DuplicateThreshold != 0 {
+		t.Errorf("DuplicateThreshold: got %d, want 0 (round-trip preserves explicit zero)", out.DuplicateThreshold)
 	}
 }
 
@@ -176,6 +190,21 @@ func TestSave_RejectsInvalid(t *testing.T) {
 	if err := Save(bad); err == nil {
 		t.Errorf("Save should reject invalid WatchMode")
 	}
+	bad = DefaultSettings()
+	bad.DuplicateDetectMode = "sometimes"
+	if err := Save(bad); err == nil {
+		t.Errorf("Save should reject invalid DuplicateDetectMode")
+	}
+	bad = DefaultSettings()
+	bad.DuplicateThreshold = minDuplicateThreshold - 1
+	if err := Save(bad); err == nil {
+		t.Errorf("Save should reject DuplicateThreshold below min")
+	}
+	bad = DefaultSettings()
+	bad.DuplicateThreshold = maxDuplicateThreshold + 1
+	if err := Save(bad); err == nil {
+		t.Errorf("Save should reject DuplicateThreshold above max")
+	}
 }
 
 func TestSave_StampsVersion(t *testing.T) {
@@ -224,15 +253,17 @@ func TestLoad_PerFieldFallbackKeepsValidFields(t *testing.T) {
 	bad, _ := json.Marshal(map[string]any{
 		"version":              SettingsSchemaVersion,
 		"logLevel":             "garbage",
-		"multiSelectMode":      MultiSelectModifier,    // valid
-		"wheelMode":            WheelModeShiftZoom,     // valid
-		"maxImagePixelsMP":     -5,                     // invalid
-		"thumbnailSize":        320,                    // valid
-		"thumbnailMode":        "stretch",              // invalid
-		"thumbnailWorkerCount": 8,                      // valid
+		"multiSelectMode":      MultiSelectModifier, // valid
+		"wheelMode":            WheelModeShiftZoom,  // valid
+		"maxImagePixelsMP":     -5,                  // invalid
+		"thumbnailSize":        320,                 // valid
+		"thumbnailMode":        "stretch",           // invalid
+		"thumbnailWorkerCount": 8,                   // valid
 		"tagColors":            map[string]string{"keep": "#abc123", "drop": "garbage"},
-		"uiScalePercent":       9999,     // out of range — should fall back
-		"watchMode":            "polling", // invalid → fall back
+		"uiScalePercent":       9999,        // out of range — should fall back
+		"watchMode":            "polling",   // invalid → fall back
+		"duplicateDetectMode":  "sometimes", // invalid → fall back
+		"duplicateThreshold":   99,          // out of range → fall back
 	})
 	if err := os.WriteFile(p, bad, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -270,6 +301,12 @@ func TestLoad_PerFieldFallbackKeepsValidFields(t *testing.T) {
 	}
 	if s.WatchMode != WatchModeAuto {
 		t.Errorf("invalid WatchMode should fall back, got %q", s.WatchMode)
+	}
+	if s.DuplicateDetectMode != DuplicateDetectAuto {
+		t.Errorf("invalid DuplicateDetectMode should fall back, got %q", s.DuplicateDetectMode)
+	}
+	if s.DuplicateThreshold != defaultDuplicateThreshold {
+		t.Errorf("out-of-range DuplicateThreshold should fall back, got %d", s.DuplicateThreshold)
 	}
 }
 
@@ -313,6 +350,13 @@ func TestLoad_NewFieldsMissing_GetDefaults(t *testing.T) {
 	if !s.EditAutoSave {
 		t.Errorf("missing EditAutoSave should default to true (not Go bool zero), got %v", s.EditAutoSave)
 	}
+	if s.DuplicateDetectMode != DuplicateDetectAuto {
+		t.Errorf("missing DuplicateDetectMode should default, got %q", s.DuplicateDetectMode)
+	}
+	if s.DuplicateThreshold != defaultDuplicateThreshold {
+		t.Errorf("missing DuplicateThreshold should default to %d (not Go int zero), got %d",
+			defaultDuplicateThreshold, s.DuplicateThreshold)
+	}
 }
 
 // TestLoad_EditAutoSave_ExplicitFalse_Preserved pins the probe-based key
@@ -353,6 +397,43 @@ func TestLoad_EditAutoSave_NullValue_DefaultsToTrue(t *testing.T) {
 	s := Load()
 	if !s.EditAutoSave {
 		t.Errorf("JSON null should fall back to default (true), got %v", s.EditAutoSave)
+	}
+}
+
+// TestLoad_DuplicateThreshold_ExplicitZero_Preserved pins the probe-based key
+// presence check for the int field (EditAutoSave と同じ理屈, #136)。probe が無いと
+// 明示的な `"duplicateThreshold": 0` (知覚的に同一のみ) と「欠落」が区別できず、
+// 既定 5 に巻き戻ってユーザーの厳格設定を silent に上書きする。
+func TestLoad_DuplicateThreshold_ExplicitZero_Preserved(t *testing.T) {
+	p := setSettingsFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	body, _ := json.Marshal(map[string]any{
+		"version":            SettingsSchemaVersion,
+		"duplicateThreshold": 0,
+	})
+	if err := os.WriteFile(p, body, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.DuplicateThreshold != 0 {
+		t.Errorf("explicit zero should be preserved (probe path), got %d", s.DuplicateThreshold)
+	}
+}
+
+// TestLoad_DuplicateThreshold_NullValue_DefaultsTo5 covers the third probe case
+// (EditAutoSave の JSON null と同型): key はあるが null → *int 再 decode で nil →
+// 「不正値 → field default」規則に合わせて既定へ倒す。
+func TestLoad_DuplicateThreshold_NullValue_DefaultsTo5(t *testing.T) {
+	p := setSettingsFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	body := []byte(`{"version":1,"duplicateThreshold":null}`)
+	if err := os.WriteFile(p, body, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.DuplicateThreshold != defaultDuplicateThreshold {
+		t.Errorf("JSON null should fall back to default (%d), got %d",
+			defaultDuplicateThreshold, s.DuplicateThreshold)
 	}
 }
 
@@ -415,5 +496,25 @@ func TestWatchModeValues(t *testing.T) {
 	}
 	if WatchModeOff != "off" {
 		t.Errorf("WatchModeOff = %q, want %q (TS side pins the same literal)", WatchModeOff, "off")
+	}
+}
+
+// TestDuplicateDetectValues pins the DuplicateDetect* literals and the default
+// threshold. AGENTS.md D-1: TS 側は
+// `frontend/src/features/settings/duplicateDetect.ts` が同じリテラルを持ち
+// `duplicateDetect.test.ts` で pin する (watchMode と同じ流儀, #136)。
+func TestDuplicateDetectValues(t *testing.T) {
+	if DuplicateDetectAuto != "auto" {
+		t.Errorf("DuplicateDetectAuto = %q, want %q (TS side pins the same literal)", DuplicateDetectAuto, "auto")
+	}
+	if DuplicateDetectOff != "off" {
+		t.Errorf("DuplicateDetectOff = %q, want %q (TS side pins the same literal)", DuplicateDetectOff, "off")
+	}
+	if defaultDuplicateThreshold != 5 {
+		t.Errorf("defaultDuplicateThreshold = %d, want 5 (TS side pins the same value)", defaultDuplicateThreshold)
+	}
+	if minDuplicateThreshold != 0 || maxDuplicateThreshold != 16 {
+		t.Errorf("threshold bounds = %d..%d, want 0..16 (TS side pins the same values)",
+			minDuplicateThreshold, maxDuplicateThreshold)
 	}
 }

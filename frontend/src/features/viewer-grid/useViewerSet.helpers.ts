@@ -1,6 +1,5 @@
-// Pure helpers extracted from useViewerSet.ts. These don't touch React
-// state / callbacks; keeping them out of the hook file leaves the hook
-// focused on `useState` orchestration and `useCallback` wiring.
+// useViewerSet.ts から抽出した純ヘルパ。React state / callback に触れないので hook 本体を
+// useState / useCallback の配線に集中させられる。
 
 import {
   appendOrFocusInActive,
@@ -11,8 +10,7 @@ import {
 import { newTab } from "./useTabs";
 import type { Viewer } from "./viewers";
 
-// leafTabsCount sums the tab count across all leaves in a viewer's layout.
-// Used only for the close-viewer log line ("did the user lose data?").
+// viewer の全 leaf の tab 数を合計。close-viewer のログ行 (データ喪失の有無) 用。
 export function leafTabsCount(v: Viewer): number {
   let n = 0;
   walk(v.layout.root);
@@ -27,12 +25,9 @@ export function leafTabsCount(v: Viewer): number {
   }
 }
 
-// openPathAsSplitOrAppend is the layout transform used by the "open many as
-// split" bulk flows: if the active leaf is empty, just append to it (so the
-// first image fills the existing empty panel instead of creating an extra
-// split). Otherwise split right with a fresh tab. The MAX_PANELS check is
-// the caller's responsibility — by the time we get here we've already
-// confirmed there's room.
+// "open many as split" 用の layout 変換: active leaf が空なら append (最初の画像が余分な
+// split を作らず既存の空パネルに入る)、そうでなければ右に split。MAX_PANELS チェックは
+// 呼び出し側の責任 (ここに来る時点で空きは確認済み)。
 export function openPathAsSplitOrAppend(
   layout: Layout,
   path: string,

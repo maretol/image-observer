@@ -9,11 +9,8 @@ import { getPreview } from "../../shared/utils/thumbnailDefaults";
 import { SampleEditPane } from "./SampleEditPane";
 import type { SaveContext } from "./useClassificationEdit";
 
-// Tooltip used on prev/next while editing pane has unsaved changes (#93,
-// spec §5.4). Surfaced via `title` only — `aria-label` stays on the
-// operation name ("前の画像 (←)") so screen readers always announce what
-// the button does. The unsaved state itself is conveyed by the dirty
-// badge in the header (aria-label "未保存の変更があります").
+// 未保存編集中の prev/next tooltip (#93, spec §5.4)。title だけに出す — aria-label は
+// 操作名 ("前の画像 (←)") のままにして SR が常にボタンの機能を読み上げるように。
 const NAV_BLOCKED_TOOLTIP =
   "未保存の変更があります。保存またはキャンセルしてください";
 
@@ -21,54 +18,35 @@ export type SampleModalOpenSource = "preview" | "edit";
 
 type SampleModalProps = {
   open: boolean;
-  // POSIX path the modal should show. null while closed.
+  // 表示する POSIX path。閉じている間は null。
   imagePath: string | null;
-  // Display name shown in the header. Caller supplies it so we don't have
-  // to parse paths here — `filename` may contain subdirectory separators
-  // (e.g. `child/foo.png` for recursively-scanned sidecars) and the caller
-  // has already decided how it wants to label that.
+  // ヘッダ表示名。filename はサブディレクトリ区切りを含みうる (`child/foo.png`) ので、
+  // ここで path を parse せず呼び出し側が決めたラベルを受ける。
   filename: string | null;
   onClose: () => void;
-  // Multi-viewer (#11): the modal renders a viewer-selector in its footer.
-  // Caller passes the current viewer set (id + name) and which one is active
-  // (used for highlighting the default choice). On click, the modal calls
-  // onOpenInViewer(viewerId) with the chosen target.
+  // footer の viewer セレクタ用 (#11)。active は既定選択のハイライトに使う。
   viewers: { id: string; name: string }[];
   activeViewerId: string;
   onOpenInViewer: (viewerId: string) => void;
-  // Prev / next navigation (#94). null = end of list within the current
-  // directory group (ディレクトリ跨ぎ / 端ループは禁止)。Both null hides the
-  // nav controls entirely; otherwise the respective button renders disabled.
-  // While the edit pane has unsaved changes (#93, spec §5.4) the modal also
-  // disables nav internally with NAV_BLOCKED_TOOLTIP — the original
-  // direction availability is still respected, dirty just adds an extra
-  // block on top.
+  // prev/next (#94)。null = グループ端 (ディレクトリ跨ぎ / 端ループ禁止)。両方 null で
+  // nav 全体を隠す。未保存編集中 (#93, spec §5.4) は dirty が上乗せで disable する。
   onPrev: (() => void) | null;
   onNext: (() => void) | null;
-  // Edit pane (#93). Unified modal now hosts tag/confidence/note editing
-  // alongside the preview. entry is null while no entry resolves for the
-  // current preview filename (e.g. mid filter race) — the pane renders an
-  // empty placeholder in that case. openSource controls initial focus
-  // routing: "preview" leaves focus on the preview side, "edit" autofocuses
-  // the tag input.
+  // entry は現在の preview filename に対応する entry が無いとき null (filter race 中など) —
+  // pane は空 placeholder を出す。openSource は初期 focus を振り分ける ("edit" → tag 入力)。
   entry: classification.Entry | null;
   knownTags: string[];
   openSource: SampleModalOpenSource;
-  // Current folder (#110 C). Forwarded to SampleEditPane so its save wrapper
-  // can stamp each save's SaveContext.folder — letting saveEdit gate on the
-  // folder the edit belongs to instead of a live ref (replaces the round 6
-  // folderPathRef band-aid).
+  // 現在の folder (#110 C)。SampleEditPane の save wrapper が各 save の SaveContext.folder に
+  // 刻み、saveEdit が live ref でなく編集が属する folder で gate できるようにする。
   folder: string;
-  // Pre-#105 manual mode returns void; #105 auto mode awaits the resulting
-  // Promise inside SampleEditPane to serialize in-flight saves (spec §5.3).
-  // ctx carries the folder the save was captured for (#110 C). Callers may
-  // return either void or Promise; the pane wraps with Promise.resolve.
+  // manual モードは void、auto モード (#105) は Promise を await して in-flight save を
+  // 直列化する (spec §5.3)。ctx は save を capture した folder を運ぶ (#110 C)。
   onSave: (
     next: classification.Entry,
     ctx: SaveContext,
   ) => void | Promise<void>;
-  // #105: drives whether SampleEditPane is in auto (true) or manual (false)
-  // save mode. Forwarded straight to the pane.
+  // SampleEditPane の auto (true) / manual (false) save モード (#105)。
   autoSave: boolean;
 };
 
@@ -93,17 +71,12 @@ export function SampleModal({
   const [state, setState] = useState<"idle" | "loading" | "ok" | "error">(
     "idle",
   );
-  // Bubble dirty state up from SampleEditPane so prev/next can be blocked
-  // while there are unsaved edits (#93 spec §5.4).
+  // 未保存中に prev/next を止めるため SampleEditPane から dirty を吸い上げる (#93 spec §5.4)。
   const [editDirty, setEditDirty] = useState(false);
 
-  // Initial-focus routing for ModalShell. ModalShell's default behavior is
-  // to focus the first focusable descendant on open, which would land on
-  // the close icon and override any child `autoFocus`. We explicitly hand
-  // it a ref so spec §5.2 is honored:
-  //   openSource === "edit"    → tag input (editing pane)
-  //   openSource === "preview" → close button (preview side; Tab from here
-  //                              flows into prev/next → edit pane)
+  // ModalShell の初期 focus 振り分け。既定だと最初の focusable = 閉じるアイコンに当たり
+  // child の autoFocus を上書きするので、ref を明示する (spec §5.2):
+  //   "edit"    → tag 入力、"preview" → 閉じるボタン
   const tagInputRef = useRef<HTMLInputElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const initialFocusRef = useMemo(
@@ -111,19 +84,12 @@ export function SampleModal({
     [openSource],
   );
 
-  // Reset dirty when the modal closes or the active *filename* changes
-  // (prev/next swap, entry becoming null, etc.). We deliberately key on
-  // `entry?.filename` rather than `entry` itself: watcher-driven reloads
-  // hand us a new entry object whose baseline (folder / confidence /
-  // note) is unchanged, and SampleEditPane preserves the user's in-pane
-  // edits in that case (its `lastBaselineRef` short-circuits the reset).
-  // Resetting parent's editDirty on every ref churn would desync from
-  // child — SampleEditPane's onDirtyChange only re-fires when `dirty`
-  // changes, so a ref-only update would leave editDirty stuck at false
-  // while the pane still has unsaved tags/confidence/note. The save path
-  // (same filename, new baseline) is covered by SampleEditPane's
-  // baselineChanged branch instead: tags etc. get reset, dirty memo
-  // flips true→false, and onDirtyChange(false) drains editDirty.
+  // modal が閉じるか active *filename* が変わったとき dirty を reset。entry 自体でなく
+  // entry?.filename で key するのは意図的: watcher reload は baseline 不変の新 entry オブ
+  // ジェクトを渡し、SampleEditPane は in-pane 編集を保つ (lastBaselineRef で reset を短絡)。
+  // ref churn ごとに親の editDirty を reset すると child と desync する (onDirtyChange は
+  // dirty 変化時しか再発火しないので editDirty が false のまま固まる)。save 経路 (同一
+  // filename + 新 baseline) は SampleEditPane の baselineChanged 分岐が扱う。
   useEffect(() => {
     setEditDirty(false);
   }, [open, entry?.filename]);
@@ -158,41 +124,27 @@ export function SampleModal({
       });
     return () => {
       cancelled = true;
-      // Revoke immediately on close / path change. Unlike useGridThumbnail
-      // we have only one consumer and no risk of a parallel <img> still
-      // fetching; the modal's <img> is torn down synchronously.
+      // close / path 変更で即 revoke。useGridThumbnail と違い consumer が 1 つで、
+      // 並行 <img> の fetch が残る risk が無い (modal の <img> は同期的に破棄される)。
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
   }, [open, imagePath]);
 
-  // Effective nav callbacks after applying the dirty block (#93 §5.4).
-  // null = direction unavailable (edge of group) OR blocked by dirty edits.
-  // We keep the original null distinct from the dirty block in title text
-  // so the user knows which case they're in.
+  // dirty block 適用後の実効 nav (#93 §5.4)。null = 方向なし (グループ端) or dirty block。
+  // どちらかは title 文言で区別する。
   const prevBlocked = editDirty && onPrev !== null;
   const nextBlocked = editDirty && onNext !== null;
   const effectivePrev = prevBlocked ? null : onPrev;
   const effectiveNext = nextBlocked ? null : onNext;
 
-  // Keyboard navigation (#94). ←/→ jump to prev/next within the current
-  // directory group. ModalShell handles Esc and Tab focus trap, so we only
-  // claim arrow keys here — no conflict. document-level listener mirrors how
-  // ModalShell wires its own keys. Suppressed while the focus is in an
-  // editable element so typing arrows inside the note textarea / tag input
-  // doesn't bounce the preview. The TagInput chip × buttons are <button>s
-  // (not INPUT/TEXTAREA/contentEditable), so an INPUT/TEXTAREA-only guard
-  // would still bounce the preview when focus sits on a chip ×; the
-  // `.cls-tag-input` ancestor check covers the whole chip-input widget
-  // (input field + chip × buttons) uniformly.
+  // ←/→ で directory グループ内の prev/next (#94)。Esc / Tab は ModalShell が持つので
+  // ここは arrow だけ。editable 要素に focus 中は抑止するが、TagInput の chip × は
+  // <button> なので INPUT/TEXTAREA だけの guard だと chip × 上で preview が動く —
+  // `.cls-tag-input` 祖先チェックで chip-input widget 全体を覆う。
   //
-  // While the modal owns ←/→ we always preventDefault on those keys (after
-  // the editable-target guard) regardless of whether the direction is
-  // available, then call the callback only if non-null. Without the
-  // unconditional preventDefault, the dirty-block path (effectivePrev /
-  // effectiveNext = null) and the edge-of-group path (onPrev / onNext = null)
-  // would fall through to the browser default — background scroll, focus
-  // ring jump, etc. — violating spec §5.4 / PR test plan「未保存中に ←/→
-  // キーが no-op」(spec §5.4) と single-entry group の暗黙の no-op 期待。
+  // ←/→ は (editable guard の後) 方向の可否によらず常に preventDefault し、callback は
+  // 非 null のときだけ呼ぶ。無条件 preventDefault が無いと dirty-block や group 端で
+  // browser 既定 (背景スクロール等) に落ちて spec §5.4 の no-op 期待を破る。
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -218,10 +170,8 @@ export function SampleModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, effectivePrev, effectiveNext]);
 
-  // Render the nav row only when at least one direction is *available* in
-  // the underlying group. The dirty block doesn't hide the buttons (they
-  // render disabled with an explanatory tooltip instead), only single-entry
-  // groups do.
+  // 少なくとも片方向が *利用可能* なときだけ nav 行を描画。dirty block はボタンを隠さず
+  // disabled + tooltip にする。隠すのは single-entry group のみ。
   const navAvailable = onPrev !== null || onNext !== null;
 
   return (
@@ -330,8 +280,7 @@ export function SampleModal({
         aria-label={viewers.length > 1 ? "ビューアを選んで開く" : undefined}
       >
         {viewers.length === 0 ? null : viewers.length === 1 ? (
-          // Single-viewer fast path: keep the original "ビューアで開く"
-          // wording so the simple-case UX is unchanged.
+          // 単一 viewer の fast path: 従来の "ビューアで開く" 文言を保つ。
           <button
             type="button"
             className="sample-modal-open-viewer"

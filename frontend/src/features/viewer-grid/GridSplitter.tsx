@@ -6,7 +6,7 @@ import { pushBodyStyle } from "../../shared/utils/bodyStyles";
 type Props = {
   splitId: string;
   direction: SplitDirection;
-  ratio: number; // current ratio (a's share)
+  ratio: number; // 現在の ratio (a の取り分)
   containerRef: React.RefObject<HTMLDivElement | null>;
   onChangeRatio: (splitId: string, ratio: number) => void;
 };
@@ -27,7 +27,7 @@ export function GridSplitter({
     release: () => void;
   } | null>(null);
 
-  // Refs let the global pointer listeners stay stable across renders.
+  // global pointer listener を render 越しに安定させるための ref。
   const directionRef = useRef(direction);
   directionRef.current = direction;
   const onChangeRatioRef = useRef(onChangeRatio);
@@ -37,9 +37,8 @@ export function GridSplitter({
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
-    // A drag is already in flight (e.g. multi-touch second finger). Ignore
-    // the new pointer so we don't overwrite dragRef and orphan the existing
-    // release(), which would leak the body cursor/userSelect override.
+    // 既に drag 中 (multi-touch の 2 本目等)。新 pointer を無視し、dragRef を上書きして
+    // 既存 release() を orphan にしない (body cursor/userSelect の override が leak する)。
     if (dragRef.current) return;
     e.preventDefault();
     e.stopPropagation();
@@ -68,7 +67,7 @@ export function GridSplitter({
       const currentPointer = dir === "col" ? e.clientX : e.clientY;
       const deltaPx = currentPointer - drag.startPointer;
       const deltaRatio = deltaPx / containerSize;
-      // Clamp by both 100px minimum and the absolute MIN_RATIO floor.
+      // 100px 最小と絶対 MIN_RATIO の両方で clamp。
       const minRatioByPx = MIN_PX / containerSize;
       const minR = Math.max(MIN_RATIO, minRatioByPx);
       let r = drag.startRatio + deltaRatio;
@@ -89,7 +88,7 @@ export function GridSplitter({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
-      // Best-effort restore if unmount happens mid-drag.
+      // drag 中に unmount した場合の best-effort 復元。
       dragRef.current?.release();
       dragRef.current = null;
     };

@@ -6,12 +6,7 @@ import { PlusIcon } from "./shared/icons/PlusIcon";
 import { SettingsIcon } from "./shared/icons/SettingsIcon";
 import type { TopTab } from "./topTab";
 
-// TopTabsBar — the top-level tab strip across the window header. Renders one
-// "一覧" tab + N viewer tabs (with inline rename + #50 reorder DnD indicator)
-// + the "add viewer" button + the "settings" button. The dragActive /
-// dragSrcIdx / dragInsertIdx values that gate the indicator and the source-
-// tab dimming are derived locally from `reorder.state`; the orchestrator
-// just hands the reorder hook through.
+// ウィンドウヘッダのトップレベルタブ列 ("一覧" + ビューアタブ + 追加 / 設定ボタン)。
 
 export type TopTabsBarProps = {
   topTab: TopTab;
@@ -46,9 +41,7 @@ export function TopTabsBar({
   onOpenSettings,
   maxViewers,
 }: TopTabsBarProps) {
-  // Indicator and dragSource visibility key off the same state. Only show
-  // them once the drag has crossed the threshold (active) so a normal click
-  // doesn't briefly flash the indicator.
+  // 閾値を越えて active になってから出す (通常クリックでインジケータが一瞬光らないよう)。
   const dragActive = reorder.state?.active ?? false;
   const dragSrcIdx = dragActive ? (reorder.state?.srcIdx ?? -1) : -1;
   const dragInsertIdx = dragActive ? (reorder.state?.insertIdx ?? -1) : -1;
@@ -80,11 +73,9 @@ export function TopTabsBar({
               viewer={v}
               isActive={topTab === "viewer" && v.id === activeViewerId}
               isEditing={editingViewerId === v.id}
-              // anyRenaming gates drag-start on *any* tab while a rename
-              // session is open. Without it a pointerdown on a sibling tab
-              // would start a drag (its own isEditing is false) while the
-              // rename input keeps focus thanks to our preventDefault(),
-              // letting the user reorder behind a still-open editor.
+              // rename 中に *どの* タブでもドラッグ開始を抑止する。これがないと兄弟
+              // タブの pointerdown が (isEditing=false なので) ドラッグを始め、rename
+              // 入力はフォーカスを保ったまま裏で並べ替えできてしまうため。
               anyRenaming={editingViewerId !== null}
               isDragSource={dragSrcIdx === i}
               canClose={viewers.length > 1}

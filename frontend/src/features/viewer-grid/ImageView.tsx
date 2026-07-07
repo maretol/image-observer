@@ -23,7 +23,7 @@ type Props = {
   tab: Tab;
   tabIndex: number;
   isActivePanel: boolean;
-  // "zoom" (default) → wheel zooms. "shift-zoom" → wheel pans, Shift+wheel zooms.
+  // "zoom" (既定) → ホイールでズーム。"shift-zoom" → ホイールでパン、Shift+ホイールでズーム。
   wheelMode?: string;
   onUpdateTabState: (index: number, patch: Partial<Tab>) => void;
 };
@@ -60,9 +60,8 @@ export function ImageView({
     release: () => void;
   } | null>(null);
 
-  // Mirror tab/tabIndex/onUpdateTabState into refs so the zoom-command
-  // listener stays stable across renders (we only re-bind on activation
-  // change, not on every pan/zoom).
+  // tab/tabIndex/onUpdateTabState を ref にミラーし、zoom-command listener を render 越しに
+  // 安定させる (再 bind は activation 変更時のみ、pan/zoom ごとではない)。
   const tabRef = useRef(tab);
   tabRef.current = tab;
   const tabIndexRef = useRef(tabIndex);
@@ -70,7 +69,7 @@ export function ImageView({
   const updateRef = useRef(onUpdateTabState);
   updateRef.current = onUpdateTabState;
 
-  // Fetch image when path changes. spec-viewer-tab-cache.md §6:
+  // path 変更時に画像を取得 (spec-viewer-tab-cache.md §6):
   //   - GetImageInfo → 寸法を tab state に流し initial fit を駆動 (常に発火)
   //   - getPreview   → cache miss 時のみ発火。成功すれば cache 登録 + 表示
   //   - ReadImage    → オリジナル本体 (常に発火、cache hit 時も併走させて
@@ -220,7 +219,7 @@ export function ImageView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.path]);
 
-  // Initial fit when both image and container known
+  // image と container の両方が判明したら初期 fit。
   useEffect(() => {
     if (tab.initialized) return;
     if (tab.imageWidth <= 0 || tab.imageHeight <= 0) return;
@@ -237,11 +236,8 @@ export function ImageView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.initialized, tab.imageWidth, tab.imageHeight]);
 
-  // Re-pan on viewport (panel) resize. Axis-independent rule:
-  //   - axis where image fits   → center on that axis
-  //   - axis where image hangs  → keep the image-pixel that was at the
-  //                                viewport's geometric center, then clamp
-  // Zoom is never modified here. See spec note in `Phase H UI/UX 修正`.
+  // viewport (panel) リサイズ時の再パン。軸ごと: image が収まる軸は中央寄せ、はみ出す軸は
+  // viewport 幾何中心にあった image ピクセルを保って clamp。zoom はここでは変えない。
   useEffect(() => {
     if (!tab.initialized) return;
     const el = containerRef.current;
@@ -255,7 +251,7 @@ export function ImageView({
       if (newW <= 0 || newH <= 0) return;
       const t = tabRef.current;
       if (t.imageWidth <= 0 || t.imageHeight <= 0 || t.zoom <= 0) return;
-      // First callback after attach records the baseline; nothing to recompute.
+      // attach 後の最初の callback は baseline を記録するだけ。
       if (!prev) {
         prev = { w: newW, h: newH };
         return;
@@ -288,9 +284,8 @@ export function ImageView({
     return () => ro.disconnect();
   }, [tab.initialized]);
 
-  // After session restore: tab.initialized is true but imageWidth/Height start at 0.
-  // Once they arrive (from ReadImage), the saved pan may be out of range if the
-  // window was resized between sessions. Clamp once when dims become known.
+  // session 復元後: tab.initialized は true だが imageWidth/Height は 0 から始まる。ReadImage で
+  // 届いたとき、session 間で window がリサイズされていれば保存 pan が範囲外になりうる。寸法判明時に 1 回 clamp。
   const clampedAfterRestoreRef = useRef(false);
   useEffect(() => {
     if (clampedAfterRestoreRef.current) return;
@@ -316,15 +311,10 @@ export function ImageView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.initialized, tab.imageWidth, tab.imageHeight]);
 
-  // Wheel handler. Attach as non-passive to allow preventDefault. Reads tab
-  // state via tabRef so the listener is attached once per wheelMode change
-  // rather than rebound on every pan/zoom.
-  //
-  // wheelMode === "shift-zoom":
-  //   - Shift+wheel / Ctrl+wheel → zoom (cursor-anchored, like the default)
-  //   - plain wheel              → pan (deltaY → vertical, deltaX → horizontal trackpads)
-  //
-  // wheelMode === "zoom" (default): wheel always zooms.
+  // wheel handler。preventDefault のため非 passive で attach。tab state を tabRef で読み、
+  // listener は wheelMode 変更時のみ attach (pan/zoom ごとに再 bind しない)。
+  //   - "shift-zoom": Shift/Ctrl+wheel → ズーム (カーソル固定)、素の wheel → パン
+  //   - "zoom" (既定): wheel は常にズーム
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -338,8 +328,7 @@ export function ImageView({
         e.preventDefault();
         const cx = e.clientX - rect.left;
         const cy = e.clientY - rect.top;
-        // Some browsers swap deltaY into deltaX when Shift is held; pick the
-        // non-zero one so the modifier+wheel zooms regardless.
+        // Shift 押下時に deltaY を deltaX に入れ替える browser がある。非ゼロの方を採り修飾+wheel が確実にズーム。
         const d = e.deltaY !== 0 ? e.deltaY : e.deltaX;
         if (d === 0) return;
         const factor = d < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
@@ -365,8 +354,8 @@ export function ImageView({
         });
         return;
       }
-      // Pan mode: scroll the image. Subtract delta so deltaY > 0 (wheel down)
-      // moves the image upward — same direction sense as a scrollable view.
+      // パンモード: 画像をスクロール。delta を引くことで deltaY > 0 (下スクロール) が画像を上へ動かす
+      // (スクロールビューと同じ向き)。
       e.preventDefault();
       const renderedW = t.imageWidth * t.zoom;
       const renderedH = t.imageHeight * t.zoom;
@@ -388,9 +377,8 @@ export function ImageView({
     return () => container.removeEventListener("wheel", onWheel);
   }, [wheelMode]);
 
-  // Subscribe to zoom commands when this panel is active. Single-listener
-  // bus: when the active panel changes, the new ImageView replaces the
-  // previous one. Inactive panels don't react to keyboard commands.
+  // このパネルが active のとき zoom command を購読。単一リスナ bus なので、active 変更で新 ImageView が
+  // 前を置き換える。非 active パネルはキーボードコマンドに反応しない。
   useEffect(() => {
     if (!isActivePanel) return;
     const handle = (cmd: ZoomCommand) => {
@@ -412,8 +400,7 @@ export function ImageView({
         return;
       }
 
-      // For "actualSize" / "in" / "out" we zoom around the viewport center
-      // so the user's gaze stays put.
+      // "actualSize" / "in" / "out" は viewport 中心を軸にズーム (視線が動かないように)。
       let newZoom: number;
       if (cmd === "actualSize") {
         newZoom = 1.0;
@@ -442,17 +429,14 @@ export function ImageView({
     return () => zoomCommandBus.setListener(null);
   }, [isActivePanel]);
 
-  // Drag pan (left button only — leave right click for context menu).
-  // Unified on PointerEvent + setPointerCapture so the same dragger that
-  // started on the container keeps receiving moves even if the cursor leaves
-  // the viewport, matching the touch/pen story too.
+  // ドラッグパン (左ボタンのみ — 右クリックは context menu 用)。PointerEvent + setPointerCapture で、
+  // カーソルが viewport を出ても同じ dragger が move を受け続ける (touch/pen も同様)。
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.button !== 0) return;
       if (!tab.initialized) return;
-      // A drag is already in flight (e.g. multi-touch second finger). Ignore
-      // the new pointer so we don't overwrite dragRef and orphan the existing
-      // release(), which would leak the body cursor/userSelect override.
+      // 既に drag 中 (multi-touch の 2 本目等)。新 pointer を無視し dragRef を上書きして
+      // 既存 release() を orphan にしない (body cursor/userSelect の override が leak)。
       if (dragRef.current) return;
       e.preventDefault();
       const release = pushBodyStyle({
@@ -472,8 +456,7 @@ export function ImageView({
     [tab.panX, tab.panY, tab.initialized]
   );
 
-  // Drag-pan move/up listeners. Refs let us attach once on mount instead of
-  // re-binding on every pan update.
+  // ドラッグパンの move/up リスナ。ref により mount 時に 1 回 attach (pan 更新ごとに再 bind しない)。
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       const drag = dragRef.current;
@@ -508,7 +491,7 @@ export function ImageView({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
-      // Restore if the component unmounts mid-drag.
+      // drag 中に unmount した場合の復元。
       dragRef.current?.release();
       dragRef.current = null;
     };

@@ -21,6 +21,7 @@ const payload = (over: Partial<ChangedPayload> = {}): ChangedPayload => ({
   addedFiles: 0,
   removedFiles: 0,
   renamedFiles: 0,
+  contentChanged: false,
   sidecarChanged: false,
   ...over,
 });

@@ -19,6 +19,8 @@ import { CardContextMenu } from "./CardContextMenu";
 import { ClassificationHeader } from "./ClassificationHeader";
 import { ConfidenceSegment } from "./ConfidenceSegment";
 import { DirectoryGroup } from "./DirectoryGroup";
+import { DuplicatePairsModal } from "./DuplicatePairsModal";
+import { duplicateFileSet, pairsForFile } from "./duplicateBadge";
 import { SampleModal, type SampleModalOpenSource } from "./SampleModal";
 import { SearchBox } from "./SearchBox";
 import type { SaveContext } from "./useClassificationEdit";
@@ -35,28 +37,21 @@ import type { UseClassificationReturn } from "./useClassification";
 
 export type ClassificationViewProps = {
   state: UseClassificationReturn;
-  // "checkbox" (default) | "modifier" | "both" — see settings.SettingsData.
-  // Falls back to "checkbox" while settings load.
+  // "checkbox" (既定) | "modifier" | "both" (settings.SettingsData)。ロード中は "checkbox"。
   multiSelectMode?: string;
-  // #105: drives SampleEditPane save mode. Optional because settings load
-  // is async — `undefined` (still loading) is treated the same as `true`
-  // (auto), matching the persisted default so users don't see manual-mode
-  // chrome flash during the first paint.
+  // SampleEditPane の save モード (#105)。undefined (ロード中) は true (auto) 扱い —
+  // 初回描画で manual モードの chrome が一瞬出ないよう永続化 default に合わせる。
   editAutoSave?: boolean;
-  // Owned by the parent so the scroll position survives ClassificationView
-  // unmount when the top tab switches away from "list". Folder changes reset
-  // it to 0 (handled below). Not persisted to settings/state.json.
+  // トップタブが "list" から離れて ClassificationView が unmount してもスクロール位置が
+  // 残るよう親が持つ。folder 変更で 0 にリセット。state.json には永続化しない。
   scrollTopRef: MutableRefObject<number>;
-  // Multi-viewer (#11): the parent passes the current viewer set + active
-  // viewer id so the SampleModal viewer-picker and bulk-actions dropdown can
-  // render their options. The open callbacks now take a destination viewer id.
+  // SampleModal の viewer ピッカーと bulk ドロップダウン用に親が viewer set + active id を渡す (#11)。
   viewers: { id: string; name: string }[];
   activeViewerId: string;
   onOpenInViewer: (viewerId: string, filename: string) => void;
   onOpenManyInTabs: (viewerId: string, filenames: string[]) => void;
   onOpenManyAsSplit: (viewerId: string, filenames: string[]) => void;
-  // Called with the deleted file's absolute path after deleteOne() succeeds
-  // so the parent can close any viewer tabs still referencing it (#47).
+  // deleteOne() 成功後に削除ファイルの絶対 path で呼ぶ (親が参照中の viewer タブを閉じる, #47)。
   onAfterDelete: (absPath: string) => void;
 };
 
@@ -106,6 +101,8 @@ export function ClassificationView({
     resolveMergeSkip,
     resolveMergeCancel,
     deleteOne,
+    duplicatePairs,
+    dismissDuplicatePair,
   } = state;
 
   const allEntries = loadResult?.entries ?? [];
@@ -114,10 +111,8 @@ export function ClassificationView({
     return Array.from(tagSummary(allEntries).keys()).sort();
   }, [allEntries]);
 
-  // Total counts per group (before filtering) — needed so collapsed group
-  // headers can show e.g. "5 / 12" even when filter has hidden some entries.
-  // allGroupKeys derives the full ordered list of directory keys from the
-  // unfiltered entries, used by the "すべて折りたたむ" button.
+  // フィルタ前のグループ別合計数 — 折りたたみ見出しで "5 / 12" を出すため。allGroupKeys は
+  // 未フィルタから全ディレクトリキーの順序リストを作り "すべて折りたたむ" が使う。
   const { totalCountByGroup, allGroupKeys } = useMemo(() => {
     const counts = new Map<string, number>();
     const keys: string[] = [];
@@ -134,9 +129,8 @@ export function ClassificationView({
     [filteredEntries],
   );
 
-  // Flat order of currently visible cards for Shift+click range selection.
-  // Folds the groups in display order; collapsed groups are still included
-  // (range can span across collapsed sections, matching Finder behavior).
+  // Shift+click 範囲選択用の可視 card フラット順。折りたたみグループも含む (範囲が
+  // 折りたたみ節をまたげる Finder 挙動)。
   const displayedOrder = useMemo(
     () => filteredGroups.flatMap((g) => g.entries.map((e) => e.filename)),
     [filteredGroups],
@@ -147,13 +141,9 @@ export function ClassificationView({
   const modifierEnabled =
     multiSelectMode === "modifier" || multiSelectMode === "both";
 
-  // Scroll position survival (#40).
-  // The `.cls-groups` element can disappear and reappear during a single
-  // ClassificationView lifetime (filter clears all entries → comes back), and
-  // the ClassificationView itself unmounts when the top tab switches to
-  // "viewer". The parent-owned `scrollTopRef` outlives both. A ref callback
-  // on the scroll container handles the "remount" cases by restoring on
-  // attach; `onScroll` writes back. Folder changes reset to top.
+  // スクロール位置の保持 (#40)。.cls-groups は 1 lifetime 中に消えて再出現し得る (filter で
+  // 全 entries が消える→戻る) し、ClassificationView 自体もタブ切替で unmount する。親の
+  // scrollTopRef は両方より長命。ref callback が attach 時に復元し onScroll が書き戻す。
   const groupsElRef = useRef<HTMLDivElement | null>(null);
   const groupsRefCallback = useCallback(
     (el: HTMLDivElement | null) => {
@@ -169,15 +159,9 @@ export function ClassificationView({
     [scrollTopRef],
   );
 
-  // Arrow-key grid navigation (#115). When a card thumb (or a control inside
-  // it) is focused, ←/→ move through cards in reading (DOM) order — flowing
-  // across row and directory-group boundaries — and ↑/↓ move by visual row,
-  // picking the card whose horizontal center is nearest. pickGridNeighbor owns
-  // the (testable) decision; collapsed groups render no cards so they're
-  // skipped automatically. Enter/Space activation already lives on the Card
-  // thumb itself, so we only move focus here. The handler is bound on the
-  // scroll container and reacts to the keydown bubbling up from the focused
-  // element.
+  // 矢印キーのグリッド移動 (#115)。card thumb (内の control) に focus 中、←/→ は reading (DOM)
+  // 順、↑/↓ は視覚行で水平中心が最も近い card へ。判定は pickGridNeighbor。ここでは focus 移動
+  // だけ (Enter/Space の起動は Card thumb 側)。
   const onGroupsKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       const dir = arrowDirection(e.key);
@@ -186,12 +170,9 @@ export function ClassificationView({
       if (!container) return;
       const active = document.activeElement;
       if (!(active instanceof HTMLElement)) return;
-      // Resolve the card thumb from the focused element. Focus may sit on a
-      // control *inside* the thumb — the selection checkbox and the edit
-      // button both live within .cls-card-thumb — so match the nearest
-      // ancestor instead of requiring the thumb itself to be the active
-      // element. Returns null for focus outside any card (filter inputs live
-      // outside .cls-groups), leaving arrows to their default behavior.
+      // focus 要素から card thumb を解決。focus は thumb *内* の control (checkbox / 編集ボタン) に
+      // あり得るので、thumb 自身でなく最寄り祖先で match。card 外 (filter 入力等) では null を返し
+      // 矢印を既定挙動に任せる。
       const thumb = active.closest<HTMLElement>(".cls-card-thumb");
       if (!thumb) return;
       const cards = Array.from(
@@ -199,9 +180,8 @@ export function ClassificationView({
       );
       const current = cards.indexOf(thumb);
       if (current < 0) return;
-      // Pass a lazy getRect accessor: ←/→ never call it, and ↑/↓ measure only
-      // the cards near the cursor (pickGridNeighbor early-exits at the adjacent
-      // row), so key-repeat stays off the O(n) getBoundingClientRect sweep.
+      // lazy な getRect を渡す: ←/→ は呼ばず、↑/↓ もカーソル近傍の card だけ測るので
+      // (pickGridNeighbor が隣接行で early-exit)、key-repeat が O(n) の sweep に乗らない。
       const next = pickGridNeighbor(cards.length, current, dir, (i) =>
         cards[i].getBoundingClientRect(),
       );
@@ -212,9 +192,8 @@ export function ClassificationView({
     },
     [],
   );
-  // Reset on folder change. Initialized with the current folderPath so the
-  // first mount after a tab switch (folderPath unchanged) does NOT reset and
-  // the restore-on-attach path above wins.
+  // folder 変更時に reset。現 folderPath で初期化し、タブ切替後の初回 mount (folderPath 不変)
+  // では reset せず上の attach 復元を勝たせる。
   const lastFolderRef = useRef(folderPath);
   useLayoutEffect(() => {
     if (lastFolderRef.current === folderPath) return;
@@ -223,31 +202,22 @@ export function ClassificationView({
     if (groupsElRef.current) groupsElRef.current.scrollTop = 0;
   }, [folderPath, scrollTopRef]);
 
-  // Sample modal (#9, unified preview+edit since #93). Filename only —
-  // paired with folderPath in render to build the IPC path. Folder change
-  // dismisses an open preview because the captured filename no longer
-  // belongs to the current view. Not persisted.
+  // Sample modal (#9, #93 で preview+edit 統合)。filename のみ保持し render で folderPath と
+  // 組んで IPC path を作る。folder 変更で開いた preview を閉じる。
   //
-  // `previewOpenSource` records *how* the modal was opened so the unified
-  // modal can route initial focus: "preview" leaves focus on the preview
-  // side (Card thumb click / keyboard activation), "edit" autofocuses the
-  // tag input (Card pencil button / context-menu 編集). See spec §5.2.
+  // previewOpenSource は modal の開き方を記録し初期 focus を振り分ける: "preview" は preview 側、
+  // "edit" は tag 入力 (spec §5.2)。
   const [previewFilename, setPreviewFilename] = useState<string | null>(null);
   const [previewOpenSource, setPreviewOpenSource] =
     useState<SampleModalOpenSource>("preview");
-  // The unified modal also drives `useClassification.editing` so the
-  // existing replay-defer machinery in useClassificationReplay (watcher
-  // events arriving while editing.open=true get parked and replayed when
-  // the modal closes) keeps working. Both preview and edit triggers open
-  // the same modal and set editing.open=true — the underlying semantics
-  // ("an entry is being inspected, hold external merges briefly") apply
-  // equally to both starting points.
+  // 統合 modal は useClassification.editing も駆動し、useClassificationReplay の replay-defer
+  // (editing.open=true 中に届いた watcher event を park し modal close で replay) を生かす。
+  // preview / edit どちらも同じ modal を開き editing.open=true にする — 「entry を見ている間、
+  // 外部 merge を少し保留する」意味は両方に等しく効く。
   //
-  // saveEdit success path clears editing.open=false (legacy EditPopover
-  // semantics — popover closed on save). The unified modal stays open
-  // after save per spec §5.3, so handleSave re-flags editing.open=true
-  // below to keep defer effective while the user keeps viewing the
-  // entry.
+  // saveEdit 成功は editing.open=false にする (旧 EditPopover の名残)。統合 modal は save 後も
+  // 開いたまま (spec §5.3) なので、下の handleSave が editing.open=true を張り直し、閲覧中も
+  // defer を効かせる。
   const openPreview = useCallback(
     (filename: string) => {
       setPreviewFilename(filename);
@@ -273,33 +243,22 @@ export function ClassificationView({
     closeEdit();
   }, [folderPath, closeEdit]);
 
-  // saveEdit clears editing.open=false on success (legacy EditPopover
-  // semantics). For the unified modal we want editing.open to track the
-  // modal's open-state so subsequent watcher events keep getting deferred
-  // while the user is still viewing the entry. The one-frame
-  // true → false → true transition at save intentionally fires
-  // useClassificationReplay's performReplay() exactly once — saved =
-  // editing confirmed, so draining any deferred watcher results into the
-  // refreshed baseline is the correct moment. Conflict / error paths in
-  // saveEdit leave editing untouched, in which case re-calling openEdit
-  // with the same filename is a no-op same-value setState.
+  // saveEdit 成功時に editing.open=false になる (旧 EditPopover の名残)。統合 modal では
+  // editing.open が modal の開閉に追従してほしい (閲覧中も後続 watcher event を defer させるため)。
+  // save 時の 1 フレームの true → false → true 遷移は performReplay() をちょうど 1 回発火させる —
+  // 保存 = 編集確定なので、保留 watcher 結果を更新後 baseline に流し込む正しい瞬間。saveEdit の
+  // conflict / error 経路は editing を触らないので、同じ filename で openEdit を呼んでも同値 setState の no-op。
   //
-  // previewFilenameRef provides the *current* (not closure-captured)
-  // filename at await completion. Without the ref, "保存クリック → 即
-  // Esc/×/backdrop で閉じる" の操作で handleSave のクロージャが閉じる前の
-  // previewFilename を保持したまま openEdit を呼んでしまい、モーダルが
-  // 閉じた後に editing.open=true が復活して watcher replay の defer が
-  // 解除されない。render-time assignment は AGENTS.md H-8 の
-  // "state ref の同期タイミング" に従う。
+  // previewFilenameRef は await 完了時の *現在の* (closure キャプチャでない) filename を渡す。
+  // ref が無いと「保存クリック → 即 Esc/×/backdrop で閉じる」で handleSave の closure が閉じる前の
+  // previewFilename を保持したまま openEdit を呼び、modal を閉じた後に editing.open=true が復活して
+  // watcher replay の defer が解除されない。render 時代入は AGENTS.md H-8 に従う。
   const previewFilenameRef = useRef<string | null>(null);
   previewFilenameRef.current = previewFilename;
-  // handleSave forwards the SaveContext from SampleEditPane straight through to
-  // saveEdit (#110 C). The folder-switch race the old folderPathRef band-aid
-  // guarded (PR #109 round 6) now lives inside saveEdit: SampleEditPane captures
-  // the folder at the snapshot's origin (render-synced folderPropRef, which
-  // stays OLD once a folder switch unmounts the pane), so a stale save-on-unmount
-  // cleanup carries ctx.folder = OLD and saveEdit's pre-IPC gate skips it. No
-  // stale-closure comparison here anymore.
+  // SampleEditPane の SaveContext をそのまま saveEdit へ渡す (#110 C)。旧 folderPathRef が
+  // 守っていた folder 切替 race は今 saveEdit 内: SampleEditPane が snapshot 起点で folder を
+  // capture する (render 同期 folderPropRef、pane unmount で旧 folder のまま) ので、stale な
+  // save-on-unmount cleanup は ctx.folder=旧 を運び saveEdit の IPC 前 gate が skip する。
   const handleSave = useCallback(
     async (entry: classification.Entry, ctx: SaveContext) => {
       await saveEdit(entry, ctx);
@@ -311,23 +270,16 @@ export function ClassificationView({
     [saveEdit, openEdit],
   );
 
-  // Edit pane resolves the active entry from previewFilename against the
-  // current loadResult — the unified SampleModal (#93) owns the open
-  // filename directly instead of going through useClassification.editing,
-  // so the lookup happens here and the entry is passed in as a prop.
+  // 現在の loadResult から previewFilename の entry を解決する — 統合 SampleModal (#93) が
+  // 開いている filename を直接持つので、ここで引いて prop で渡す。
   const previewEntry = useMemo(() => {
     if (previewFilename === null) return null;
     return allEntries.find((e) => e.filename === previewFilename) ?? null;
   }, [previewFilename, allEntries]);
 
-  // Sample modal prev/next navigation (#94). Derived from `displayedOrder`
-  // (already collapsed-aware: Shift+click range selection also includes
-  // collapsed groups). pickSibling enforces the "no directory cross / no
-  // end-loop" contract; null means the respective direction is at an edge
-  // and the SampleModal renders the button as disabled. When displayedOrder
-  // updates mid-preview (filter / watcher) the memo recomputes — if the
-  // currently previewed file is filtered out both directions become null
-  // and the nav buttons disable, leaving the user with Esc / close.
+  // Sample modal の prev/next (#94)。displayedOrder から導出。pickSibling が「ディレクトリ
+  // 跨ぎ / 端ループ禁止」を課し、null はその方向が端でボタンが disabled。preview 中に
+  // displayedOrder が変わり (filter / watcher) 対象がフィルタ外になると両方向 null になる。
   const previewSibling = useMemo(() => {
     if (previewFilename === null) return { prev: null, next: null };
     return pickSibling(displayedOrder, previewFilename);
@@ -347,11 +299,9 @@ export function ClassificationView({
     [previewSibling.next],
   );
 
-  // Right-click context menu state (#47). One menu instance at a time. The
-  // Card emits position via onRequestContextMenu; CardContextMenu owns its
-  // outside-click / Esc lifecycle and calls onClose to clear this state.
-  // Folder change dismisses an open menu because the captured filename no
-  // longer belongs to the current view.
+  // 右クリックメニュー state (#47)。同時に 1 つ。Card が位置を onRequestContextMenu で出し、
+  // CardContextMenu が outside-click / Esc の lifecycle を持ち onClose で state をクリア。
+  // folder 変更で開いたメニューを閉じる。
   const [cardCtxMenu, setCardCtxMenu] = useState<{
     filename: string;
     x: number;
@@ -368,16 +318,48 @@ export function ClassificationView({
     [],
   );
 
-  // Bulk-actions destination viewer (#11). Per spec §5.6.2 the default is
-  // always "the most recently active viewer" — so we always sync to
-  // activeViewerId whenever the parent reports a change, overriding any
-  // explicit user pick. This keeps "open" intuitive after the user switches
-  // viewers in the viewer tab and returns. Defensive: fall back to active if
-  // the currently picked viewer was closed. Declared *before* the
-  // context-menu callbacks because their dep arrays read this value (and
-  // dep arrays are evaluated at useCallback() call time — so a later const
-  // declaration would be in the temporal dead zone; same pattern as #27's
-  // selectAnchorRef relocation, per AGENTS.md A-3).
+  // ダブり候補 (#136)。バッジ対象集合と確認モーダルの起点 filename。folder 変更で閉じるのは
+  // 他のモーダル / メニューと同じ。dismiss で pairs が減り起点のペアが尽きたら自動で閉じる
+  // (spec §5.3)。
+  const duplicateSet = useMemo(
+    () => duplicateFileSet(duplicatePairs ?? []),
+    [duplicatePairs],
+  );
+  const [dupModalFilename, setDupModalFilename] = useState<string | null>(
+    null,
+  );
+  useLayoutEffect(() => {
+    setDupModalFilename(null);
+  }, [folderPath]);
+  const dupModalPairs = useMemo(
+    () =>
+      dupModalFilename === null
+        ? []
+        : pairsForFile(duplicatePairs ?? [], dupModalFilename),
+    [duplicatePairs, dupModalFilename],
+  );
+  useEffect(() => {
+    if (dupModalFilename !== null && dupModalPairs.length === 0) {
+      setDupModalFilename(null);
+    }
+  }, [dupModalFilename, dupModalPairs]);
+
+  const onShowDuplicates = useCallback((filename: string) => {
+    setDupModalFilename(filename);
+  }, []);
+
+  // ctx メニュー経由 — 先にメニューを閉じてから開く (他の項目と同じ流儀)。
+  const onContextMenuShowDuplicates = useCallback(() => {
+    if (!cardCtxMenu) return;
+    const filename = cardCtxMenu.filename;
+    setCardCtxMenu(null);
+    setDupModalFilename(filename);
+  }, [cardCtxMenu]);
+
+  // bulk アクションの宛先 viewer (#11)。spec §5.6.2 で既定は常に「直近アクティブな viewer」なので、
+  // 親の変更報告のたび activeViewerId に同期し明示選択も上書きする。閉じられた viewer が選択中なら
+  // active に fallback。context-menu callback の dep 配列がこの値を読むので *前* に宣言する
+  // (dep 配列は useCallback() 呼び出し時に評価され、後の const 宣言は TDZ になる、AGENTS.md A-3)。
   const [bulkDstViewerId, setBulkDstViewerId] = useState(activeViewerId);
   useEffect(() => {
     setBulkDstViewerId(activeViewerId);
@@ -393,9 +375,8 @@ export function ClassificationView({
   const onContextMenuDelete = useCallback(() => {
     if (!cardCtxMenu) return;
     const filename = cardCtxMenu.filename;
-    // Close the menu BEFORE awaiting confirm so the ConfirmDialog modal isn't
-    // visually behind the menu, and so a stray outside-click closing the menu
-    // mid-confirm can't race with the delete flow.
+    // confirm を await する前にメニューを閉じる (ConfirmDialog がメニューの裏に隠れず、confirm 中の
+    // outside-click が delete flow と race しないように)。
     setCardCtxMenu(null);
     void (async () => {
       const ok = await deleteOne(filename);
@@ -403,9 +384,8 @@ export function ClassificationView({
     })();
   }, [cardCtxMenu, deleteOne, folderPath, onAfterDelete]);
 
-  // Single-mode "コピー" — copy the right-clicked card's full-resolution image
-  // to the clipboard (#127). Build the absolute path the same way the delete
-  // flow does, close the menu, then fire from this user gesture.
+  // single モードの "コピー" (#127)。絶対 path を delete flow と同様に作り、メニューを閉じてから
+  // このユーザー操作で発火する。
   const onContextMenuCopy = useCallback(() => {
     if (!cardCtxMenu) return;
     const absPath = `${folderPath}/${cardCtxMenu.filename}`;
@@ -421,9 +401,8 @@ export function ClassificationView({
       });
   }, [cardCtxMenu, folderPath, toast]);
 
-  // Single-mode "ビューア「{name}」で開く" — close menu first, then open.
-  // Closing before the async open avoids a stale menu sitting on top of the
-  // viewer tab after the top tab switches.
+  // single モードの「ビューアで開く」— 先にメニューを閉じてから開く (タブ切替後に stale な
+  // メニューが viewer タブ上に残らないように)。
   const onContextMenuOpenInViewer = useCallback(
     (viewerId: string) => {
       if (!cardCtxMenu) return;
@@ -434,12 +413,9 @@ export function ClassificationView({
     [cardCtxMenu, onOpenInViewer],
   );
 
-  // Single-mode "選択モードに切り替え" — add the right-clicked card to the
-  // selection set so the bulk-toolbar appears. We use toggleSelected (which
-  // adds when absent, removes when present). The "already-selected" branch
-  // would actually deselect the card, but spec §11-D guarantees the single
-  // menu is only shown when the card is NOT in selection, so that branch is
-  // unreachable from here.
+  // single モードの「選択モードに切り替え」— 右クリック card を選択に加え bulk-toolbar を出す。
+  // toggleSelected を使う (無ければ追加/あれば削除)。spec §11-D で single メニューは card が未選択の
+  // ときだけ出るので、削除側の分岐はここから到達しない。
   const onContextMenuEnterSelectionMode = useCallback(() => {
     if (!cardCtxMenu) return;
     const filename = cardCtxMenu.filename;
@@ -447,11 +423,8 @@ export function ClassificationView({
     toggleSelected(filename);
   }, [cardCtxMenu, toggleSelected]);
 
-  // Bulk-mode actions — close menu first, then dispatch. Match the bulk-
-  // toolbar buttons: we call clearSelected synchronously right after firing
-  // onOpenMany* (not "on completion" — the open IPC runs out-of-band). The
-  // toolbar makes the same deliberate UX choice: once the user has invoked
-  // the action they typically want a clean slate.
+  // bulk アクション — 先にメニューを閉じて dispatch。bulk-toolbar と同じく onOpenMany* 発火直後に
+  // clearSelected を同期で呼ぶ (完了時でなく — open IPC は out-of-band)。操作後は clean slate が自然。
   const onContextMenuOpenManyInTabs = useCallback(() => {
     if (!cardCtxMenu) return;
     setCardCtxMenu(null);
@@ -637,6 +610,8 @@ export function ClassificationView({
                 extendSelectionTo(filename, displayedOrder)
               }
               onRequestCardContextMenu={onRequestCardContextMenu}
+              duplicateSet={duplicateSet}
+              onShowDuplicates={onShowDuplicates}
             />
           ))}
         </div>
@@ -676,12 +651,20 @@ export function ClassificationView({
         onSave={handleSave}
         autoSave={editAutoSave}
       />
+      <DuplicatePairsModal
+        open={dupModalFilename !== null}
+        folderPath={folderPath}
+        filename={dupModalFilename}
+        pairs={dupModalPairs}
+        onDismissPair={(fileA, fileB) => {
+          void dismissDuplicatePair(fileA, fileB);
+        }}
+        onClose={() => setDupModalFilename(null)}
+      />
       {cardCtxMenu ? (
         <CardContextMenu
-          // Re-mount on filename / x / y change so the menu's useState
-          // position seed is re-evaluated (Copilot review #58 thread #1).
-          // Without a fresh mount the menu would keep its first cursor
-          // position even if the parent opens it again at new coords.
+          // filename / x / y 変更で re-mount し、メニューの useState 位置 seed を再評価する。
+          // fresh mount しないと新座標で開き直しても最初のカーソル位置を保ってしまう。
           key={`${cardCtxMenu.filename}|${cardCtxMenu.x},${cardCtxMenu.y}`}
           x={cardCtxMenu.x}
           y={cardCtxMenu.y}
@@ -695,6 +678,11 @@ export function ClassificationView({
           bulkDstViewerId={bulkDstViewerId}
           onOpenInViewer={onContextMenuOpenInViewer}
           onCopy={onContextMenuCopy}
+          onShowDuplicates={
+            duplicateSet.has(cardCtxMenu.filename)
+              ? onContextMenuShowDuplicates
+              : null
+          }
           onEnterSelectionMode={onContextMenuEnterSelectionMode}
           onDelete={onContextMenuDelete}
           onOpenManyInTabs={onContextMenuOpenManyInTabs}

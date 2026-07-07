@@ -1,6 +1,12 @@
 import { t } from "../../../shared/messages";
 import type { Settings } from "../useSettings";
-import { Field, Segment } from "../SettingsFields";
+import { Field, NumberInput, Segment } from "../SettingsFields";
+import {
+  DUPLICATE_DETECT_AUTO,
+  DUPLICATE_DETECT_OFF,
+  MAX_DUPLICATE_THRESHOLD,
+  MIN_DUPLICATE_THRESHOLD,
+} from "../duplicateDetect";
 import { WATCH_MODE_AUTO, WATCH_MODE_OFF } from "../watchMode";
 
 const MULTI_SELECT_MODES: Array<{
@@ -42,10 +48,26 @@ const WATCH_MODES: Array<{
   },
 ];
 
-// #105: edit-pane save mode. The Segment uses number-coded values because the
-// underlying setting is a bool (`editAutoSave`); 1/0 just route through the
-// generic Segment<T extends string | number> wrapper. boolean directly would
-// require widening Segment's type parameter, which we don't want for one site.
+// ダブり検出 (#136, spec-duplicate-detection.md §5.4)。アルゴリズム選択は Phase 2。
+const DUPLICATE_DETECT_MODES: Array<{
+  value: string;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: DUPLICATE_DETECT_AUTO,
+    label: t("settings.list.dupDetect.auto.label"),
+    hint: t("settings.list.dupDetect.auto.hint"),
+  },
+  {
+    value: DUPLICATE_DETECT_OFF,
+    label: t("settings.list.dupDetect.off.label"),
+    hint: t("settings.list.dupDetect.off.hint"),
+  },
+];
+
+// edit-pane save モード (#105)。設定は bool (editAutoSave) だが、汎用 Segment<string|number> に
+// 通すため 1/0 で符号化する (boolean 直だと 1 箇所のために Segment の型 param を広げる必要がある)。
 const EDIT_AUTO_SAVE_MODES: Array<{
   value: number;
   label: string;
@@ -92,6 +114,29 @@ export function ListSection({
           options={WATCH_MODES}
           value={data.watchMode}
           onChange={(v) => onChange({ watchMode: v })}
+        />
+      </Field>
+      <Field
+        label={t("settings.list.dupDetect.label")}
+        hint={t("settings.list.dupDetect.fieldHint")}
+      >
+        <Segment
+          name="duplicateDetectMode"
+          options={DUPLICATE_DETECT_MODES}
+          value={data.duplicateDetectMode}
+          onChange={(v) => onChange({ duplicateDetectMode: v })}
+        />
+      </Field>
+      <Field
+        label={t("settings.list.dupThreshold.label")}
+        hint={t("settings.list.dupThreshold.fieldHint")}
+      >
+        <NumberInput
+          value={data.duplicateThreshold}
+          min={MIN_DUPLICATE_THRESHOLD}
+          max={MAX_DUPLICATE_THRESHOLD}
+          step={1}
+          onChange={(n) => onChange({ duplicateThreshold: n })}
         />
       </Field>
       <Field

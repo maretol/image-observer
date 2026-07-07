@@ -8,13 +8,8 @@ import (
 	"image-observer/internal/logging"
 )
 
-// Trash deletes `absPath` outright via os.Remove on non-Windows builds.
-//
-// The production target is Windows only; this fallback exists so the
-// app builds and runs in WSL/Linux for development (CLAUDE.md notes
-// `wails dev` / `wails build` on Linux is supported as a dev target).
-// On Linux this is a *hard* delete — files do not go to a system trash —
-// so a warn log is emitted to make accidental dev-mode deletions traceable.
+// Trash は non-Windows build では os.Remove で直接削除する (WSL/Linux 開発用 fallback, CLAUDE.md)。
+// system trash を経ない hard delete なので、誤削除を追跡できるよう warn ログを出す。
 func Trash(absPath string) error {
 	logging.Warn("imgfile", "trash: dev fallback to os.Remove (non-windows build)",
 		"path", absPath)

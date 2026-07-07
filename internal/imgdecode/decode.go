@@ -1,4 +1,7 @@
-package thumb
+// Package imgdecode は画像ファイルを image.Image にデコードする共有層。thumb (サムネ生成) と
+// imghash (ダブり判定のハッシュ計算, #136) が同じデコード経路を使う (spec-duplicate-detection.md §3)。
+// AVIF は Go に in-tree デコーダが無く対象外 (spec-avif-support.md、WebView に委譲)。
+package imgdecode
 
 import (
 	"fmt"
@@ -12,9 +15,8 @@ import (
 	"golang.org/x/image/webp"
 )
 
-// decodeImage opens path and returns the first frame as image.Image.
-// Animation formats (GIF, WebP) collapse to the first frame per spec §3.4.
-func decodeImage(path, ext string) (image.Image, error) {
+// Decode は path を開き最初のフレームを image.Image で返す。アニメ形式 (GIF, WebP) は最初のフレームに潰す (spec-thumbnail.md §3.4)。
+func Decode(path, ext string) (image.Image, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

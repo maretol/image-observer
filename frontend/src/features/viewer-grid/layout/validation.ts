@@ -1,9 +1,9 @@
-// Structural validation and ratio clamping for the BSP layout tree.
+// BSP layout tree の構造検証と ratio clamp。
 
 import type { LayoutNode } from "./types";
 import { MIN_RATIO } from "./types";
 
-// Returns null when valid; otherwise an explanation string.
+// 有効なら null、無効なら説明文字列を返す。
 export function validateLayout(root: LayoutNode): string | null {
   const seen = new Set<string>();
   function walk(node: LayoutNode): string | null {

@@ -1,19 +1,12 @@
-// Clipboard image copy (#127). The Wails runtime only exposes text clipboard
-// helpers, so image copy is done entirely on the frontend via the browser
-// Clipboard API. The WebView (production = WebView2 / dev = WebKitGTK) provides
-// the actual clipboard + image decoders, which keeps decoding off the Go side —
-// consistent with the avif "delegate decode to the WebView" decision (#118).
+// Wails runtime はテキストクリップボードしか公開しないため、画像コピーはフロント側
+// のブラウザ Clipboard API で完結させる (#127)。デコードは WebView (本番 WebView2 /
+// dev WebKitGTK) に任せて Go 側から外す — avif の「WebView へ委譲」(#118) と一貫。
 
 import { ReadImage } from "../../../wailsjs/go/main/App";
 import { toBytes } from "./base64";
 
-// Convert an image Blob to an `image/png` Blob for the clipboard.
-// - PNG passes through untouched (fast-path).
-// - Every other format (jpg/gif/webp/avif) is decoded by the WebView via
-//   createImageBitmap — the same engine that renders them in <img> (#118) — and
-//   re-encoded to PNG through a canvas.
-// `image/png` is the only type Chromium's ClipboardItem reliably hands to paste
-// targets, so we always normalize to it.
+// png へ正規化するのは、Chromium の ClipboardItem が paste 先へ確実に渡せるのが
+// image/png だけのため (PNG は素通し、他は WebView でデコード→canvas 再エンコード)。
 export async function toPngBlob(src: Blob): Promise<Blob> {
   if (src.type === "image/png") return src;
   const bitmap = await createImageBitmap(src);
@@ -36,16 +29,13 @@ export async function toPngBlob(src: Blob): Promise<Blob> {
   }
 }
 
-// Copy the full-resolution image at `absPath` to the OS clipboard as PNG.
-// MUST be called from a user gesture (e.g. a context-menu click): the Clipboard
-// API requires transient activation. We hand ClipboardItem the Blob *promise*
-// rather than an already-resolved Blob so the ReadImage IPC + decode/re-encode
-// don't consume the activation window before write() is reached (Chromium
-// supports deferred ClipboardItem blobs).
+// ユーザー操作 (コンテキストメニュー等) から呼ぶ必要がある — Clipboard API は
+// transient activation を要求するため。IPC + デコード / 再エンコードが write() 前に
+// activation window を使い切らないよう、ClipboardItem には解決済み Blob ではなく
+// Blob の *promise* を渡す (Chromium は遅延 blob をサポート)。
 export async function copyImageToClipboard(absPath: string): Promise<void> {
-  // Feature-detect up front so environments without the async image clipboard
-  // (e.g. dev = WebKitGTK, §D9) fail with a clear message the caller can log,
-  // instead of a raw TypeError / ReferenceError deep in the promise chain.
+  // 非同期画像クリップボードが無い環境 (dev = WebKitGTK, §D9) で、promise chain の
+  // 奥の raw TypeError ではなく呼び出し側がログできる明確なメッセージで早期に失敗させる。
   if (
     typeof navigator === "undefined" ||
     !navigator.clipboard ||

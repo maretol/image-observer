@@ -8,19 +8,18 @@ import (
 	"unsafe"
 )
 
-// SHFileOperationW constants. See MSDN:
+// SHFileOperationW 定数 (MSDN):
 // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shfileoperationw
 const (
 	foDelete          = 0x0003
-	fofAllowUndo      = 0x0040 // send to Recycle Bin instead of deleting
-	fofNoConfirmation = 0x0010 // suppress OS confirm dialog
-	fofNoErrorUI      = 0x0400 // suppress OS error dialog
-	fofSilent         = 0x0004 // suppress progress UI
-	fofNoConfirmMkdir = 0x0200 // not strictly needed for delete; harmless
+	fofAllowUndo      = 0x0040 // 削除でなく Recycle Bin へ送る
+	fofNoConfirmation = 0x0010 // OS 確認ダイアログを抑制
+	fofNoErrorUI      = 0x0400 // OS エラーダイアログを抑制
+	fofSilent         = 0x0004 // 進捗 UI を抑制
+	fofNoConfirmMkdir = 0x0200 // delete には不要だが害はない
 )
 
-// shFileOpStructW mirrors the SHFILEOPSTRUCTW C struct. Field order and
-// padding must match exactly for the syscall to read it correctly.
+// shFileOpStructW は C の SHFILEOPSTRUCTW に対応。フィールド順と padding を厳密に一致させる必要がある。
 type shFileOpStructW struct {
 	hwnd                  uintptr
 	wFunc                 uint32
@@ -37,16 +36,9 @@ var (
 	procSHFileOperationW = modShell32.NewProc("SHFileOperationW")
 )
 
-// Trash sends `absPath` to the Windows Recycle Bin via SHFileOperationW.
-// Returns nil on success, or an error describing the SHFileOperationW return
-// code on failure (typical reasons: file not found, permission denied,
-// destination drive does not support the Recycle Bin — e.g. some network
-// shares or removable media).
+// Trash は absPath を SHFileOperationW で Windows ゴミ箱へ送る。
 func Trash(absPath string) error {
-	// SHFileOperationW's pFrom is a *double*-null-terminated string list.
-	// For one path we still need the trailing extra null, so we append a
-	// zero to the UTF16 slice produced by UTF16FromString (which already
-	// terminates with one null).
+	// pFrom は double-null 終端リスト。UTF16FromString の末尾 null に加えもう 1 つ要る。
 	utf16, err := syscall.UTF16FromString(absPath)
 	if err != nil {
 		return fmt.Errorf("trash: utf16 conversion: %w", err)

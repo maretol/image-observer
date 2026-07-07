@@ -2,26 +2,15 @@ import { t } from "../../shared/messages";
 import { getKnownTagColors } from "../classification/colors";
 import { DEFAULT_PALETTE } from "../classification/defaultPalette";
 
-// TagColorsView is read-only in v1. It always displays the effective merged
-// palette (DEFAULT_PALETTE + settings.tagColors overrides) via
-// getKnownTagColors(), so "what's shown here" matches "what tagColor()
-// actually renders" — including for tags the user has not overridden. Each
-// row carries an "上書き" pill when its color is actually different from the
-// seed default (or it's a tag name that isn't in DEFAULT_PALETTE at all).
+// v1 は read-only。getKnownTagColors() で effective な merged palette (DEFAULT_PALETTE +
+// settings.tagColors override) を表示し、ここの表示が tagColor() の実描画と一致する。
 //
-// Note on "is override": we compare values against DEFAULT_PALETTE rather
-// than checking `name in colors`, because Go-side DefaultSettings() /
-// applyFieldDefaults populate `colors` with the full seed palette by default
-// — so a key-presence check would label every row as an override after a
-// fresh load or `既定値に戻す`. Value comparison is robust to that and also
-// correctly leaves "user set X to the same color as default" as non-override.
+// override 判定は `name in colors` でなく DEFAULT_PALETTE との値比較で行う。Go の
+// DefaultSettings() / applyFieldDefaults が colors に seed palette 全体を埋めるので、key 有無
+// チェックだと fresh load や「既定値に戻す」後に全 row が override 扱いになるため。値比較なら
+// 「default と同じ色に設定」も正しく非 override になる。
 //
-// `colors` is the raw settings payload, used here only to decide which rows
-// to badge as overrides and to drive the summary hint.
-//
-// Editing today happens by editing settings.json directly and restarting the
-// app (useSettings calls GetSettings only on mount). Full in-app editing is
-// a follow-up issue.
+// 編集は settings.json を直接書き換えて再起動 (useSettings は mount 時のみ GetSettings)。
 export function TagColorsView({ colors }: { colors: Record<string, string> }) {
   const effective = getKnownTagColors();
   const entries = Object.entries(effective).sort(([a], [b]) =>
@@ -74,12 +63,9 @@ export function TagColorsView({ colors }: { colors: Record<string, string> }) {
   );
 }
 
-// isOverrideValue: true when settings.tagColors has `name` with a value
-// different from the seed default. Names not in DEFAULT_PALETTE are always
-// considered overrides (the user added a brand-new tag). Names whose stored
-// value happens to equal the seed are NOT marked as overrides — that lets
-// the pill mean "this row diverges from the bundled defaults", which is the
-// signal the user actually wants when scanning the table.
+// settings.tagColors の name の値が seed default と違えば true。DEFAULT_PALETTE に無い name は
+// 常に override (ユーザーが新規追加)。seed と同値なら override 扱いしない (pill が「同梱既定と
+// 相違」を意味するように)。
 function isOverrideValue(
   name: string,
   effectiveHex: string,

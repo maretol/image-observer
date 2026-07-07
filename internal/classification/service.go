@@ -5,9 +5,8 @@ import (
 	"time"
 )
 
-// Service orchestrates loading, merging, and saving classification metadata.
-// Repository handles I/O; Scanner enumerates files. Both are interfaces so
-// the service can be tested with in-memory fakes.
+// Service は分類メタデータの load / merge / save をまとめる。Repository (I/O) と Scanner (列挙) は
+// interface で in-memory fake でテストできる。
 type Service struct {
 	repo    SidecarRepository
 	scanner FileScanner
@@ -17,8 +16,7 @@ func NewService(repo SidecarRepository, scanner FileScanner) *Service {
 	return &Service{repo: repo, scanner: scanner}
 }
 
-// Load reads the sidecar (if any) and merges it with the actual image files
-// in folderPath. See spec-classification.md §3.6 for the merge rules.
+// Load は sidecar を読み folderPath の実画像ファイルとマージする (merge ルール: spec-classification.md §3.6)。
 func (s *Service) Load(folderPath string) (*LoadResult, error) {
 	out, err := s.repo.Load(folderPath)
 	if err != nil {
@@ -39,7 +37,7 @@ func (s *Service) Load(folderPath string) (*LoadResult, error) {
 		sidecarEntries = out.Data.Entries
 	}
 
-	// Step 1: keep sidecar entries in order, splitting orphans aside.
+	// Step 1: sidecar entry を順序保持し、orphan を分離。
 	entries := make([]Entry, 0, len(sidecarEntries)+len(files))
 	orphans := make([]Entry, 0)
 	seen := make(map[string]struct{}, len(sidecarEntries))
@@ -52,7 +50,7 @@ func (s *Service) Load(folderPath string) (*LoadResult, error) {
 		}
 	}
 
-	// Step 2: append unseen files (in scanner order, which is alphabetical via os.ReadDir).
+	// Step 2: 未見ファイルを追加 (scanner 順 = os.ReadDir の alphabetical)。
 	for _, f := range files {
 		if _, ok := seen[f]; ok {
 			continue
@@ -70,18 +68,16 @@ func (s *Service) Load(folderPath string) (*LoadResult, error) {
 	}, nil
 }
 
-// Save persists the given entries (plus the existing orphans) to JSON.
-// expectedMtime is the mtime the caller observed at load time; pass 0 to
-// force overwrite (e.g., the user chose "force overwrite" after a conflict).
+// Save は entries (+ 既存 orphans) を JSON へ永続化する。expectedMtime は caller が load 時に見た
+// mtime。強制上書きは 0 を渡す (conflict 後にユーザーが「強制上書き」を選んだ等)。
 func (s *Service) Save(folderPath string, entries []Entry, expectedMtime int64) (int64, error) {
 	if err := validateNoDuplicates(entries); err != nil {
 		return 0, err
 	}
-	// Read current sidecar to pick up orphans we should preserve.
+	// 保持すべき orphan を拾うため現在の sidecar を読む。
 	orphans, err := s.currentOrphans(folderPath, entries)
 	if err != nil {
-		// Non-fatal: a missing/corrupt sidecar just means no orphans to keep.
-		// We log via the returned error chain by ignoring softly.
+		// 非致命: sidecar 欠落/破損は保持 orphan なしを意味するだけ。
 		orphans = nil
 	}
 	all := append(append(make([]Entry, 0, len(entries)+len(orphans)), entries...), orphans...)
@@ -94,8 +90,7 @@ func (s *Service) Save(folderPath string, entries []Entry, expectedMtime int64) 
 	return s.repo.SaveJSON(folderPath, c, expectedMtime)
 }
 
-// UpdateEntry replaces (or appends) a single entry by Filename. Order of
-// other entries is preserved. Conflict detection is delegated to SaveJSON.
+// UpdateEntry は Filename で 1 entry を置換 (無ければ追加)。他 entry の順序は保持。conflict 検出は SaveJSON に委譲。
 func (s *Service) UpdateEntry(folderPath string, entry Entry, expectedMtime int64) (int64, error) {
 	out, err := s.repo.Load(folderPath)
 	if err != nil {
@@ -128,8 +123,7 @@ func (s *Service) UpdateEntry(folderPath string, entry Entry, expectedMtime int6
 	return s.repo.SaveJSON(folderPath, c, expectedMtime)
 }
 
-// CreateEmpty writes a brand-new sidecar populated from the actual image
-// files in folderPath. Returns ErrAlreadyExists if a JSON file is already there.
+// CreateEmpty は folderPath の実画像から新規 sidecar を書く。JSON が既にあれば ErrAlreadyExists。
 func (s *Service) CreateEmpty(folderPath string) (int64, error) {
 	files, err := s.scanner.ListImageFiles(folderPath)
 	if err != nil {
@@ -147,9 +141,8 @@ func (s *Service) CreateEmpty(folderPath string) (int64, error) {
 	return s.repo.CreateJSON(folderPath, c)
 }
 
-// currentOrphans figures out which existing-sidecar entries are NOT in the
-// caller-supplied entries list AND are not present on disk — i.e., orphans
-// the caller's UI did not see and should not silently delete.
+// currentOrphans は既存 sidecar entry のうち、caller の entries に無く disk にも無いもの
+// (= caller の UI が見ておらず silent に消すべきでない orphan) を割り出す。
 func (s *Service) currentOrphans(folderPath string, supplied []Entry) ([]Entry, error) {
 	out, err := s.repo.Load(folderPath)
 	if err != nil {

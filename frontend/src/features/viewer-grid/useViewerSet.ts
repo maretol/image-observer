@@ -1,18 +1,14 @@
-// useViewerSet — multi-viewer state hook (#11). Owns the entire `ViewerSet`
-// (N independent BSP layouts + active viewer pointer) and exposes:
+// useViewerSet — マルチビューア state hook (#11)。ViewerSet 全体 (N 個の独立 BSP layout +
+// active viewer pointer) を持ち、以下を公開する:
+//   - viewer 単位: add / close / rename / setActive
+//   - panel 単位 (open / split / move 等): **active viewer** の layout を対象
+//   - openInViewer / openManyInViewer / openManyAsSplitInViewer: SampleModal の viewer
+//     ピッカー + bulk UI が使う薄いラッパ
+//   - moveTabToViewer: TabContextMenu の viewer 間移動 (§5.7)
 //
-//   - viewer-level mutations: add / close / rename / setActive
-//   - panel-level mutations (open / split / move / etc.) that target the
-//     **active viewer's** layout. These are the same operations the old
-//     useViewerGrid exposed; we now route them through the active viewer.
-//   - "openInViewer" / "openManyInViewer" / "openManyAsSplitInViewer" thin
-//     wrappers used by the SampleModal viewer-picker and bulk-actions UI.
-//   - "moveTabToViewer" for the TabContextMenu cross-viewer move (§5.7).
-//
-// All state goes through one useState (the entire ViewerSet). Pure functions
-// live in viewers.ts and layout/; this file only does the React glue +
-// pre-flight + toasts + logging. Stateless helpers shared between the
-// callback families live in useViewerSet.helpers.ts.
+// state は 1 つの useState (ViewerSet 全体) に集約。純関数は viewers.ts / layout/、この
+// ファイルは React 配線 + pre-flight + toast + logging だけ。共有 stateless helper は
+// useViewerSet.helpers.ts。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GetImageInfo } from "../../../wailsjs/go/main/App";
@@ -62,20 +58,16 @@ import {
 
 export type ConfirmFn = (message: string) => Promise<boolean>;
 
-// DEFAULT_MAX_PIXELS is the historical hardcoded ceiling (200 MP). Callers
-// (App.tsx) compute the live limit from settings.maxImagePixelsMP and pass it
-// via `opts.maxImagePixels`; this constant only acts as a fallback while
-// settings finish loading.
+// 歴史的な hardcode 上限 (200 MP)。App.tsx が settings.maxImagePixelsMP から live 値を計算し
+// opts.maxImagePixels で渡す。この定数は settings ロード中の fallback のみ。
 export const DEFAULT_MAX_PIXELS = 200_000_000;
 
 export { MAX_PANELS, MAX_VIEWERS };
 export type { Edge, Layout, SplitDirection };
 
-// Note: this hook intentionally does NOT take a `confirm` callback. Viewer-
-// close confirmation lives in App.tsx (see `closeViewerWithConfirm`) because
-// the dialog message needs context (target name + tab count) that the hook
-// doesn't own. ConfirmFn is still exported as a type because useClassification
-// imports it from here for its own confirm-driven flows.
+// この hook はあえて confirm callback を受けない。viewer close の確認は App.tsx
+// (closeViewerWithConfirm) にある — dialog 文言に hook が持たない context (対象名 + tab 数) が
+// 要るため。ConfirmFn 型を export し続けるのは useClassification がここから import して使うから。
 export function useViewerSet(opts?: {
   initialSet?: ViewerSet;
   maxImagePixels?: number;
@@ -89,8 +81,7 @@ export function useViewerSet(opts?: {
     maxPixelsRef.current = opts?.maxImagePixels ?? DEFAULT_MAX_PIXELS;
   }, [opts?.maxImagePixels]);
 
-  // Keep the latest set in a ref so async callbacks (preflight + bulk loops)
-  // can read live state without re-creating themselves on every change.
+  // 最新 set を ref に保ち、async callback (preflight + bulk loop) が毎変更で作り直さず live state を読めるように。
   const setRef = useRef(set);
   useEffect(() => {
     setRef.current = set;
@@ -116,9 +107,7 @@ export function useViewerSet(opts?: {
     });
   }, [toast]);
 
-  // closeViewerCb assumes the caller already obtained user confirmation when
-  // appropriate (per §5.4 the confirm dialog lives in App.tsx). It still
-  // refuses to close the last viewer (no UI for that path either).
+  // 呼び出し側が必要なら確認済みと仮定 (§5.4、confirm dialog は App.tsx)。最後の 1 個は閉じない。
   const closeViewerCb = useCallback((id: string) => {
     setSet((cur) => {
       if (cur.viewers.length <= 1) {
@@ -143,14 +132,11 @@ export function useViewerSet(opts?: {
 
   const renameViewerCb = useCallback(
     (id: string, name: string) => {
-      // Distinguish the two reasons renameViewer can return the same set:
-      //   (a) sanitize → null (empty / whitespace-only) — a real rejection
-      //       that deserves a toast + warn log.
-      //   (b) sanitized name equals the existing name — silent no-op (the
-      //       user just blurred / Enter'd without changing anything).
-      // Pre-sanitizing here lets us branch cleanly; without it both paths
-      // collapsed onto the same `next === cur` check and fired a misleading
-      // "名前を空にできません" toast on every unchanged commit.
+      // renameViewer が同じ set を返す 2 理由を区別する:
+      //   (a) sanitize → null (空/空白) — toast + warn すべき本当の拒否。
+      //   (b) sanitized 名が既存名と同じ — silent no-op (変更なしの blur / Enter)。
+      // ここで先に sanitize することで綺麗に分岐できる。無いと両方が next === cur に潰れ、
+      // 変更なし commit のたびに誤解を招く "名前を空にできません" toast が出る。
       const sanitized = sanitizeName(name);
       if (sanitized === null) {
         toast("名前を空にできません", "warn");
@@ -165,7 +151,7 @@ export function useViewerSet(opts?: {
         if (!target) return cur;
         if (target.name === sanitized) return cur; // (b) — silent no-op
         const next = renameViewer(cur, id, sanitized);
-        if (next === cur) return cur; // defensive; sanitize already passed
+        if (next === cur) return cur; // 防御的; sanitize は既に通過
         logger.info("viewer-set", "rename", {
           id,
           oldName: target.name,
@@ -190,10 +176,8 @@ export function useViewerSet(opts?: {
     });
   }, []);
 
-  // reorderViewerCb wraps the moveViewer pure function. Caller passes the
-  // insert position (0..len), matching the DnD insertIdx semantics. activeViewerId
-  // is preserved (the moved viewer keeps its identity, so the keybinding mapping
-  // by index naturally follows the new order).
+  // moveViewer 純関数のラッパ。呼び出し側は挿入位置 (0..len, DnD insertIdx と同じ) を渡す。
+  // activeViewerId は不変 (移動 viewer は identity を保つので index ベースのキーバインドも自然に追従)。
   const reorderViewerCb = useCallback((fromIdx: number, toIdx: number) => {
     setSet((cur) => {
       const next = moveViewer(cur, fromIdx, toIdx);
@@ -208,9 +192,7 @@ export function useViewerSet(opts?: {
 
   // ─── helpers: apply a Layout transform to one viewer ───────────────
 
-  // applyToActive runs `fn(activeViewerLayout)` and writes back. Used for the
-  // single-viewer mutations that don't need cross-viewer state (the bulk of
-  // the Phase 5 layout operations).
+  // fn(activeViewerLayout) を実行して書き戻す。cross-viewer state が不要な単一 viewer mutation 用。
   const applyToActive = useCallback((fn: (layout: Layout) => Layout) => {
     setSet((cur) => {
       const av = activeViewer(cur);
@@ -220,8 +202,7 @@ export function useViewerSet(opts?: {
     });
   }, []);
 
-  // applyToViewer is the same but for an arbitrary viewer ID — used by the
-  // bulk-actions "open in viewer X" path.
+  // applyToActive の任意 viewerId 版。bulk の "open in viewer X" が使う。
   const applyToViewer = useCallback(
     (viewerId: string, fn: (layout: Layout) => Layout) => {
       setSet((cur) => {
@@ -235,9 +216,7 @@ export function useViewerSet(opts?: {
     [],
   );
 
-  // enforcePanelLimit short-circuits a panel-creating op when the active /
-  // target layout already has MAX_PANELS leaves. Surfaces the same
-  // toast+warn pair the inline call sites used to duplicate.
+  // active / 対象 layout が既に MAX_PANELS leaf のとき panel 作成 op を短絡。toast+warn を集約。
   const enforcePanelLimit = useCallback(
     (layout: Layout, attempt: string): boolean => {
       if (countLeaves(layout.root) < MAX_PANELS) return true;
@@ -297,9 +276,7 @@ export function useViewerSet(opts?: {
     [applyToActive],
   );
 
-  // splitTab / splitFromContext mirror the previous useViewerGrid ones —
-  // returning success so the caller (DnD) knows whether to dismiss its
-  // pending state.
+  // 成功を返し、呼び出し側 (DnD) が pending state を畳むか判断できるようにする。
   const splitTab = useCallback(
     (
       srcLeafId: string,
@@ -393,10 +370,8 @@ export function useViewerSet(opts?: {
 
   // ─── bulk-apply helpers ────────────────────────────────────────────
 
-  // applyManyWithPreflight runs preflight + apply for each path. Tallies
-  // opened / skipped and emits matching `${op} start` / `${op} done` lines on
-  // the "viewer" log channel. Extra fields (e.g. viewerId) are merged into
-  // each log line — useful for the in-viewer variants.
+  // 各 path に preflight + apply を実行。opened / skipped を集計し ${op} start / done をログ。
+  // extra フィールド (viewerId 等) は各ログ行にマージ。
   const applyManyWithPreflight = useCallback(
     async (
       paths: string[],
@@ -422,10 +397,8 @@ export function useViewerSet(opts?: {
     [preflight],
   );
 
-  // applyManyWithLimit is applyManyWithPreflight + a per-iteration panel-
-  // count snapshot (read via getLayout). Used by the "open as split" bulk
-  // flows where each step adds a panel. getLayout may return null to abort
-  // silently (= target viewer disappeared mid-loop, no toast).
+  // applyManyWithPreflight + iteration ごとの panel 数 snapshot (getLayout 経由)。各ステップが
+  // panel を足す "open as split" bulk 用。getLayout が null なら silent abort (loop 中に対象 viewer 消失)。
   const applyManyWithLimit = useCallback(
     async (
       paths: string[],
@@ -438,11 +411,9 @@ export function useViewerSet(opts?: {
       let skipped = 0;
       logger.info("viewer", `${op} start`, { count: paths.length, ...extra });
       for (const path of paths) {
-        // Viewer-missing check goes BEFORE preflight: viewer existence does
-        // not depend on the previous iteration's apply() having committed,
-        // so there's no race to wait out. Bailing early matches the legacy
-        // ordering and avoids a misleading file-error toast on a path bound
-        // for a viewer that's already gone.
+        // viewer 存在チェックは preflight の前: viewer の有無は前 iteration の apply() commit に
+        // 依存しないので待つ race が無い。早期 bail で、既に消えた viewer 向け path に誤った
+        // file-error toast を出さない。
         if (getLayout() === null) {
           skipped += paths.length - (opened + skipped);
           break;
@@ -452,13 +423,10 @@ export function useViewerSet(opts?: {
           skipped++;
           continue;
         }
-        // Re-snapshot AFTER the preflight await. (a) The previous iteration's
-        // apply() schedules a setState that React commits during the yield,
-        // so reading countLeaves before the await would see a stale value
-        // and let us run past MAX_PANELS while splitWithNewLeaf silently
-        // refuses each step. (b) The target viewer could also have been
-        // closed during preflight; the second null check keeps accounting
-        // correct in that window.
+        // preflight await の *後* に再 snapshot。(a) 前 iteration の apply() の setState は yield 中に
+        // commit されるので、await 前に countLeaves を読むと stale で MAX_PANELS を超えて走り
+        // splitWithNewLeaf が各ステップ silent 拒否する。(b) preflight 中に対象 viewer が閉じられうるので、
+        // 2 度目の null チェックで集計を正しく保つ。
         const l = getLayout();
         if (!l) {
           skipped += paths.length - (opened + skipped);
@@ -490,7 +458,7 @@ export function useViewerSet(opts?: {
 
   const openInActive = useCallback(
     async (path: string) => {
-      // Fast path: if the active leaf already has the tab, just refocus.
+      // fast path: active leaf に既に tab があれば refocus だけ。
       const cur = setRef.current;
       const av = activeViewer(cur);
       const leaf = findLeaf(av.layout.root, av.layout.activeId);
@@ -529,9 +497,8 @@ export function useViewerSet(opts?: {
 
   // ─── open paths (specific viewer, used by SampleModal + bulk) ─────
 
-  // openInViewer applies the same active-leaf semantics to the *target*
-  // viewer's active leaf. Active viewer is NOT switched here — the caller
-  // (App.tsx onOpenInViewer) decides whether to switch and to setTopTab.
+  // *対象* viewer の active leaf に同じ semantics を適用。active viewer は切り替えない —
+  // 切替 / setTopTab は呼び出し側 (App.tsx onOpenInViewer) が決める。
   const openInViewer = useCallback(
     async (viewerId: string, path: string) => {
       const cur = setRef.current;
@@ -580,11 +547,8 @@ export function useViewerSet(opts?: {
 
   // ─── delete-driven tab cleanup (#47) ───────────────────────────────
 
-  // closeTabsForPath walks every viewer's layout and closes every tab whose
-  // `path === absPath`. Used after a successful image deletion so the now-
-  // missing file does not stay open as a ghost tab. No-op when nothing
-  // matched; that lets the caller invoke it unconditionally after delete
-  // without first probing whether any viewer had the file open.
+  // 全 viewer の layout を walk し path === absPath の tab を全て閉じる。画像削除成功後に
+  // ghost tab を残さない用。一致なしなら no-op なので、呼び出し側は delete 後に無条件で呼べる。
   const closeTabsForPath = useCallback((absPath: string) => {
     setSet((cur) => {
       let changed = false;
@@ -602,9 +566,8 @@ export function useViewerSet(opts?: {
 
   // ─── cross-viewer tab move ─────────────────────────────────────────
 
-  // moveTabToViewer: the user right-clicks a tab in the active viewer's
-  // panel and picks "ビューア X へ移動". We never change activeViewerId
-  // (the user keeps working in src; spec §4.6).
+  // active viewer のパネルで tab を右クリックし「ビューア X へ移動」を選ぶ。activeViewerId は
+  // 変えない (ユーザーは src で作業を続ける; spec §4.6)。
   const moveTabToViewer = useCallback(
     (srcLeafId: string, srcIdx: number, dstViewerId: string) => {
       setSet((cur) => {
@@ -633,14 +596,12 @@ export function useViewerSet(opts?: {
 
   // ─── return ────────────────────────────────────────────────────────
 
-  // Memoize so downstream effects (App.tsx keydown) don't churn on every
-  // re-render. Identity changes only when the set changes or a callback
-  // identity changes (which they don't, since they all close over setSet
-  // and stable refs).
+  // 下流 effect (App.tsx keydown) が毎 re-render で churn しないよう memo 化。identity は set 変更時
+  // (callback は setSet + stable ref を閉じ込むので変わらない) のみ変わる。
   const av = activeViewer(set);
   return useMemo(
     () => ({
-      // viewer set state
+      // viewer set の state
       viewers: set.viewers,
       activeViewerId: set.activeViewerId,
       activeViewer: av,

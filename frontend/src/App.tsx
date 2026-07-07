@@ -32,18 +32,10 @@ import { GetLogPath } from "../wailsjs/go/main/App";
 import type { state } from "../wailsjs/go/models";
 import "./App.css";
 
-// App.tsx — top-level orchestrator. Hydrates persisted state, owns the cross-
-// feature state hubs (topTab / viewer / classification / settings / confirm /
-// window geometry), wires them into the child hooks (useGlobalKeybindings /
-// useWindowGeometryPolling / useViewerRename / useListToViewerHandlers /
-// useViewerTabReorder / useSessionSave) and the child UI (TopTabsBar /
-// ClassificationView / ViewerGrid / SettingsDialog).
-//
-// Inline side-effect hooks kept here (settings → tag colors / thumbnail
-// params / --ui-scale, GetLogPath fetch) are <= 5 lines each — abstracting
-// them into a hook would cost more in indirection than it would save.
+// トップレベルのオーケストレータ。state hub を持ち子フック / 子 UI に配線する。
+// インライン副作用フック (settings → タグ色 / サムネイル / --ui-scale 等) を残して
+// いるのは、各 5 行以下でフック化すると間接コストのほうが大きいため。
 
-// Hook into uncaught errors and rejections once, before React mounts.
 installGlobalErrorHandlers();
 logger.info("app", "frontend mount");
 
@@ -81,21 +73,16 @@ function AppInner({ initialState }: AppInnerProps) {
   }, []);
 
   const { confirm, dialog: confirmDialog } = useConfirm();
-  // Apply tag-color and thumbnail params from settings as soon as they load.
-  // These are module-level setters (not hook state) because the underlying
-  // helpers — tagColor() / GetThumbnail() in useGridThumbnail's load() — are
-  // called from leaf components and a context provider just to thread one
-  // map / two scalars would be more noise than insight.
+  // module レベル setter なのは、下請け (tagColor / GetThumbnail) が leaf から
+  // 呼ばれるためで、map 1 つ / scalar 2 つのために context provider を挟むより軽い。
   useEffect(() => {
     if (!settings.data) return;
     setKnownTagColors(settings.data.tagColors);
     setThumbnailParams(settings.data.thumbnailSize, settings.data.thumbnailMode);
   }, [settings.data]);
 
-  // maxImagePixelsMP is stored as MP (200 = 200_000_000 px). Convert once and
-  // hand the raw pixel count to useViewerSet, which clamps via a ref so
-  // settings updates take effect on the next image open. Falls back to
-  // DEFAULT_MAX_PIXELS during the brief settings-loading window.
+  // MP 単位で保存 (200 = 200_000_000 px)。ref 経由で clamp するので設定変更は次の
+  // 画像オープンから効く。ロード中の一瞬は DEFAULT_MAX_PIXELS。
   const maxImagePixels =
     settings.data?.maxImagePixelsMP != null
       ? settings.data.maxImagePixelsMP * 1_000_000
@@ -109,13 +96,12 @@ function AppInner({ initialState }: AppInnerProps) {
     initialList: initialState?.list ?? null,
     confirm,
     watchMode: settings.data?.watchMode,
+    duplicateDetectMode: settings.data?.duplicateDetectMode,
+    duplicateThreshold: settings.data?.duplicateThreshold,
   });
 
-  // List-tab scroll position (#40). Owned here so it survives the
-  // ClassificationView unmount that happens when the top tab switches to
-  // "viewer". ClassificationView restores from this on mount and writes back
-  // on scroll; folder changes inside ClassificationView reset it to 0.
-  // Intentionally not persisted to settings/state.json.
+  // 一覧タブのスクロール位置 (#40)。"viewer" 切替で ClassificationView が unmount
+  // されてもまたいで保持するためここが持つ。state.json には永続化しない。
   const listScrollTopRef = useRef(0);
 
   const windowState = useWindowGeometryPolling({ initial: initialState?.window });
@@ -139,18 +125,13 @@ function AppInner({ initialState }: AppInnerProps) {
     [viewer],
   );
 
-  // Stable id+name list for child props. `viewer.viewers` gets a fresh array
-  // identity on every layout-only mutation (updateViewerLayout maps over the
-  // array even when only one viewer's layout changed), so memoizing on its
-  // reference would recompute every render and hand a new list to children.
-  // Memo on a primitive content signature instead so the result is stable
-  // across pure layout changes — picked up automatically by any future
-  // React.memo-wrapped consumer.
+  // viewer.viewers は layout 変更だけでも新しい配列 identity になるため、参照でメモ
+  // 化すると毎 render で子へ新リストを渡してしまう。内容シグネチャ (id:name) でメモ
+  // 化して純粋な layout 変更をまたいで安定させる。
   const viewerSig = viewer.viewers.map((v) => `${v.id}:${v.name}`).join("|");
   const viewerList = useMemo(
     () => viewer.viewers.map((v) => ({ id: v.id, name: v.name })),
-    // viewerSig is recomputed every render but cheap (≤8 viewers). useMemo
-    // sees the same string and reuses the cached array.
+    // viewerSig は毎 render 再計算するが安価 (≤8)。同じ文字列なら useMemo が再利用。
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [viewerSig],
   );
@@ -160,9 +141,6 @@ function AppInner({ initialState }: AppInnerProps) {
     setTopTab("viewer");
   }, [viewer]);
 
-  // closeViewerWithConfirm gates the close on a user confirm dialog when the
-  // viewer has any image tabs. Empty viewers (root leaf with 0 tabs) close
-  // immediately. Always refuses the last-remaining viewer.
   const closeViewerWithConfirm = useCallback(
     async (viewerId: string) => {
       if (viewer.viewers.length <= 1) return;
@@ -190,19 +168,16 @@ function AppInner({ initialState }: AppInnerProps) {
       setTopTab,
     });
 
-  // UI scale (#10, #12, #39): expose the user's choice as a `--ui-scale` CSS
-  // variable on <html>; App.css then applies `zoom: var(--ui-scale)` to
-  // chrome containers only.
+  // UI スケール (#10, #12, #39)。--ui-scale を <html> に公開し、App.css が chrome
+  // コンテナにだけ zoom を適用する。
   useLayoutEffect(() => {
     const scale = (settings.data?.uiScalePercent ?? 100) / 100;
     document.documentElement.style.setProperty("--ui-scale", String(scale));
   }, [settings.data?.uiScalePercent]);
 
-  // Top-tab viewer reorder DnD (#50, docs/spec-viewer-tab-reorder.md). The
-  // hook owns pointer state + body-style stack; we hand it down to TopTabsBar
-  // which binds containerRef + reads `state` for the indicator / source-tab
-  // dimming. Calling the hook here (not inside TopTabsBar) keeps it tied to
-  // the viewer-set lifecycle so the count / onReorder closure stay live.
+  // トップタブのビューア並べ替え DnD (#50, docs/spec-viewer-tab-reorder.md)。
+  // TopTabsBar 内でなくここでフックを呼ぶのは、count / onReorder クロージャを
+  // ビューアセットのライフサイクルに繋いで生かすため。
   const tabReorder = useViewerTabReorder({
     count: viewer.viewers.length,
     onReorder: viewer.reorderViewer,
@@ -242,11 +217,9 @@ function AppInner({ initialState }: AppInnerProps) {
           />
         ) : (
           <ViewerGrid
-            // The key forces unmount/remount when the active viewer
-            // changes, which gives ImageView's effect cleanup a chance to
-            // de-register from zoomCommandBus and clears any per-panel
-            // local state. Keeps the listener takeover deterministic
-            // (spec-multi-viewer.md §6.2).
+            // key でビューア変更時に remount を強制し、ImageView cleanup が
+            // zoomCommandBus から de-register する機会を作る。リスナ引き継ぎを
+            // 決定的に保つ (spec-multi-viewer.md §6.2)。
             key={viewer.activeViewerId}
             layout={viewer.layout}
             wheelMode={settings.data?.wheelMode}

@@ -1,5 +1,4 @@
-// Keybindings table is read-only in v1; carve a setting key
-// (`keybindings.*`) out for future Phase H rebinding.
+// v1 では read-only。将来の Phase H rebinding 用に keybindings.* の設定キーを分離しておく。
 const KEYBINDINGS: Array<{ keys: string; action: string; scope: string }> = [
   { keys: "Esc", action: "ドラッグ中の操作をキャンセル", scope: "DnD 中" },
   { keys: "Ctrl+Shift+1", action: "一覧タブに切替", scope: "全体" },

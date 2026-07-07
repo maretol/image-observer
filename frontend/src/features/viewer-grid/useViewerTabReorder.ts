@@ -1,40 +1,32 @@
-// Top-tab viewer reordering DnD hook (#50). Spec: docs/spec-viewer-tab-reorder.md.
-//
-// Minimal pointer-events DnD for the .top-tabs-viewers strip — independent of
-// the panel-internal useDnD which targets a richer panel/edge/tab-bar drop
-// space. Shared idioms with useDnD: 5px threshold, pushBodyStyle release
-// stack, pointercancel + Escape cancellation, no module-scoped state.
+// トップタブ viewer 並べ替え DnD (#50, docs/spec-viewer-tab-reorder.md)。
+// .top-tabs-viewers 用の最小 pointer-events DnD — panel 内の useDnD (より複雑な
+// panel/edge/tab-bar drop) とは独立。useDnD と共通の idiom: 5px 閾値 / pushBodyStyle /
+// pointercancel + Escape キャンセル / module scope state なし。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logger } from "../../shared/utils/logger";
 import { pushBodyStyle } from "../../shared/utils/bodyStyles";
 
-// data-viewer-tab marks the draggable child elements within the container so
-// the hook can collect their rects via querySelectorAll. The attribute value
-// is the array index as a string but the hook only uses the rect order — index
-// extraction happens via the container's child order.
+// container 内の draggable な子要素の目印。hook が querySelectorAll で rect を集める。
+// 属性値は index の文字列だが hook は rect の順序しか使わない。
 export const DATA_VIEWER_TAB = "data-viewer-tab";
 
 const DRAG_THRESHOLD_PX = 5;
 
 export type ReorderState = {
   srcIdx: number;
-  // insertIdx is the splice position 0..len. `srcIdx` and `srcIdx + 1` are
-  // both visually-no-op slots — they round-trip to the current order.
+  // splice 位置 0..len。srcIdx と srcIdx + 1 は共に視覚 no-op スロット (現在順に戻る)。
   insertIdx: number;
-  // Drag is "armed" until movement exceeds the threshold, then "active".
-  // Click suppression only kicks in once active is true.
+  // 閾値を超えるまで "armed"、超えたら "active"。click 抑止は active になってから。
   active: boolean;
 };
 
-// Anything with left + width is enough for the insertion math; we accept a
-// plain shape so the pure function can be tested without a DOM.
+// 挿入計算には left + width で十分。DOM なしで純関数を test できるよう plain shape を受ける。
 export type RectLike = { left: number; width: number };
 
-// computeInsertIdxFromRects returns the splice index 0..rects.length that
-// best matches `x`. Each tab claims [left, left + width/2) as "insert before
-// me" and [left + width/2, left + width) as "insert after me". A click past
-// the last tab's midpoint maps to rects.length (= append).
+// x に最も合う splice index 0..rects.length を返す。各 tab は [left, left+width/2) を
+// 「前に挿入」、[left+width/2, left+width) を「後に挿入」とする。最後の tab の中点を
+// 越えたら rects.length (= append)。
 export function computeInsertIdxFromRects(
   rects: readonly RectLike[],
   x: number,
@@ -47,31 +39,26 @@ export function computeInsertIdxFromRects(
 }
 
 type Options = {
-  // Total viewer count — drag is suppressed when count < 2 (no reorder target).
+  // viewer 総数 — count < 2 (並べ替え先なし) ならドラッグ抑止。
   count: number;
-  // Apply the reorder. Spec §12.4: caller's pure-function layer (moveViewer)
-  // already handles no-op and out-of-range cases, but we still pre-filter
-  // here to avoid logging an info-level commit that didn't move anything.
+  // 並べ替えを適用。moveViewer が no-op / 範囲外を扱うが、動いていない info-level commit を
+  // ログしないようここでも事前フィルタする (spec §12.4)。
   onReorder: (fromIdx: number, toIdx: number) => void;
 };
 
 export type UseViewerTabReorder = {
   state: ReorderState | null;
   containerRef: React.RefObject<HTMLDivElement | null>;
-  // startDrag is wired to the per-tab onPointerDown. The caller is responsible
-  // for the upstream guards (close-button hit, rename mode, button !== 0) —
-  // see spec §5.2 — because the hook can't see those. `pointerId` is required
-  // so we can ignore stray move/up events from other concurrent pointers
-  // (multi-touch).
+  // per-tab の onPointerDown に配線。上流の guard (閉じるボタン / rename モード / button !== 0)
+  // は hook から見えないので呼び出し側の責任 (spec §5.2)。pointerId は他の並行 pointer の
+  // move/up を無視するため必須 (multi-touch)。
   startDrag: (
     srcIdx: number,
     ev: { clientX: number; clientY: number; pointerId: number },
   ) => void;
-  // shouldSuppressClick returns true for one tick after a drag that reached
-  // the active state ends (commit, pointercancel, or Escape) so the synthetic
-  // click that pointerup dispatches doesn't re-activate the source tab.
-  // Tabs use `onClick` for activate; armed-only releases are normal clicks
-  // and stay unaffected (spec §5.3).
+  // active になった drag が終わった (commit / pointercancel / Escape) 直後 1 tick だけ true。
+  // pointerup が飛ばす合成 click が source tab を再アクティブ化しないように。armed のみの
+  // release は通常クリックで影響を受けない (spec §5.3)。
   shouldSuppressClick: () => boolean;
 };
 
@@ -83,23 +70,19 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
   const startRef = useRef<{ x: number; y: number } | null>(null);
   const releaseStyleRef = useRef<(() => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  // pointerIdRef pins the drag to the originating pointer. document-level
-  // listeners are global, so without this a second finger / mouse moving on
-  // the page could drive insertIdx updates or fire pointerup against the
-  // active drag (AGENTS.md H-2 multi-touch defense).
+  // drag を起点 pointer に固定する。document リスナは global なので、これがないと 2 本目の指 /
+  // マウスが insertIdx を動かしたり active drag に pointerup を飛ばしうる (AGENTS.md H-2)。
   const pointerIdRef = useRef<number | null>(null);
-  // Tracks pointerup→click suppression. true for one render cycle after a
-  // drag in the active state ends (commit/cancel); cleared on the next
-  // animation frame.
+  // pointerup→click 抑止の追跡。active drag 終了 (commit/cancel) 後 1 render cycle だけ true、
+  // 次の animation frame でクリア。
   const justFinishedDragRef = useRef(false);
-  // onReorder is captured via ref so the document listeners (re-attached only
-  // when drag start/stops) don't have to redo work for callback identity churn.
+  // onReorder を ref で捕捉し、document リスナ (drag 開始/終了時のみ再アタッチ) が callback
+  // identity churn で作り直さずに済むように。
   const onReorderRef = useRef(onReorder);
   onReorderRef.current = onReorder;
 
-  // armSuppressClick: latch + auto-clear for the single trailing click after
-  // an active drag ends. Centralised so commit / pointercancel / Escape paths
-  // share one implementation.
+  // active drag 終了後の trailing click 1 回分の latch + 自動クリア。commit / pointercancel /
+  // Escape が共通実装を使うよう集約。
   const armSuppressClick = useCallback(() => {
     justFinishedDragRef.current = true;
     requestAnimationFrame(() => {
@@ -112,11 +95,10 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
       srcIdx: number,
       ev: { clientX: number; clientY: number; pointerId: number },
     ) => {
-      // Reject if reorder is meaningless (single viewer).
+      // 並べ替えが無意味なら (単一 viewer) 拒否。
       if (count < 2) return;
-      // H-2: guard against a stray second pointerdown while a drag is in
-      // progress. The first drag's release() would otherwise be replaced
-      // here and orphan body styles.
+      // H-2: drag 中の 2 本目の pointerdown を guard。でないと最初の drag の release() が
+      // ここで置き換わり body styles が orphan になる。
       if (stateRef.current) return;
       pointerIdRef.current = ev.pointerId;
       startRef.current = { x: ev.clientX, y: ev.clientY };
@@ -136,10 +118,7 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
 
   useEffect(() => {
     if (!state) return;
-    // isOurPointer rejects events from any pointer other than the one that
-    // started this drag. document listeners are global, so without this a
-    // second concurrent pointer would drive insertIdx / fire pointerup
-    // against the active drag (AGENTS.md H-2 multi-touch defense).
+    // この drag を始めた pointer 以外の event を拒否する (AGENTS.md H-2、上の pointerIdRef と同旨)。
     const isOurPointer = (e: PointerEvent) =>
       pointerIdRef.current === null || e.pointerId === pointerIdRef.current;
     const onMove = (e: PointerEvent) => {
@@ -153,10 +132,8 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
           Math.hypot(e.clientX - start.x, e.clientY - start.y) >=
             DRAG_THRESHOLD_PX);
       if (!movedFar) {
-        // Armed but under threshold — no state update needed. Ghost position
-        // isn't tracked (no ghost rendering in Phase 1), and insertIdx is
-        // held at srcIdx (= no-op slot) until we cross the threshold, so
-        // re-rendering here would be pure waste.
+        // armed だが閾値未満 — state 更新不要。ghost 位置は追わず (Phase 1 で ghost 描画なし)、
+        // insertIdx は閾値を越えるまで srcIdx (no-op スロット) のままなので、ここで再 render は無駄。
         return;
       }
       const insertIdx = computeInsertIdxFromContainer(
@@ -164,8 +141,7 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
         e.clientX,
         cur.insertIdx,
       );
-      // Skip the state update when nothing visible changes — same insertIdx
-      // and already-active means the indicator / dragging class don't move.
+      // 見た目が変わらなければ state 更新を skip (同 insertIdx かつ active 済みなら indicator は動かない)。
       if (cur.active && insertIdx === cur.insertIdx) return;
       setState({
         ...cur,
@@ -179,12 +155,11 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
       endDrag();
       if (!cur) return;
       if (!cur.active) {
-        // armed-only pointerup is a normal click — leave it to the wrapper.
+        // armed のみの pointerup は通常クリック — wrapper に任せる。
         return;
       }
-      // Active end always suppresses the trailing click, whether it commits
-      // a reorder or no-ops on the same slot — both feel like "drop" to the
-      // user and should not re-activate the source tab.
+      // active 終了は trailing click を常に抑止 (reorder commit でも同スロット no-op でも、
+      // 両方 "drop" に感じられ source tab を再アクティブ化すべきでない)。
       armSuppressClick();
       const from = cur.srcIdx;
       const to = cur.insertIdx;
@@ -200,9 +175,8 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
       const cur = stateRef.current;
       if (cur?.active) {
         logger.info("viewer-tab-dnd", "cancel", { reason: "pointercancel" });
-        // Same trailing-click suppression as commit. pointercancel rarely
-        // produces a synthetic click, but if it does we want the source tab
-        // not to re-activate (UX symmetry with the Escape path).
+        // commit と同じ trailing-click 抑止。pointercancel が合成 click を出すのは稀だが、出ても
+        // source tab を再アクティブ化させない (Escape 経路との UX 対称)。
         armSuppressClick();
       }
       endDrag();
@@ -227,11 +201,11 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onCancel);
       document.removeEventListener("keydown", onKey);
-      // Best-effort restore in case the hook unmounts mid-drag (H-2).
+      // drag 中に hook が unmount した場合の best-effort 復元 (H-2)。
       releaseStyleRef.current?.();
       releaseStyleRef.current = null;
     };
-    // Re-attach only when drag start/stops.
+    // drag 開始/終了時のみ再アタッチ。
   }, [Boolean(state)]);
 
   function endDrag() {
@@ -247,11 +221,9 @@ export function useViewerTabReorder(opts: Options): UseViewerTabReorder {
   return { state, containerRef, startDrag, shouldSuppressClick };
 }
 
-// computeInsertIdxFromContainer reads the tab rects from `container` and
-// returns the splice index. When `container` is missing or the pointer is
-// outside its horizontal range, the previous insertIdx is preserved so the
-// indicator doesn't snap to an arbitrary position while the user briefly
-// hovers over the "一覧" tab / "+" button (spec §12.5).
+// container から tab rect を読み splice index を返す。container が無い / pointer が横範囲外の
+// ときは前の insertIdx を保つ (ユーザーが "一覧" タブ / "+" ボタン上を一瞬 hover しても indicator が
+// 勝手な位置に飛ばないように, spec §12.5)。
 function computeInsertIdxFromContainer(
   container: HTMLElement | null,
   x: number,

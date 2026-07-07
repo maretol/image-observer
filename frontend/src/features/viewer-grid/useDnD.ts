@@ -3,7 +3,7 @@ import { logger } from "../../shared/utils/logger";
 import { pushBodyStyle } from "../../shared/utils/bodyStyles";
 import type { Edge } from "./layout";
 
-// Drop targets recognized while dragging a tab.
+// tab ドラッグ中に認識する drop ターゲット。
 export type DropHit =
   | { kind: "panel-center"; leafId: string }
   | { kind: "panel-edge"; leafId: string; edge: Edge }
@@ -15,13 +15,13 @@ export type DnDState = {
   tabPath: string;
   ghost: { x: number; y: number };
   hit: DropHit | null;
-  // Drag is "armed" until movement exceeds the threshold, then "active".
+  // 閾値を超えるまで "armed"、超えたら "active"。
   active: boolean;
 };
 
 const DRAG_THRESHOLD_PX = 5;
 
-// data-* attributes used to locate drop targets via elementFromPoint.
+// elementFromPoint で drop ターゲットを探す data-* 属性。
 export const DATA_LEAF = "data-dnd-leaf";
 export const DATA_TAB_BAR = "data-dnd-tab-bar";
 export const DATA_TAB = "data-dnd-tab";
@@ -44,7 +44,7 @@ export type DnDActions = {
 
 export function useDnD(actions: DnDActions) {
   const [state, setState] = useState<DnDState | null>(null);
-  // Mirror state so global handlers stay stable.
+  // global handler を安定させるため state をミラー。
   const stateRef = useRef<DnDState | null>(null);
   stateRef.current = state;
   const startRef = useRef<{ x: number; y: number } | null>(null);
@@ -60,9 +60,8 @@ export function useDnD(actions: DnDActions) {
       ev: { clientX: number; clientY: number },
     ) => {
       startRef.current = { x: ev.clientX, y: ev.clientY };
-      // Block text selection (user-select) and the I-beam cursor across the
-      // whole document while dragging. Released in endDrag() via the token
-      // stack so concurrent claimants (e.g. splitter) compose cleanly.
+      // ドラッグ中は document 全体で text 選択と I-beam カーソルを抑止。endDrag() で token
+      // stack 経由で解放し、並行要求元 (splitter 等) とクリーンに合成する。
       releaseStyleRef.current?.();
       releaseStyleRef.current = pushBodyStyle({
         cursor: "grabbing",
@@ -116,8 +115,7 @@ export function useDnD(actions: DnDActions) {
       endDrag();
       if (!cur) return;
       if (!cur.active) {
-        // pointerdown without movement past the threshold = a normal click,
-        // not worth logging.
+        // 閾値を超える移動なしの pointerdown = 通常クリック。ログ不要。
         return;
       }
       if (!cur.hit) {
@@ -148,14 +146,13 @@ export function useDnD(actions: DnDActions) {
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onCancel);
       document.removeEventListener("keydown", onKey);
-      // Best-effort restore in case the component unmounts mid-drag.
+      // ドラッグ中に unmount した場合の best-effort 復元。
       releaseStyleRef.current?.();
       releaseStyleRef.current = null;
     };
-  }, [Boolean(state)]); // re-attach when drag starts/stops
+  }, [Boolean(state)]); // drag 開始/終了で再アタッチ
 
-  // endDrag clears state + start ref + body styles. Used by both pointerup
-  // (commit / no-hit) and pointercancel.
+  // state + start ref + body styles をクリア。pointerup (commit / no-hit) と pointercancel が使う。
   function endDrag() {
     setState(null);
     startRef.current = null;
@@ -166,8 +163,7 @@ export function useDnD(actions: DnDActions) {
   return { dnd: state, startDrag };
 }
 
-// Resolve the drop target under the cursor. Tab-bar zones win over panel
-// zones because the tab bar visually sits inside the panel.
+// カーソル下の drop ターゲットを解決。tab-bar は視覚的にパネル内にあるのでパネルより優先。
 export function computeHit(x: number, y: number): DropHit | null {
   const el = document.elementFromPoint(x, y);
   if (!el || !(el instanceof Element)) return null;
@@ -192,8 +188,7 @@ export function computeHit(x: number, y: number): DropHit | null {
   return null;
 }
 
-// Spec §8.1: 20% edges, 60%×60% center, corners decide by closer relative
-// distance.
+// spec §8.1: 端 20% / 中央 60%×60%、角は相対距離の近い方で決める。
 function resolveZone(leafId: string, rx: number, ry: number): DropHit {
   const left = rx;
   const right = 1 - rx;
