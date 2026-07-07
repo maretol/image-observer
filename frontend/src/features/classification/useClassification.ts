@@ -251,7 +251,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     pendingResultRef.current = null;
     resetSelectionForFolderSwitch();
     // duplicatePairs も filename-keyed (#136)。残すと旧 folder のバッジが新 folder の同名
-    // ファイルに誤表示される (PR #75 Round 13/14 と同型)。
+    // ファイルに誤表示される。
     resetDuplicates();
   }, [resetSelectionForFolderSwitch, resetDuplicates]);
 
