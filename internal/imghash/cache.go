@@ -17,7 +17,9 @@ const indexVersion = 1
 type indexEntry struct {
 	Mtime int64  `json:"mtime"`
 	Size  int64  `json:"size"`
-	Hash  string `json:"hash"`
+	Hash  string `json:"hash,omitempty"`
+	// Failed は decode 失敗の負キャッシュ。mtime/size 不変の間は再試行しない (spec §7.3)。
+	Failed bool `json:"failed,omitempty"`
 }
 
 type indexFile struct {

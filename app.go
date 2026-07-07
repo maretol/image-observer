@@ -187,9 +187,17 @@ func (a *App) CheckDuplicates(folderPath string, filenames []string) (imghash.Du
 			Skipped:    []string{},
 		}, nil
 	}
-	report, err := a.duplicates.Check(folderPath, filenames, s.DuplicateThreshold)
+	// ctx は shutdown で in-flight Check を打ち切るため (同一 folder の supersede は Service 内部)。
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	report, err := a.duplicates.Check(ctx, folderPath, filenames, s.DuplicateThreshold)
 	if err != nil {
-		logging.Warn("imghash", "check failed", "folder", folderPath, "err", err.Error())
+		// supersede / shutdown の cancel は正常系 (フロントは gen gate で破棄) なので warn を出さない。
+		if !errors.Is(err, context.Canceled) {
+			logging.Warn("imghash", "check failed", "folder", folderPath, "err", err.Error())
+		}
 		return imghash.DuplicateReport{}, err
 	}
 	return report, nil

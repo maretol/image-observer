@@ -1,6 +1,7 @@
 package imghash
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"os"
@@ -37,6 +38,9 @@ type DuplicateReport struct {
 type Service struct {
 	mu        sync.Mutex
 	folderMus map[string]*sync.Mutex
+	// folderChecks は folder ごとの in-flight Check。同一 folder への新しい Check が旧 Check を
+	// supersede cancel する (spec §6.1。フロントは gen gate で旧結果を捨てるため完走は無駄)。
+	folderChecks map[string]*inflightCheck
 	// workers はハッシュ計算 (decode がボトルネック) の並行上限。サムネの pool とは独立し
 	// 相互にブロックしない (spec §13 D8)。
 	workers int
@@ -44,17 +48,27 @@ type Service struct {
 	decode func(path, ext string) (image.Image, error)
 }
 
+type inflightCheck struct {
+	cancel context.CancelFunc
+}
+
 func NewService() *Service {
 	return &Service{
-		folderMus: map[string]*sync.Mutex{},
-		workers:   defaultWorkerCount(),
-		decode:    imgdecode.Decode,
+		folderMus:    map[string]*sync.Mutex{},
+		folderChecks: map[string]*inflightCheck{},
+		workers:      defaultWorkerCount(),
+		decode:       imgdecode.Decode,
 	}
 }
 
-// defaultWorkerCount は NumCPU/2 (最低 1)。thumb の auto と同じ式だが専用設定は設けない (D8)。
+// maxAutoWorkers は auto (NumCPU/2) worker 数の上限。thumb の maxAutoWorkers /
+// settings.MaxThumbnailWorkerCount と同値に保つ (D8。TestDefaultWorkerCapMatchesSettings が守る)。
+const maxAutoWorkers = 64
+
+// defaultWorkerCount は NumCPU/2 (最低 1、上限 maxAutoWorkers)。thumb の auto と同じ式で
+// 専用設定は設けない (D8)。
 func defaultWorkerCount() int {
-	return max(runtime.NumCPU()/2, 1)
+	return min(max(runtime.NumCPU()/2, 1), maxAutoWorkers)
 }
 
 func (s *Service) folderMu(folder string) *sync.Mutex {
@@ -70,12 +84,35 @@ func (s *Service) folderMu(folder string) *sync.Mutex {
 
 // Check は filenames (POSIX 相対、一覧の表示 entry と同じ集合 = D3) からダブり候補ペアを返す
 // (spec §6.1)。threshold はハミング距離の上限で caller (app.go) が settings から解決する。
-// mode ゲートも caller の責任 (off ならここまで来ない)。
-func (s *Service) Check(folderPath string, filenames []string, threshold int) (DuplicateReport, error) {
+// mode ゲートも caller の責任 (off ならここまで来ない)。同一 folder への新しい Check は
+// 旧 in-flight を ctx で supersede cancel する — cancel された側は計算済み分を index に
+// salvage してエラーで返る (フロントは gen gate で silent に破棄, spec §6.1)。
+func (s *Service) Check(ctx context.Context, folderPath string, filenames []string, threshold int) (DuplicateReport, error) {
 	folder, err := validateFolder(folderPath)
 	if err != nil {
 		return DuplicateReport{}, err
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	me := &inflightCheck{cancel: cancel}
+	s.mu.Lock()
+	if prev := s.folderChecks[folder]; prev != nil {
+		prev.cancel()
+	}
+	s.folderChecks[folder] = me
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		// 自分が最新の登録のときだけ消す (後続 Check が既に上書きしていたら触らない)。
+		if s.folderChecks[folder] == me {
+			delete(s.folderChecks, folder)
+		}
+		s.mu.Unlock()
+	}()
+
 	report := DuplicateReport{
 		FolderPath: folderPath,
 		Pairs:      []DuplicatePair{},
@@ -85,6 +122,10 @@ func (s *Service) Check(folderPath string, filenames []string, threshold int) (D
 	mu := s.folderMu(folder)
 	mu.Lock()
 	defer mu.Unlock()
+	// mutex 待ちの間に supersede されていたら stat / decode を始める前に抜ける。
+	if err := ctx.Err(); err != nil {
+		return DuplicateReport{}, fmt.Errorf("imghash: check superseded: %w", err)
+	}
 
 	// cache root 不可 (UserCacheDir 失敗) でも判定は続行 — キャッシュ無しで全計算するだけ (spec §9)。
 	var idxPath string
@@ -118,10 +159,23 @@ func (s *Service) Check(folderPath string, filenames []string, threshold int) (D
 		}
 		info, err := os.Stat(abs)
 		if err != nil || info.IsDir() {
+			// stat 失敗は一時的 (コピー中ロック等) かもしれないので、既存キャッシュ行を
+			// 温存する — 全置換で有効な行を巻き込んで落とさない (spec §7.3)。
+			if err != nil {
+				if e, ok := cached[name]; ok {
+					next[name] = e
+				}
+			}
 			report.Skipped = append(report.Skipped, name)
 			continue
 		}
 		if e, ok := cached[name]; ok && e.Mtime == info.ModTime().Unix() && e.Size == info.Size() {
+			if e.Failed {
+				// 負キャッシュ: 前回 decode 失敗かつファイル不変 → 再試行しない (spec §7.3)。
+				report.Skipped = append(report.Skipped, name)
+				next[name] = e
+				continue
+			}
 			if h, ok := parseHashHex(e.Hash); ok {
 				hashes[name] = h
 				next[name] = e
@@ -134,43 +188,77 @@ func (s *Service) Check(folderPath string, filenames []string, threshold int) (D
 		})
 	}
 
-	// 並行ハッシュ計算。結果は index 書きで decode 順によらず決定的に集約する。
+	// 並行ハッシュ計算。固定 s.workers 本の worker が channel から仕事を引く (goroutine 数を
+	// 未計算件数に比例させない, D8)。結果は index 書きで decode 順によらず決定的に集約する。
 	type hashResult struct {
-		h   uint64
-		err error
+		h    uint64
+		err  error
+		done bool
 	}
 	results := make([]hashResult, len(toCompute))
-	sem := make(chan struct{}, s.workers)
+	jobs := make(chan int)
 	var wg sync.WaitGroup
-	for i := range toCompute {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			img, err := s.decode(toCompute[i].abs, toCompute[i].ext)
-			if err != nil {
-				results[i] = hashResult{err: err}
-				return
+	for w := 0; w < min(s.workers, len(toCompute)); w++ {
+		wg.Go(func() {
+			for i := range jobs {
+				// supersede / shutdown 後は decode せず捨てる (done=false のまま)。
+				if ctx.Err() != nil {
+					continue
+				}
+				img, err := s.decode(toCompute[i].abs, toCompute[i].ext)
+				if err != nil {
+					results[i] = hashResult{err: err, done: true}
+					continue
+				}
+				results[i] = hashResult{h: DHash(img), done: true}
 			}
-			results[i] = hashResult{h: DHash(img)}
-		}(i)
+		})
 	}
+feed:
+	for i := range toCompute {
+		select {
+		case jobs <- i:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(jobs)
 	wg.Wait()
+
+	// changed = index を書き直す価値のある差分があった (全件キャッシュヒットの Check で
+	// 毎回 JSON を書き直す write amplification を避ける, spec §7.3)。
+	changed := false
 	for i, t := range toCompute {
-		if results[i].err != nil {
-			// デコード失敗は skip でエラーにしない (spec §9)。
-			logging.Warn("imghash", "hash failed (skipping)",
-				"file", t.name, "err", results[i].err.Error())
-			report.Skipped = append(report.Skipped, t.name)
+		r := results[i]
+		if !r.done {
+			// cancel で未処理。既存キャッシュ行があれば温存 (spec §7.3)。
+			if e, ok := cached[t.name]; ok {
+				next[t.name] = e
+			}
 			continue
 		}
-		hashes[t.name] = results[i].h
-		next[t.name] = indexEntry{Mtime: t.mtime, Size: t.size, Hash: hashHex(results[i].h)}
+		if r.err != nil {
+			// デコード失敗は skip でエラーにしない (spec §9)。負キャッシュを残し、ファイルが
+			// 変わるまで再試行しない (spec §7.3)。
+			logging.Warn("imghash", "hash failed (skipping)",
+				"file", t.name, "err", r.err.Error())
+			report.Skipped = append(report.Skipped, t.name)
+			next[t.name] = indexEntry{Mtime: t.mtime, Size: t.size, Failed: true}
+			changed = true
+			continue
+		}
+		hashes[t.name] = r.h
+		next[t.name] = indexEntry{Mtime: t.mtime, Size: t.size, Hash: hashHex(r.h)}
+		changed = true
 	}
 	// next は今回の filenames から再構築するので、消えた filename の行は自然に落ちる (spec §7.3)。
-	if idxPath != "" {
+	if idxPath != "" && (changed || len(next) != len(cached)) {
 		saveIndex(idxPath, dhashRevision, next)
+	}
+	// cancel されたら計算済み分の salvage (上の saveIndex) だけ済ませてエラーで返る。
+	// フロントは gen gate で silent に破棄する (spec §6.1)。
+	if err := ctx.Err(); err != nil {
+		return DuplicateReport{}, fmt.Errorf("imghash: check superseded: %w", err)
 	}
 
 	dismissed := loadDismissed(folder, AlgoDHash)
@@ -180,13 +268,22 @@ func (s *Service) Check(folderPath string, filenames []string, threshold int) (D
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	// O(n²) の内側ループは添字アクセスだけにする — map lookup / Sprintf を毎反復行うと
+	// popcount の数十倍のコストが支配して spec §3 の性能前提が崩れる。
+	hs := make([]uint64, len(names))
+	hexes := make([]string, len(names))
+	for i, n := range names {
+		hs[i] = hashes[n]
+		hexes[i] = hashHex(hs[i])
+	}
 	for i := range names {
+		hi := hs[i]
 		for j := i + 1; j < len(names); j++ {
-			d := Distance(hashes[names[i]], hashes[names[j]])
+			d := Distance(hi, hs[j])
 			if d > threshold {
 				continue
 			}
-			if _, ok := dismissed[dismissKey(hashHex(hashes[names[i]]), hashHex(hashes[names[j]]))]; ok {
+			if _, ok := dismissed[dismissKey(hexes[i], hexes[j])]; ok {
 				continue
 			}
 			report.Pairs = append(report.Pairs, DuplicatePair{

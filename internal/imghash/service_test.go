@@ -1,14 +1,19 @@
 package imghash
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/png"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"image-observer/internal/settings"
 )
 
 func writePNGFile(t *testing.T, path string, img image.Image) {
@@ -58,7 +63,7 @@ func TestCheckFindsResizedDuplicate(t *testing.T) {
 	writePNGFile(t, filepath.Join(folder, "b.png"), pattern(128, 128, false))
 	writePNGFile(t, filepath.Join(folder, "c.png"), pattern(64, 64, true))
 
-	rep, err := s.Check(folder, []string{"c.png", "b.png", "a.png"}, 5)
+	rep, err := s.Check(context.Background(), folder, []string{"c.png", "b.png", "a.png"}, 5)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -81,7 +86,7 @@ func TestCheckPairOrderIsDeterministic(t *testing.T) {
 	for _, n := range []string{"z.png", "a.png", "m.png"} {
 		writePNGFile(t, filepath.Join(folder, n), src)
 	}
-	rep, err := s.Check(folder, []string{"z.png", "a.png", "m.png"}, 0)
+	rep, err := s.Check(context.Background(), folder, []string{"z.png", "a.png", "m.png"}, 0)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -107,7 +112,7 @@ func TestCheckUsesCacheAndInvalidatesOnMtime(t *testing.T) {
 	writePNGFile(t, filepath.Join(folder, "b.png"), pattern(128, 128, false))
 	files := []string{"a.png", "b.png"}
 
-	if _, err := s.Check(folder, files, 5); err != nil {
+	if _, err := s.Check(context.Background(), folder, files, 5); err != nil {
 		t.Fatal(err)
 	}
 	if got := atomic.LoadInt32(count); got != 2 {
@@ -115,7 +120,7 @@ func TestCheckUsesCacheAndInvalidatesOnMtime(t *testing.T) {
 	}
 
 	atomic.StoreInt32(count, 0)
-	if _, err := s.Check(folder, files, 5); err != nil {
+	if _, err := s.Check(context.Background(), folder, files, 5); err != nil {
 		t.Fatal(err)
 	}
 	if got := atomic.LoadInt32(count); got != 0 {
@@ -128,7 +133,7 @@ func TestCheckUsesCacheAndInvalidatesOnMtime(t *testing.T) {
 		t.Fatal(err)
 	}
 	atomic.StoreInt32(count, 0)
-	if _, err := s.Check(folder, files, 5); err != nil {
+	if _, err := s.Check(context.Background(), folder, files, 5); err != nil {
 		t.Fatal(err)
 	}
 	if got := atomic.LoadInt32(count); got != 1 {
@@ -140,7 +145,7 @@ func TestCheckCorruptIndexRecomputes(t *testing.T) {
 	s, count := newTestService(t)
 	folder := t.TempDir()
 	writePNGFile(t, filepath.Join(folder, "a.png"), pattern(64, 64, false))
-	if _, err := s.Check(folder, []string{"a.png"}, 5); err != nil {
+	if _, err := s.Check(context.Background(), folder, []string{"a.png"}, 5); err != nil {
 		t.Fatal(err)
 	}
 	root, err := cacheRoot()
@@ -152,7 +157,7 @@ func TestCheckCorruptIndexRecomputes(t *testing.T) {
 		t.Fatal(err)
 	}
 	atomic.StoreInt32(count, 0)
-	if _, err := s.Check(folder, []string{"a.png"}, 5); err != nil {
+	if _, err := s.Check(context.Background(), folder, []string{"a.png"}, 5); err != nil {
 		t.Fatalf("Check with corrupt index: %v", err)
 	}
 	if got := atomic.LoadInt32(count); got != 1 {
@@ -170,7 +175,7 @@ func TestCheckSkipsUnhashable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(folder, "broken.png"), []byte("not-a-png"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rep, err := s.Check(folder,
+	rep, err := s.Check(context.Background(), folder,
 		[]string{"a.png", "anim.avif", "broken.png", "missing.png", "note.txt"}, 5)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
@@ -203,7 +208,7 @@ func TestCheckThresholdBoundary(t *testing.T) {
 	}
 	writePNGFile(t, filepath.Join(folder, "c.png"), pattern(64, 64, true))
 
-	rep, err := s.Check(folder, []string{"a.png", "copy.png", "c.png"}, 0)
+	rep, err := s.Check(context.Background(), folder, []string{"a.png", "copy.png", "c.png"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +226,7 @@ func TestCheckSubdirEntries(t *testing.T) {
 	folder := t.TempDir()
 	writePNGFile(t, filepath.Join(folder, "a.png"), pattern(64, 64, false))
 	writePNGFile(t, filepath.Join(folder, "child", "b.png"), pattern(128, 128, false))
-	rep, err := s.Check(folder, []string{"a.png", "child/b.png"}, 5)
+	rep, err := s.Check(context.Background(), folder, []string{"a.png", "child/b.png"}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,16 +238,16 @@ func TestCheckSubdirEntries(t *testing.T) {
 func TestCheckRejectsBadInput(t *testing.T) {
 	s, _ := newTestService(t)
 	folder := t.TempDir()
-	if _, err := s.Check("relative/path", []string{"a.png"}, 5); err == nil {
+	if _, err := s.Check(context.Background(), "relative/path", []string{"a.png"}, 5); err == nil {
 		t.Error("relative folder should error")
 	}
-	if _, err := s.Check(folder, []string{"../evil.png"}, 5); err == nil {
+	if _, err := s.Check(context.Background(), folder, []string{"../evil.png"}, 5); err == nil {
 		t.Error("traversal filename should error")
 	}
-	if _, err := s.Check(folder, []string{"/abs.png"}, 5); err == nil {
+	if _, err := s.Check(context.Background(), folder, []string{"/abs.png"}, 5); err == nil {
 		t.Error("absolute filename should error")
 	}
-	if _, err := s.Check("  ", []string{"a.png"}, 5); err == nil {
+	if _, err := s.Check(context.Background(), "  ", []string{"a.png"}, 5); err == nil {
 		t.Error("empty folder should error")
 	}
 }
@@ -254,7 +259,7 @@ func TestDismissExcludesPairAndSurvivesRename(t *testing.T) {
 	writePNGFile(t, filepath.Join(folder, "b.png"), pattern(128, 128, false))
 	files := []string{"a.png", "b.png"}
 
-	rep, err := s.Check(folder, files, 5)
+	rep, err := s.Check(context.Background(), folder, files, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +275,7 @@ func TestDismissExcludesPairAndSurvivesRename(t *testing.T) {
 		t.Fatalf("Dismiss (again): %v", err)
 	}
 
-	rep, err = s.Check(folder, files, 5)
+	rep, err = s.Check(context.Background(), folder, files, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +287,7 @@ func TestDismissExcludesPairAndSurvivesRename(t *testing.T) {
 	if err := os.Rename(filepath.Join(folder, "b.png"), filepath.Join(folder, "z.png")); err != nil {
 		t.Fatal(err)
 	}
-	rep, err = s.Check(folder, []string{"a.png", "z.png"}, 5)
+	rep, err = s.Check(context.Background(), folder, []string{"a.png", "z.png"}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,12 +338,202 @@ func TestDismissCorruptFileRewrites(t *testing.T) {
 	if err := s.Dismiss(folder, "a.png", "b.png"); err != nil {
 		t.Fatalf("Dismiss over corrupt file: %v", err)
 	}
-	rep, err := s.Check(folder, []string{"a.png", "b.png"}, 5)
+	rep, err := s.Check(context.Background(), folder, []string{"a.png", "b.png"}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rep.Pairs) != 0 {
 		t.Errorf("dismiss after rewrite should hold: %v", rep.Pairs)
+	}
+}
+
+func TestCheckNegativeCachesDecodeFailure(t *testing.T) {
+	s, count := newTestService(t)
+	folder := t.TempDir()
+	writePNGFile(t, filepath.Join(folder, "a.png"), pattern(64, 64, false))
+	if err := os.WriteFile(filepath.Join(folder, "broken.png"), []byte("not-a-png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := []string{"a.png", "broken.png"}
+
+	if _, err := s.Check(context.Background(), folder, files, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt32(count); got != 2 {
+		t.Fatalf("first check decode attempts = %d, want 2", got)
+	}
+
+	// 負キャッシュ: ファイル不変なら decode 失敗を再試行しない (spec §7.3)。
+	atomic.StoreInt32(count, 0)
+	rep, err := s.Check(context.Background(), folder, files, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt32(count); got != 0 {
+		t.Errorf("cached check decode attempts = %d, want 0 (負キャッシュ)", got)
+	}
+	if len(rep.Skipped) != 1 || rep.Skipped[0] != "broken.png" {
+		t.Errorf("skipped = %v, want [broken.png]", rep.Skipped)
+	}
+
+	// mtime 変更で再試行される。
+	newTime := time.Now().Add(5 * time.Second)
+	if err := os.Chtimes(filepath.Join(folder, "broken.png"), newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	atomic.StoreInt32(count, 0)
+	if _, err := s.Check(context.Background(), folder, files, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt32(count); got != 1 {
+		t.Errorf("post-mtime check decode attempts = %d, want 1 (再試行)", got)
+	}
+}
+
+func TestCheckRetainsCacheRowOnStatFailure(t *testing.T) {
+	s, _ := newTestService(t)
+	folder := t.TempDir()
+	writePNGFile(t, filepath.Join(folder, "a.png"), pattern(64, 64, false))
+	writePNGFile(t, filepath.Join(folder, "b.png"), pattern(128, 128, false))
+	files := []string{"a.png", "b.png"}
+	if _, err := s.Check(context.Background(), folder, files, 5); err != nil {
+		t.Fatal(err)
+	}
+
+	// stat 失敗 (ここでは消失で再現) しても filenames に居る限り行は温存される (spec §7.3)。
+	if err := os.Remove(filepath.Join(folder, "b.png")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Check(context.Background(), folder, files, 5); err != nil {
+		t.Fatal(err)
+	}
+	root, err := cacheRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := indexPath(root, AlgoDHash, folder)
+	cached := loadIndex(idx, dhashRevision)
+	if _, ok := cached["b.png"]; !ok {
+		t.Errorf("stat 失敗行が index から落ちた: %v", cached)
+	}
+
+	// filenames から消えたら (フロントの集合が更新されたら) 行も落ちる。
+	if _, err := s.Check(context.Background(), folder, []string{"a.png"}, 5); err != nil {
+		t.Fatal(err)
+	}
+	cached = loadIndex(idx, dhashRevision)
+	if _, ok := cached["b.png"]; ok {
+		t.Errorf("消えた filename の行が残っている: %v", cached)
+	}
+}
+
+func TestCheckSkipsIndexWriteWhenUnchanged(t *testing.T) {
+	s, _ := newTestService(t)
+	folder := t.TempDir()
+	writePNGFile(t, filepath.Join(folder, "a.png"), pattern(64, 64, false))
+	writePNGFile(t, filepath.Join(folder, "b.png"), pattern(128, 128, false))
+	files := []string{"a.png", "b.png"}
+	if _, err := s.Check(context.Background(), folder, files, 5); err != nil {
+		t.Fatal(err)
+	}
+	root, err := cacheRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := indexPath(root, AlgoDHash, folder)
+	sentinel := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(idx, sentinel, sentinel); err != nil {
+		t.Fatal(err)
+	}
+
+	// 全件キャッシュヒットなら index を書き直さない (spec §7.3 write amplification 防止)。
+	if _, err := s.Check(context.Background(), folder, files, 5); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(sentinel) {
+		t.Error("変更なしの Check が index を書き直した")
+	}
+
+	// 差分があれば書き直す。
+	newTime := time.Now().Add(5 * time.Second)
+	if err := os.Chtimes(filepath.Join(folder, "a.png"), newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Check(context.Background(), folder, files, 5); err != nil {
+		t.Fatal(err)
+	}
+	info, err = os.Stat(idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ModTime().Equal(sentinel) {
+		t.Error("再計算後も index が書き直されていない")
+	}
+}
+
+func TestCheckSupersededByNewerCheck(t *testing.T) {
+	s, _ := newTestService(t)
+	folder := t.TempDir()
+	writePNGFile(t, filepath.Join(folder, "a.png"), pattern(64, 64, false))
+	writePNGFile(t, filepath.Join(folder, "b.png"), pattern(128, 128, false))
+	files := []string{"a.png", "b.png"}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	orig := s.decode
+	s.decode = func(path, ext string) (image.Image, error) {
+		once.Do(func() {
+			close(started)
+			<-release // 旧 Check を decode 中に留め、その間に新 Check を発行させる
+		})
+		return orig(path, ext)
+	}
+
+	var firstErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, firstErr = s.Check(context.Background(), folder, files, 5)
+	}()
+	<-started
+
+	// 同一 folder への新しい Check が旧 in-flight を supersede cancel する (spec §6.1)。
+	secondDone := make(chan struct{})
+	var rep DuplicateReport
+	var secondErr error
+	go func() {
+		defer close(secondDone)
+		rep, secondErr = s.Check(context.Background(), folder, files, 5)
+	}()
+	close(release)
+	<-done
+	<-secondDone
+
+	if !errors.Is(firstErr, context.Canceled) {
+		t.Errorf("superseded check error = %v, want context.Canceled", firstErr)
+	}
+	if secondErr != nil {
+		t.Fatalf("second check: %v", secondErr)
+	}
+	if len(rep.Pairs) != 1 {
+		t.Errorf("second check pairs = %v, want 1", rep.Pairs)
+	}
+}
+
+// TestDefaultWorkerCapMatchesSettings は auto worker 上限が thumb 側 (settings の明示上限と同値) から
+// 乖離していないことを守る (D8「thumb と同じ auto 式」のドリフト検知)。
+func TestDefaultWorkerCapMatchesSettings(t *testing.T) {
+	if maxAutoWorkers != settings.MaxThumbnailWorkerCount {
+		t.Errorf("imghash.maxAutoWorkers (%d) != settings.MaxThumbnailWorkerCount (%d)",
+			maxAutoWorkers, settings.MaxThumbnailWorkerCount)
+	}
+	if got := defaultWorkerCount(); got > maxAutoWorkers || got < 1 {
+		t.Errorf("defaultWorkerCount() = %d, want 1..%d", got, maxAutoWorkers)
 	}
 }
 
