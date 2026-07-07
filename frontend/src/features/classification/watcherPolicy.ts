@@ -7,6 +7,9 @@ export type ChangedPayload = {
   addedFiles: number;
   removedFiles: number;
   renamedFiles: number;
+  // 既存画像への Write (同名上書き)。ダブり検出の再判定 kick に使う (#136,
+  // spec-duplicate-detection §8.1)。
+  contentChanged: boolean;
   sidecarChanged: boolean;
 };
 

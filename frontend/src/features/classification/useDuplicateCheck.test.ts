@@ -140,6 +140,28 @@ describe("useDuplicateCheck kick", () => {
     await Promise.resolve();
     expect(mockCheck).toHaveBeenCalledTimes(1);
   });
+
+  it("notifyContentChanged (同名上書き) は filename 集合が不変でも再 kick する", async () => {
+    mockCheck.mockResolvedValue(reportOf("/A", []));
+    const { result } = renderHook((p) => useDuplicateCheck(p), {
+      initialProps: makeProps(),
+    });
+    await waitFor(() => expect(mockCheck).toHaveBeenCalledTimes(1));
+    act(() => {
+      result.current.notifyContentChanged();
+    });
+    await waitFor(() => expect(mockCheck).toHaveBeenCalledTimes(2));
+    expect(mockCheck).toHaveBeenLastCalledWith("/A", ["a.png", "b.png"]);
+  });
+
+  it("区切り文字を含む filename も分解されず配列のまま IPC に渡る", async () => {
+    mockCheck.mockResolvedValue(reportOf("/A", []));
+    renderHook((p) => useDuplicateCheck(p), {
+      initialProps: makeProps("/A", ["a\nb.png", "c.png"]),
+    });
+    await waitFor(() => expect(mockCheck).toHaveBeenCalledTimes(1));
+    expect(mockCheck).toHaveBeenCalledWith("/A", ["a\nb.png", "c.png"]);
+  });
 });
 
 describe("useDuplicateCheck gates (AGENTS.md H-8)", () => {

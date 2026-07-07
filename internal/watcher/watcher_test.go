@@ -120,6 +120,33 @@ func TestStart_NewImage_Emits(t *testing.T) {
 	}
 }
 
+// 既存画像への Write のみの window でも contentChanged: true で emit される (同名上書き。
+// ダブり検出 #136 の再判定 kick 用, spec-folder-watch §4.2)。counter は増えない。
+func TestStart_ImageOverwriteEmitsContentChanged(t *testing.T) {
+	dir := t.TempDir()
+	img := filepath.Join(dir, "a.png")
+	writeImage(t, img)
+
+	cap := newCaptured()
+	m := NewManagerWithDebounce(cap.emit, shortDebounce)
+	if err := m.Start(dir); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	if err := os.WriteFile(img, []byte("overwritten-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := cap.waitForPayload(t, 1, time.Second)
+	if !got[0].ContentChanged {
+		t.Errorf("ContentChanged: got false, want true (payloads=%+v)", got)
+	}
+	if got[0].AddedFiles != 0 || got[0].RemovedFiles != 0 {
+		t.Errorf("counters should stay 0 for overwrite: %+v", got[0])
+	}
+}
+
 func TestStart_BurstCoalescedIntoOnePayload(t *testing.T) {
 	dir := t.TempDir()
 	cap := newCaptured()

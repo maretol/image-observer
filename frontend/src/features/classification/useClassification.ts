@@ -220,15 +220,20 @@ export function useClassification(opts: Opts): UseClassificationReturn {
   // ダブり検出 (#136)。kick / gate / report は子フックが持つ (同期モデルは
   // docs/spec-duplicate-detection.md §8)。resetDuplicates は下の resetEntriesDependentState に
   // 参加する — duplicatePairs も entries 依存 state (filename を指す) のため。
-  const { duplicatePairs, dismissDuplicatePair, resetDuplicates } =
-    useDuplicateCheck({
-      folderPath,
-      folderRef,
-      loadResult,
-      duplicateDetectMode: opts.duplicateDetectMode,
-      duplicateThreshold: opts.duplicateThreshold,
-      toast,
-    });
+  // notifyContentChanged は watcher handler が同名上書き payload で呼ぶ (spec §8.1)。
+  const {
+    duplicatePairs,
+    dismissDuplicatePair,
+    resetDuplicates,
+    notifyContentChanged,
+  } = useDuplicateCheck({
+    folderPath,
+    folderRef,
+    loadResult,
+    duplicateDetectMode: opts.duplicateDetectMode,
+    duplicateThreshold: opts.duplicateThreshold,
+    toast,
+  });
 
   // entries リストに意味が結びつく state (編集中ファイル / conflict draft / merge prompt /
   // park 済み auto-merge 結果 / filename-keyed 選択) を全クリアする。error 経路で
@@ -359,6 +364,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     setEditing,
     commitFreshResult,
     resetEntriesDependentState,
+    notifyDuplicateContentChanged: notifyContentChanged,
     toast,
   });
 

@@ -12,6 +12,7 @@ type changedAccumulator struct {
 	addedFiles           int
 	removedFiles         int
 	renamedFiles         int
+	contentChanged       bool
 	sidecarChanged       bool
 	anyChange            bool
 	discoveredImagePaths map[string]struct{}
@@ -23,6 +24,7 @@ func (c *changedAccumulator) empty() bool {
 		c.addedFiles == 0 &&
 		c.removedFiles == 0 &&
 		c.renamedFiles == 0 &&
+		!c.contentChanged &&
 		!c.sidecarChanged
 }
 
@@ -34,6 +36,7 @@ func (c *changedAccumulator) snapshot(folder string) ChangedPayload {
 		AddedFiles:     c.addedFiles,
 		RemovedFiles:   c.removedFiles,
 		RenamedFiles:   c.renamedFiles,
+		ContentChanged: c.contentChanged,
 		SidecarChanged: c.sidecarChanged,
 	}
 }

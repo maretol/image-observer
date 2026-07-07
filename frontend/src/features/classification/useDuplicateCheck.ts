@@ -18,6 +18,9 @@ export type UseDuplicateCheckReturn = {
   // report クリア + in-flight Check の stale 化。orchestrator の resetEntriesDependentState から
   // 呼ぶ (duplicatePairs は entries 依存 state, spec §8.1)。
   resetDuplicates: () => void;
+  // 同名上書き (watcher payload の contentChanged) の再判定トリガ。filename 集合キーでは
+  // 内容変化を検知できないため、専用 counter を kick effect の deps に足す (spec §8.1)。
+  notifyContentChanged: () => void;
 };
 
 type Props = {
@@ -34,10 +37,10 @@ type Props = {
 };
 
 // ダブり検出の kick / gate / report state を持つ子フック (#136, spec-duplicate-detection.md §8)。
-// 同期モデル: 検出 kick は「entries の filename 集合 / folder / mode / threshold が変わった」
-// effect に一本化し、各経路 (Load 成功 / watcher 反映 / 削除 / 設定変更) が setLoadResult /
-// settings 更新を通ることで自然に再 kick される。in-flight の破棄は dupGenRef (bump = 条件変更)
-// + folderRef + post-await mode check の 3 gate。
+// 同期モデル: 検出 kick は「entries の filename 集合 / contentGen / folder / mode / threshold が
+// 変わった」effect に一本化し、各経路 (Load 成功 / watcher 反映 / 同名上書き / 削除 / 設定変更) が
+// setLoadResult / notifyContentChanged / settings 更新を通ることで自然に再 kick される。
+// in-flight の破棄は dupGenRef (bump = 条件変更) + folderRef + post-await mode check の 3 gate。
 export function useDuplicateCheck(props: Props): UseDuplicateCheckReturn {
   const {
     folderPath,
@@ -65,16 +68,27 @@ export function useDuplicateCheck(props: Props): UseDuplicateCheckReturn {
     setDuplicatePairs(null);
   }, []);
 
-  // filename 集合キー。メタデータ編集 (tags / note / confidence) では entries の identity が
-  // 変わっても filename 集合は不変 → 保存のたびに Check IPC を発火させない。追加 / 削除 /
-  // watcher 反映では変わるので再 kick される。
-  const filenamesKey = useMemo(() => {
+  // 同名上書き (内容変化・集合不変) の再判定トリガ。watcher handler が payload の
+  // contentChanged で呼ぶ (spec §8.1 同名上書き行)。
+  const [contentGen, setContentGen] = useState(0);
+  const notifyContentChanged = useCallback(() => {
+    setContentGen((g) => g + 1);
+  }, []);
+
+  // filename 集合。sort 済み配列 (IPC に渡す実体) と join キー (effect の deps 比較専用) を
+  // 分離する — キー文字列の split 逆変換をすると、区切り文字を含む filename が偽の複数名に
+  // 化ける (spec §8.1)。区切りは NUL (どの FS でも filename に現れない)。
+  // メタデータ編集 (tags / note / confidence) では entries の identity が変わっても filename
+  // 集合は不変 → 保存のたびに Check IPC を発火させない。追加 / 削除 / watcher 反映では
+  // 変わるので再 kick される。
+  const filenames = useMemo(() => {
     if (!loadResult) return null;
-    return loadResult.entries
-      .map((e) => e.filename)
-      .sort()
-      .join("\n");
+    return loadResult.entries.map((e) => e.filename).sort();
   }, [loadResult]);
+  const filenamesKey = filenames === null ? null : filenames.join("\0");
+  // effect がキー変化時に最新配列を読むための render-time sync (AGENTS.md H-8)。
+  const filenamesRef = useRef(filenames);
+  filenamesRef.current = filenames;
 
   // folder 切替直後は旧 folder の loadResult が残留する (openFolder は loadResult を null に
   // しない)。新 Load が commit するまで kick しない。
@@ -92,7 +106,7 @@ export function useDuplicateCheck(props: Props): UseDuplicateCheckReturn {
     if (loadResultFolder !== folderPath) return;
     const captured = folderPath;
     const myGen = ++dupGenRef.current;
-    const filenames = filenamesKey === "" ? [] : filenamesKey.split("\n");
+    const filenames = filenamesRef.current ?? [];
     if (filenames.length < 2) {
       // ペアが成立し得ない。IPC を出さず空 report 扱い。
       setDuplicatePairs([]);
@@ -118,6 +132,7 @@ export function useDuplicateCheck(props: Props): UseDuplicateCheckReturn {
   }, [
     folderPath,
     filenamesKey,
+    contentGen,
     loadResultFolder,
     duplicateDetectMode,
     duplicateThreshold,
@@ -149,5 +164,10 @@ export function useDuplicateCheck(props: Props): UseDuplicateCheckReturn {
     [folderRef, toast],
   );
 
-  return { duplicatePairs, dismissDuplicatePair, resetDuplicates };
+  return {
+    duplicatePairs,
+    dismissDuplicatePair,
+    resetDuplicates,
+    notifyContentChanged,
+  };
 }

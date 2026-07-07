@@ -173,10 +173,13 @@ func classifyAndAccumulate(acc *changedAccumulator, ev fsnotify.Event, st *watch
 		}
 		triggered = true
 	}
-	// 既存画像への Write は entries set を変えず counter は増やさないが timer は reset する (true)。
-	// 大画像のコピー (Create → Write → …) が落ち着くまで quiet window を保つため — でないと Create 後
-	// 200ms で早期 flush し LoadClassification が書き込み中の size-0 画像を surface する。spec §7.2 / §13.14。
+	// 既存画像への Write は entries set を変えず counter は増やさないが、contentChanged を立てて
+	// timer も reset する (true)。timer 保持は大画像のコピー (Create → Write → …) が落ち着くまで
+	// quiet window を保つため — でないと Create 後 200ms で早期 flush し LoadClassification が
+	// 書き込み中の size-0 画像を surface する (spec §7.2 / §13.14)。contentChanged は同名上書きの
+	// ダブり再判定 kick 用 (#136, spec-duplicate-detection §8.1)。
 	if ev.Op.Has(fsnotify.Write) {
+		acc.contentChanged = true
 		triggered = true
 	}
 	return triggered
