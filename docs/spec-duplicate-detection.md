@@ -19,6 +19,7 @@
 | 2026-07-05 | 初版ドラフト | issue #136 + コメント (しきい値判定 / dismiss 要件) を受けて起案。dHash + フォルダ単位検出 + `_duplicates.json` dismiss 永続化 + H-8 同期モデル表。 |
 | 2026-07-05 | レビュー反映 (1) | ユーザー指示で D1 を「dHash / pHash 両実装 + 設定切替」に変更。キャッシュを algo 別パスに分離 (§7.3)、dismiss は両 algo のハッシュペアを同時記録 (§7.2)、settings に `duplicateHashAlgo` 追加 (§7.1)。 |
 | 2026-07-05 | レビュー反映 (2) → 着手 | ユーザー指示で Phase 分割: **Phase 1 (本 PR) = dHash のみ** / Phase 2 (別ブランチ) = pHash + `duplicateHashAlgo` 設定 + 切替 UI。dismiss の「両 algo 同時記録」は Phase 2 開始時から (Phase 1 の dismiss は dhash エントリのみ。Phase 2 で legacy 単 algo 記録ペアの cross-algo 照合を入れる、§7.2)。 |
+| 2026-07-07 | セルフレビュー反映 | 同名上書き (画像 Write) で再判定が走らない穴を watcher の `contentChanged` payload で塞ぐ (§8.1、spec-folder-watch §4.2 も改訂)。キャッシュ index に負キャッシュ (`failed`) / 一時失敗行の温存 / 変更なし時の書込スキップを追加 (§7.3)。Check は同一フォルダの新 Check が旧 in-flight を supersede cancel (§6.1)。worker 数の auto 上限を thumb と同じ 64 に統一 (D8)。フル解像度 decode のメモリ最適化は既知の制限として §11 へ。 |
 
 ---
 
@@ -193,6 +194,11 @@ type DuplicateReport struct {
 - `DeleteImage` と同じ入力検証 (絶対 path / 相対 filename / traversal 拒否) を行う。
 - 内部で per-folder mutex を取り、同一フォルダへの並行 Check を直列化 (キャッシュ index の
   read-modify-write を単純化)。
+- **supersede cancel**: 同一フォルダへの新しい Check は旧 in-flight Check を context cancel で
+  打ち切る (フロントは gen gate で旧結果を捨てるため、旧計算の完走は mutex 占有と CPU の無駄)。
+  cancel された Check は計算済み分だけ index に salvage してからエラーで返る (フロント側は
+  gen gate で silent に破棄)。app shutdown の ctx でも同様に打ち切る。Dismiss は cancel 対象外
+  (ユーザー操作の永続化のため完走させる)。
 
 ### 6.2 `DismissDuplicatePair(folderPath, fileA, fileB string) error`
 
@@ -283,6 +289,14 @@ func (a *App) DismissDuplicatePair(folderPath, fileA, fileB string) error
   温存され、行き来しても再計算が走らない (dismiss の追計算 §7.2 も安くなる)。
 - `mtime` (Unix 秒) / `size` 一致ならハッシュ再利用、不一致なら再計算 (サムネキャッシュ D 節と
   同じ無効化方針)。消えた filename の行は Check 時に落とす (孤児を溜めない)。
+- **負キャッシュ**: decode 失敗は `{ "mtime": ..., "size": ..., "failed": true }` 行として記録し、
+  mtime/size 不変の間は decode を再試行しない (壊れたファイルが Check のたびにフルデコード +
+  warn ログを繰り返さないように)。ファイルが更新されれば mtime/size 不一致で自然に再試行される。
+- **一時失敗行の温存**: stat 失敗 (コピー中ロック等) や cancel で今回ハッシュを得られなかった
+  ファイルは、既存のキャッシュ行をそのまま次の index に持ち越す (全置換で有効な行を巻き込んで
+  落とさない)。行を落とすのは「filenames に居ない = フォルダから消えた」場合だけ。
+- **変更なし時の書込スキップ**: 新規計算ゼロかつ行の増減なし (全件キャッシュヒット) なら
+  index を書き直さない (大フォルダで Check のたびに数百 KB 級 JSON を書く write amplification 防止)。
 - index 内の `algo` は **アルゴリズム実装のリビジョンタグ** (`dhash-v1` / `phash-v1`)。
   ビット順やパラメータを変えたら `-v2` に bump し、不一致なら index 全体を捨てて再計算
   (パスセグメントは algo 種別、タグは実装版数、と役割を分ける)。
@@ -309,6 +323,7 @@ entries 依存 state** なので、既存 `resetEntriesDependentState` に clear
 |---|---|---|---|---|
 | Load 成功後の検出 kick | `loadResult` commit (openFolder / autoLoad / reload) | folderPath + entries filename 一覧 | folder / gen / mode(off) | `dupGenRef` bump + await 後 `folderRef.current === captured` + mode を entry / post-await 両方で check |
 | watcher 反映後の検出 kick | watcher handler の setLoadResult 成功 | 同上 (新 entries) | folder / gen / mode | 同上 (bump = 旧 in-flight Check を stale 化) |
+| 同名上書き後の検出 kick | watcher payload の `contentChanged` (filename 集合が不変でも emit される。spec-folder-watch §4.2) | なし (contentGen counter を bump するだけ) | folder (payload の folder が現 folder か) | handler 冒頭の既存 folder / mode gate を通過した payload のみ bump → kick effect の deps (`contentGen`) 経由で再 kick。以降の gate は Load 成功 kick と同一 |
 | CheckDuplicates 完了 | IPC resolve | report | gen (新 kick に supersede) / folder / mode(off に切替) / entries 変化 | `myGen !== dupGenRef.current` なら破棄。entries 変化は「変化経路が必ず bump する」ことで担保 (別軸の比較はしない) |
 | CheckDuplicates 失敗 | IPC reject | — | gen / folder | 同 gate 後、report は据え置かず null 化はしない (前回結果を保持、D6)。ログのみ |
 | dismiss 成功 | モーダルのボタン → IPC resolve | 対象ペア | folder (await 中に切替) / report が別世代に差替 | `folderRef.current === captured` check → 現 report から該当ペアを **filename ペアで** local 除去 (再 Check しない。hash ペアは Go 側で永続除外済みなので次回 Check とも整合) |
@@ -318,12 +333,16 @@ entries 依存 state** なので、既存 `resetEntriesDependentState` に clear
 | フォルダ切替 / Load 失敗 | openFolder / loadInternal catch | — | 旧フォルダの report 残留 | `resetEntriesDependentState` 内で report null 化 + bump (in-flight Check を stale 化)。folder 切替は既存フローが同ヘルパを呼ぶ (PR #75 Round 14) |
 | unmount | ClassificationView unmount | — | 該当軸なし | state は hook と共に破棄。IPC 結果は gen gate で自然に無視 |
 
-- **kick の実装は effect 一本化**: 「Load 成功 / watcher 反映 / 削除 / 設定変更」の各行は
-  個別の配線ではなく、`useDuplicateCheck` 内の単一 effect
-  (deps = folderPath / entries の **filename 集合キー** / mode / threshold) が担う。
+- **kick の実装は effect 一本化**: 「Load 成功 / watcher 反映 / 同名上書き / 削除 / 設定変更」の
+  各行は個別の配線ではなく、`useDuplicateCheck` 内の単一 effect
+  (deps = folderPath / entries の **filename 集合キー** / contentGen / mode / threshold) が担う。
   filename 集合キーなのは、メタデータ編集 (tags / note) の entries identity 変化で
-  無駄な再 Check IPC を出さないため。folder 切替直後の旧 loadResult 残留は
+  無駄な再 Check IPC を出さないため。同名上書き (集合不変・内容変化) は watcher payload の
+  `contentChanged` → contentGen bump が補完する。folder 切替直後の旧 loadResult 残留は
   `loadResult.folderPath !== folderPath` guard で kick しない。
+- **filename はキーと実体を分離**: 集合キー (`"\0"` join) は deps 比較専用で、IPC に渡す配列は
+  render 時同期の ref から読む (キー文字列の split 逆変換をしない — 区切り文字を含む filename が
+  偽の複数名に化けるのを防ぐ)。
 - **dirty / touched / inflight 軸**: duplicateReport はユーザー編集を持たない読み取り専用
   state なので dirty / touched は該当なし (検討済み)。inflight は gen gate で処理。
 - **spinner**: 検出中インジケータは Phase 1 では出さない (該当軸なし)。将来出すなら
@@ -335,6 +354,7 @@ entries 依存 state** なので、既存 `resetEntriesDependentState` に clear
 |------|:--:|:--:|:--:|:--:|:--:|:--:|
 | Load 成功 kick → Check 完了 | bump | ✓ | ✓ | ✓ | – (エラー state 持たない) | – |
 | watcher 反映 kick → Check 完了 | bump | ✓ | ✓ | ✓ | – | – |
+| 同名上書き kick (contentGen) → Check 完了 | bump (effect 再発火で) | ✓ | ✓ | ✓ | – | – |
 | Check 失敗 | (bump 済み世代で判定) | ✓ | – | ✓ | – | – |
 | dismiss 成功 | – (report を local patch) | ✓ | – | – | – | – |
 | dismiss 失敗 | – | ✓ | – | – | – | – |
@@ -355,7 +375,7 @@ entries 依存 state** なので、既存 `resetEntriesDependentState` に clear
 
 | ケース | 挙動 |
 |--------|------|
-| デコード失敗 / AVIF / 対象外拡張子 | 該当ファイルを `skipped` に入れ判定から除外。warn ログ。エラーにしない。 |
+| デコード失敗 / AVIF / 対象外拡張子 | 該当ファイルを `skipped` に入れ判定から除外。warn ログ。エラーにしない。decode 失敗は index に負キャッシュ (`failed`) を残し、mtime/size 不変の間は再試行しない (§7.3)。 |
 | キャッシュ index 読込失敗 (壊れた JSON) | index を捨てて全再計算。warn ログ。 |
 | キャッシュ index 書込失敗 | 判定は続行 (report は返す)。warn ログ (次回また計算するだけ)。 |
 | `CheckDuplicates` 自体の失敗 (フォルダ消失等) | フロントはログのみ、前回 report 保持 (D6)。 |
@@ -420,6 +440,10 @@ entries 依存 state** なので、既存 `resetEntriesDependentState` に clear
 - **検出進捗のバナー / スピナー UI**: Phase 1 はバックグラウンド完結。
 - **ビューアタブへのバッジ表示**: 一覧タブのみ。
 - **orphans の判定**: disk に無いファイルはハッシュを計算できない。
+- **ハッシュ入力のメモリ最適化**: dHash は 9×8 しか要らないがフル解像度で decode するため、
+  ピークメモリは「フル画像 RGBA × worker 数」(24MP × 8 workers で ~800MB 級)。既知の制限。
+  256px サムネキャッシュを入力にすればメモリ・decode とも ~1/100 になるが、ハッシュ値の
+  互換が切れる (revision bump + 全再計算) ため Phase 2 で検討。
 - i18n (#16 / #83 で別途)。
 
 ---
@@ -459,7 +483,7 @@ Phase 1 の内部 algo は dhash 固定だが、**キャッシュパス / dismis
 | D5 | dismiss の保存先とキー | フォルダ直下 `_duplicates.json`、**ハッシュ値の無順序ペア** キー (rename 耐性)。mtime 楽観ロックなし (last-write-wins)。 |
 | D6 | 検出失敗時の UX | トーストなし・ログのみ (補助機能のため)。dismiss 失敗のみ error トースト。 |
 | D7 | ハッシュキャッシュ | フォルダ単位 JSON index (`cache/duphash/`)、`mtime+size` 無効化、`algo` バンプで全捨て。 |
-| D8 | 並行数 | 既定 `runtime.NumCPU()/2` (最低 1) の専用 worker pool。サムネの pool とは独立 (相互にブロックしない)。専用設定は設けず thumb と同じ auto 式を使う。 |
+| D8 | 並行数 | 既定 `runtime.NumCPU()/2` (最低 1、上限 64 = thumb の `maxAutoWorkers` と同値) の専用 worker pool (固定 worker が channel から仕事を引く)。サムネの pool とは独立 (相互にブロックしない)。専用設定は設けず thumb と同じ auto 式を使う。 |
 | D9 | 既定 mode | **`auto`**。初回オープンのデコードコストはキャッシュで 1 回きりのため。重いと感じたら off にできる。 |
 
 レビュー確認事項:
