@@ -960,3 +960,77 @@ func TestSaveWindow_ConcurrentWithSave(t *testing.T) {
 		t.Errorf("window size clobbered: got %+v", parsed.Window)
 	}
 }
+
+// #144: Sort は additive field。round-trip / 既定 manual / 不正値・欠落の fallback を pin。
+func TestSaveLoadState_SortRoundTrip(t *testing.T) {
+	setStateFile(t)
+	in := DefaultData()
+	in.List.Sort = SortMtimeDesc
+	if err := Save(in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out := Load()
+	if out.List.Sort != SortMtimeDesc {
+		t.Errorf("Sort roundtrip: %q", out.List.Sort)
+	}
+}
+
+func TestValidateState_SortClamped(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	bad := DefaultData()
+	bad.List.Sort = "bogus"
+	data, _ := json.Marshal(bad)
+	os.WriteFile(p, data, 0o644)
+	s := Load()
+	if s.List.Sort != SortManual {
+		t.Errorf("invalid Sort not clamped to manual, got %q", s.List.Sort)
+	}
+}
+
+func TestLoadState_LegacyV6_NoSortField_DefaultsToManual(t *testing.T) {
+	// #144 追加前の v6 state.json (sort field 無し) が manual に落ちること (無バンプ
+	// additive の後方互換)。struct を Marshal すると sort が必ず載るため raw JSON を削って作る。
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	in := DefaultData()
+	data, _ := json.Marshal(in)
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	list, ok := raw["list"].(map[string]any)
+	if !ok {
+		t.Fatal("list field missing")
+	}
+	delete(list, "sort")
+	legacy, _ := json.Marshal(raw)
+	os.WriteFile(p, legacy, 0o644)
+	s := Load()
+	if s.List.Sort != SortManual {
+		t.Errorf("legacy state without sort: got %q, want %q", s.List.Sort, SortManual)
+	}
+}
+
+func TestDefaultData_SortIsManual(t *testing.T) {
+	if got := DefaultData().List.Sort; got != SortManual {
+		t.Errorf("default Sort = %q, want %q", got, SortManual)
+	}
+}
+
+// AGENTS.md D-1 drift detector: これらのリテラルは frontend
+// features/classification/sortMode.ts に複製されている (vitest 側の pin 断言と対)。
+func TestSortModeValues(t *testing.T) {
+	pairs := map[string]string{
+		SortManual:    "manual",
+		SortNameAsc:   "nameAsc",
+		SortNameDesc:  "nameDesc",
+		SortMtimeAsc:  "mtimeAsc",
+		SortMtimeDesc: "mtimeDesc",
+	}
+	for got, want := range pairs {
+		if got != want {
+			t.Errorf("sort mode literal drift: %q != %q", got, want)
+		}
+	}
+}

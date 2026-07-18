@@ -15,7 +15,10 @@ import type {
   EditingState,
   PendingResult,
 } from "./useClassification";
-import { entriesEquivalent } from "./entriesEquivalent";
+import {
+  entriesEquivalent,
+  fileTimesEquivalent,
+} from "./entriesEquivalent";
 import {
   decideAutoMerge,
   formatChangeSummary,
@@ -112,8 +115,11 @@ export function useClassificationWatcher(props: Props): void {
         return;
       }
       if (payload.contentChanged) {
-        // 同名上書き (集合不変・内容変化) はこの下の再 Load では検知できない (entries 等価 +
-        // mtime 等価で silent に落ちる) ため、ここでダブり再判定を kick する (spec-duplicate-detection §8.1)。
+        // 同名上書き (集合不変・内容変化) のダブり再判定はここで kick する (spec-duplicate-detection
+        // §8.1)。下の再 Load 側は fileTimes 相違で表示 (mtime ソート) には追従する (#144) が、
+        // ダブり検出の kick effect は filename 集合 key を deps にしており再発火しないのと、
+        // mtime を保存したまま上書きするツール (timestamp 保持コピー) では fileTimes 差分も
+        // 出ないため、この明示 kick は引き続き必要。
         notifyDuplicateContentChanged();
       }
       const myGen = ++requestGenRef.current;
@@ -152,8 +158,9 @@ export function useClassificationWatcher(props: Props): void {
 
       // self-echo / no-op 検出。自分の Save/Delete IPC も watcher event を起こし、それに
       // "外部で更新されました" を出すのはノイズ (spec §5.4)。entries 内容が表示中と一致するとき:
-      //   - mtime も同じ → 完全に silent (真の no-op / self-echo)
-      //   - mtime 相違    → silent 更新 (次の save が conflict チェックで最新 expectedMtime を使えるよう)
+      //   - sidecar mtime も fileTimes も同じ → 完全に silent (真の no-op / self-echo)
+      //   - どちらか相違 → silent 更新 (sidecar mtime は次の save の conflict チェック用、
+      //     fileTimes は同名上書きを mtime ソートへ反映するため, #144 spec-image-sort §8.1)
       //
       // entriesEquivalent は in-flight delete を除いた後で両側を比較する — local loadResult は
       // まだ削除依頼した entry を持つ (setLoadResult patch は sidecar-save 後) が fresh re-Load は
@@ -173,7 +180,12 @@ export function useClassificationWatcher(props: Props): void {
       const entriesUnchanged =
         cur != null &&
         entriesEquivalent(stripInFlight(cur.entries), fresh.entries);
-      if (entriesUnchanged && cur != null && cur.mtime === fresh.mtime) {
+      if (
+        entriesUnchanged &&
+        cur != null &&
+        cur.mtime === fresh.mtime &&
+        fileTimesEquivalent(fresh.entries, cur.fileTimes, fresh.fileTimes)
+      ) {
         return;
       }
       if (entriesUnchanged) {
@@ -276,7 +288,14 @@ export function useClassificationWatcher(props: Props): void {
           const entriesUnchanged =
             cur != null &&
             entriesEquivalent(stripInFlight(cur.entries), fresh.entries);
-          if (entriesUnchanged && cur != null && cur.mtime === fresh.mtime) {
+          // handleWatcherPayload と同じ 3 条件 gate (fileTimes 相違 = 同名上書きは
+          // silent commit へ, #144)。
+          if (
+            entriesUnchanged &&
+            cur != null &&
+            cur.mtime === fresh.mtime &&
+            fileTimesEquivalent(fresh.entries, cur.fileTimes, fresh.fileTimes)
+          ) {
             return;
           }
           // ここに来た = silent recheck が re-Load 成功を観測。前の失敗 initial / manual reload の

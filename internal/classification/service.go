@@ -22,7 +22,9 @@ func (s *Service) Load(folderPath string) (*LoadResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	files, err := s.scanner.ListImageFiles(folderPath)
+	// fileTimes は scanner が walk 中に収集済み (#144、二重 stat を避ける)。Info() 失敗の
+	// path は行を持たない (frontend は 0 扱いで末尾に寄せる)。
+	files, fileTimes, err := s.scanner.ListImageFiles(folderPath)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +67,7 @@ func (s *Service) Load(folderPath string) (*LoadResult, error) {
 		HasSidecar: out.Source == "json" || out.Source == "csv",
 		Source:     out.Source,
 		Mtime:      out.Mtime,
+		FileTimes:  fileTimes,
 	}, nil
 }
 
@@ -125,7 +128,7 @@ func (s *Service) UpdateEntry(folderPath string, entry Entry, expectedMtime int6
 
 // CreateEmpty は folderPath の実画像から新規 sidecar を書く。JSON が既にあれば ErrAlreadyExists。
 func (s *Service) CreateEmpty(folderPath string) (int64, error) {
-	files, err := s.scanner.ListImageFiles(folderPath)
+	files, _, err := s.scanner.ListImageFiles(folderPath)
 	if err != nil {
 		return 0, err
 	}
@@ -151,7 +154,7 @@ func (s *Service) currentOrphans(folderPath string, supplied []Entry) ([]Entry, 
 	if out.Data == nil {
 		return nil, nil
 	}
-	files, err := s.scanner.ListImageFiles(folderPath)
+	files, _, err := s.scanner.ListImageFiles(folderPath)
 	if err != nil {
 		return nil, fmt.Errorf("scan for orphan check: %w", err)
 	}

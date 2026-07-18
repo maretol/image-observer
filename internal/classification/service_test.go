@@ -74,14 +74,21 @@ func (f *fakeRepo) CreateJSON(folderPath string, c *Classification) (int64, erro
 
 type fakeScanner struct {
 	files []string
+	// times は ListImageFiles の第 2 戻り値 (nil なら空 map)。実 walk での収集は
+	// scanner_test.go 側で検証し、service 側は passthrough だけを見る。
+	times map[string]int64
 	err   error
 }
 
-func (s fakeScanner) ListImageFiles(folderPath string) ([]string, error) {
+func (s fakeScanner) ListImageFiles(folderPath string) ([]string, map[string]int64, error) {
 	if s.err != nil {
-		return nil, s.err
+		return nil, nil, s.err
 	}
-	return append([]string(nil), s.files...), nil
+	times := make(map[string]int64, len(s.times))
+	for k, v := range s.times {
+		times[k] = v
+	}
+	return append([]string(nil), s.files...), times, nil
 }
 
 func TestService_Load_MergeAddsUnclassifiedAtEnd(t *testing.T) {
@@ -254,5 +261,44 @@ func TestService_CreateEmpty(t *testing.T) {
 	// Second CreateEmpty must fail.
 	if _, err := svc.CreateEmpty("/folder"); !errors.Is(err, ErrAlreadyExists) {
 		t.Errorf("second CreateEmpty: want ErrAlreadyExists, got %v", err)
+	}
+}
+
+// #144: FileTimes は scanner が walk 中に収集した map の passthrough。orphan (sidecar のみで
+// scanner が列挙しないファイル) は行を持たない。実 walk での mtime 収集は scanner_test.go 側で検証。
+func TestService_Load_FileTimes(t *testing.T) {
+	repo := &fakeRepo{
+		mtime:  100,
+		source: "json",
+		data: &Classification{
+			Version: SchemaVersion,
+			Entries: []Entry{{Filename: "ghost.png"}}, // orphan (disk に無い)
+		},
+	}
+	scn := fakeScanner{
+		files: []string{"a.jpg", "child/b.png", "locked.gif"},
+		// locked.gif は Info() 失敗を模して行なし。
+		times: map[string]int64{"a.jpg": 1000, "child/b.png": 2000},
+	}
+	svc := NewService(repo, scn)
+	res, err := svc.Load("/folder")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got, want := res.FileTimes["a.jpg"], int64(1000); got != want {
+		t.Errorf("FileTimes[a.jpg] = %d, want %d", got, want)
+	}
+	if got, want := res.FileTimes["child/b.png"], int64(2000); got != want {
+		t.Errorf("FileTimes[child/b.png] = %d, want %d", got, want)
+	}
+	if _, ok := res.FileTimes["ghost.png"]; ok {
+		t.Errorf("orphan ghost.png must not have a FileTimes row")
+	}
+	if _, ok := res.FileTimes["locked.gif"]; ok {
+		t.Errorf("Info()-failed locked.gif must not have a FileTimes row")
+	}
+	if len(res.FileTimes) != 2 {
+		t.Errorf("FileTimes size = %d, want 2 (%v)", len(res.FileTimes), res.FileTimes)
 	}
 }

@@ -43,6 +43,7 @@ export namespace classification {
 	    hasSidecar: boolean;
 	    source: string;
 	    mtime: number;
+	    fileTimes: Record<string, number>;
 	
 	    static createFrom(source: any = {}) {
 	        return new LoadResult(source);
@@ -56,6 +57,7 @@ export namespace classification {
 	        this.hasSidecar = source["hasSidecar"];
 	        this.source = source["source"];
 	        this.mtime = source["mtime"];
+	        this.fileTimes = source["fileTimes"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -384,6 +386,7 @@ export namespace state {
 	    folderPath: string;
 	    filter: ListFilterState;
 	    collapsedGroups: string[];
+	    sort: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ListTabState(source);
@@ -394,6 +397,7 @@ export namespace state {
 	        this.folderPath = source["folderPath"];
 	        this.filter = this.convertValues(source["filter"], ListFilterState);
 	        this.collapsedGroups = source["collapsedGroups"];
+	        this.sort = source["sort"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

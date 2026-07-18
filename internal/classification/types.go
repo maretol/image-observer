@@ -54,6 +54,10 @@ type LoadResult struct {
 	HasSidecar bool    `json:"hasSidecar"`
 	Source     string  `json:"source"` // "json" | "csv" | "none"
 	Mtime      int64   `json:"mtime"`
+	// FileTimes は Entries の各 filename の mtime (Unix 秒)。mtime ソート (#144) の入力で、
+	// scanner の walk 中に収集する (二重 stat を避ける)。Info() 失敗 / orphan は行を持たない
+	// (frontend は 0 扱いで末尾に寄せる)。sidecar には書かない。
+	FileTimes map[string]int64 `json:"fileTimes"`
 }
 
 // SaveOutput は Save/UpdateEntry/CreateEmpty が返す。frontend が書き込み成功後に追跡 mtime を更新する用。

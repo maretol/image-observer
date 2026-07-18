@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 )
 
 func writeFile(t *testing.T, path string) {
@@ -24,7 +25,7 @@ func TestScanner_FlatFiltersByExtension(t *testing.T) {
 	} {
 		writeFile(t, filepath.Join(dir, name))
 	}
-	got, err := NewFileScanner().ListImageFiles(dir)
+	got, _, err := NewFileScanner().ListImageFiles(dir)
 	if err != nil {
 		t.Fatalf("ListImageFiles: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestScanner_RecurseIntoSubdirs(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "child2", "deep", "x.webp"))
 	writeFile(t, filepath.Join(dir, "child2", "deep", "ignore.txt"))
 
-	got, err := NewFileScanner().ListImageFiles(dir)
+	got, _, err := NewFileScanner().ListImageFiles(dir)
 	if err != nil {
 		t.Fatalf("ListImageFiles: %v", err)
 	}
@@ -65,7 +66,7 @@ func TestScanner_SkipsHiddenDirsAndFiles(t *testing.T) {
 	writeFile(t, filepath.Join(dir, ".hidden.png"))
 	writeFile(t, filepath.Join(dir, ".hiddenDir", "inside.jpg"))
 
-	got, err := NewFileScanner().ListImageFiles(dir)
+	got, _, err := NewFileScanner().ListImageFiles(dir)
 	if err != nil {
 		t.Fatalf("ListImageFiles: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestScanner_SidecarFilesIgnored(t *testing.T) {
 	writeFile(t, filepath.Join(dir, BackupJSON))
 	writeFile(t, filepath.Join(dir, TempJSON))
 
-	got, err := NewFileScanner().ListImageFiles(dir)
+	got, _, err := NewFileScanner().ListImageFiles(dir)
 	if err != nil {
 		t.Fatalf("ListImageFiles: %v", err)
 	}
@@ -96,18 +97,51 @@ func TestScanner_SidecarFilesIgnored(t *testing.T) {
 }
 
 func TestScanner_NonexistentFolder(t *testing.T) {
-	_, err := NewFileScanner().ListImageFiles(filepath.Join(t.TempDir(), "nope"))
+	_, _, err := NewFileScanner().ListImageFiles(filepath.Join(t.TempDir(), "nope"))
 	if err == nil {
 		t.Errorf("expected error for missing folder")
 	}
 }
 
 func TestScanner_EmptyFolder(t *testing.T) {
-	got, err := NewFileScanner().ListImageFiles(t.TempDir())
+	got, _, err := NewFileScanner().ListImageFiles(t.TempDir())
 	if err != nil {
 		t.Fatalf("ListImageFiles: %v", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty slice, got %v", got)
+	}
+}
+
+// #144: walk 中に各画像の mtime (Unix 秒) を収集する。非画像 / hidden は名前と同様に対象外。
+func TestScanner_CollectsFileTimes(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a.jpg"))
+	writeFile(t, filepath.Join(dir, "child", "b.png"))
+	writeFile(t, filepath.Join(dir, "note.txt"))
+	aTime := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	bTime := time.Date(2026, 6, 7, 8, 9, 10, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(dir, "a.jpg"), aTime, aTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(dir, "child", "b.png"), bTime, bTime); err != nil {
+		t.Fatal(err)
+	}
+
+	names, times, err := NewFileScanner().ListImageFiles(dir)
+	if err != nil {
+		t.Fatalf("ListImageFiles: %v", err)
+	}
+	if !equalSlice(names, []string{"a.jpg", "child/b.png"}) {
+		t.Fatalf("names = %v", names)
+	}
+	if got, want := times["a.jpg"], aTime.Unix(); got != want {
+		t.Errorf("times[a.jpg] = %d, want %d", got, want)
+	}
+	if got, want := times["child/b.png"], bTime.Unix(); got != want {
+		t.Errorf("times[child/b.png] = %d, want %d", got, want)
+	}
+	if len(times) != 2 {
+		t.Errorf("times size = %d, want 2 (%v)", len(times), times)
 	}
 }

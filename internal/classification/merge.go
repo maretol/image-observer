@@ -121,7 +121,7 @@ func (s *Service) MergeChildSidecars(folderPath string) (int64, error) {
 
 	// merged に未収録の親直下ファイルを追加。この step が無いと、親直下の新規画像が再 save まで
 	// sidecar に現れない。
-	files, err := s.scanner.ListImageFiles(folderPath)
+	files, _, err := s.scanner.ListImageFiles(folderPath)
 	if err != nil {
 		return 0, fmt.Errorf("post-merge scan: %w", err)
 	}

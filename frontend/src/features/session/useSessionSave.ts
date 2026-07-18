@@ -16,6 +16,8 @@ export type ListPersist = {
     query: string;
   };
   collapsedGroups: string[];
+  // 一覧タブのソートモード (#144)。state.ListTabState.Sort ミラー (5 値は sortMode.ts)。
+  sort: string;
 };
 
 export type SessionInput = {
@@ -107,6 +109,7 @@ function buildStateData(input: {
         query: input.list.filter.query,
       },
       collapsedGroups: input.list.collapsedGroups,
+      sort: input.list.sort,
     },
   };
 }
