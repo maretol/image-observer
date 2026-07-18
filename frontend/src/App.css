@@ -1699,6 +1699,13 @@ html, body, #root {
   position: relative;
   cursor: grab;
   user-select: none;
+  -webkit-user-select: none;
+}
+
+/* -webkit-user-drag は非継承なので img にも直接指定 (draggable={false} の CSS 側の対、
+   WebKitGTK / WebView2 のネイティブ画像ドラッグ抑止)。 */
+.cls-card-reorderable .cls-card-thumb-img {
+  -webkit-user-drag: none;
 }
 
 .cls-card-reorderable:hover {

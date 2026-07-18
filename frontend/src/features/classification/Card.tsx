@@ -107,6 +107,9 @@ export function Card({
               // 主ボタンのみ drag 開始 (右クリック / 中クリックは無視)。マルチタッチの
               // 二重 pointerdown は hook 側の先勝ち guard が落とす (H-2)。
               if (e.button !== 0) return;
+              // ブラウザ既定のテキスト選択 / ネイティブ画像ドラッグの開始を抑止
+              // (TabBar の DnD と同じ流儀)。img 側の draggable={false} と対。
+              e.preventDefault();
               reorder.onStartDrag({
                 clientX: e.clientX,
                 clientY: e.clientY,
@@ -178,6 +181,9 @@ export function Card({
             className="cls-card-thumb-img"
             src={url}
             alt={entry.filename}
+            // 並べ替えモード中は自前 pointer DnD なので、ネイティブ画像ドラッグ
+            // (ゴースト表示 + pointermove の横取り) を止める (ImageView / SampleModal と同じ)。
+            draggable={interactive ? undefined : false}
           />
         ) : state === "error" ? (
           <span className="cls-card-thumb-error">

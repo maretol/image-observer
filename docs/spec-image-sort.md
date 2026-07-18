@@ -165,6 +165,10 @@ Card DnD drop → entries 配列を並べ替え → setLoadResult (楽観 local 
   避けるため + 既存 autosave の思想と揃えるため)。
 - マルチタッチ / 二重 pointerdown は先勝ちで無視、`pointercancel` / unmount cleanup で
   drag state を解放 (H-2)。
+- ブラウザ既定挙動の抑止: pointerdown で `preventDefault` (テキスト選択) +
+  `<img draggable={false}>` + `-webkit-user-drag: none` (ネイティブ画像ドラッグ)。
+  自前 pointer DnD がゴースト表示や pointermove の横取りと競合しないように
+  (TabBar / ImageView の先行流儀)。
 - キーボードでの並び替え (Ctrl+矢印等) は v1 では設けない (§11、a11y 改善として将来課題)。
 
 ### 5.3 トースト / エラー表示
