@@ -20,6 +20,7 @@
 | 2026-07-18 | 初版ドラフト | issue #144 + triage 合意 (スコープ = ソート基準選択 + 手動並び替えの両方) を受けて起案。2 層モデル (sidecar 配列順 = 手動順の正本 + 表示派生ソート) + ListTabState additive 永続化 + H-8 同期モデル表。 |
 | 2026-07-18 | レビュー反映 (1) | ユーザー指示で D5 を「常時 DnD」から**明示的な並べ替えモード**に変更。モード中はプレビュー / 選択 / コンテキストメニュー / ビューアタブへの移動 (トップタブ切替 + 関連キーバインド) を無効化し並べ替え専念 (§5.2)。§8 に reorderMode の event source 行を追加。 |
 | 2026-07-18 | Phase 1 実装反映 | ソート適用点を filter 後段 (ClassificationView 内、順序保存の述語なので §3 の sort→filter と同値) に確定。sortMode state の所有は useClassification (persistableState 経由で session save に乗るため)。§14 Phase 1 の実ファイルを実装に合わせ更新 (App.tsx / useSessionLoad は変更不要だった)。 |
+| 2026-07-18 | code-review 反映 | (1) FileTimes の収集を Load の二重 stat から **scanner の walk 中収集** に変更 (`FileScanner.ListImageFiles` が names+times を返す、§6.1)。(2) watcher の no-op gate に **fileTimes 等価判定を追加** (`fileTimesEquivalent`) — 同名上書きで mtime ソートが stale になる穴を塞ぐ (§8.1 の watcher 行を訂正: 「既存 gate に任せる」は gate 自体が fileTimes を知らず不成立だった)。 |
 
 ---
 
@@ -184,10 +185,12 @@ type LoadResult struct {
 }
 ```
 
-- `Service.Load` が merged entries の各ファイルを `os.Stat` して詰める (N 回 stat)。
-  scanner の `WalkDir` は既に各 entry を舐めているが、責務を scanner に足すより
-  Load 側で stat する方が interface (`ListImageFiles`) を変えずに済む。
-  数千枚オーダーの stat は誤差 (ダブり検出のデコードよりはるかに軽い)。
+- mtime は **scanner の walk 中に収集**する: `FileScanner.ListImageFiles` を
+  `([]string, map[string]int64, error)` に拡張し、`WalkDir` コールバックの
+  `fs.DirEntry.Info()` (Windows ではディレクトリ列挙データ由来で追加 syscall なし) から
+  拾う。Load は passthrough するだけ (code-review 反映: 当初案の Load 側 2 周目 stat は
+  watcher flush ごとに N stat を余分に払うため廃止)。
+- `Info()` 失敗 (コピー中ロック等) の path は map に行を持たず、エラーにしない。
 - watcher 反映 (再 Load) でも自然に最新化される。
 - 新規 IPC は増やさない。Phase 2 の保存も既存
   `SaveClassification(folderPath, entries, expectedMtime)` をそのまま使う
@@ -259,7 +262,7 @@ type ListTabState struct {
 | (P2) 保存完了 | IPC resolve | SaveOutput.mtime | await 中の folder 切替 / 別 save の完了 | `folderRef.current === captured` check 後に追跡 mtime 更新 (既存 saveEdit と同じ流儀)。古い gen なら破棄 |
 | (P2) 保存失敗 (CONFLICT) | IPC reject | — | local commit 済み並びが disk と乖離 | 既存 conflict フロー (reload) に合流 = disk 正を再 Load して local 並びを捨てる。既存の編集 CONFLICT と同一挙動 |
 | (P2) 保存失敗 (その他) | IPC reject | — | 同上 | error トースト + 再 Load で並びを戻す (silent に乖離を残さない) |
-| watcher 反映 | `classification:changed` → 再 Load | 新 entries + FileTimes | drag 中 / 保存 await 中に着弾 | drag 中: dragState を **リセット** (gen 不一致で drop 中止と同義)。保存 await 中: 既存 watcher 側の gen gate に任せ、reorder 側は mtime chain の CONFLICT で収束 |
+| watcher 反映 | `classification:changed` → 再 Load | 新 entries + FileTimes | drag 中 / 保存 await 中に着弾 / **no-op gate が fileTimes を捨てる** | drag 中: dragState を **リセット** (gen 不一致で drop 中止と同義)。保存 await 中: 既存 watcher 側の gen gate に任せ、reorder 側は mtime chain の CONFLICT で収束。no-op gate は entries + sidecar mtime に加え **fileTimes 等価 (`fileTimesEquivalent`、fresh 側 entries の filename に限定比較) も要求** — 同名上書き (mtime だけ変化) を silent commit に落とし、mtime ソートを stale にしない (code-review 反映) |
 | フォルダ切替 / Load 失敗 | openFolder / loadInternal catch | — | 旧フォルダの dragState / reorderMode 残留 | `resetEntriesDependentState` に dragState リセット + reorderMode 解除を追加 (PR #75 Round 14 の流儀)。sortMode は **リセットしない** (タブ全体の表示設定であり folder 非依存、D3) |
 | unmount | ClassificationView unmount | — | pointer capture リーク / reorderMode 残留 (タブ切替 gate が掛かったまま) | cleanup で releasePointerCapture + dragState 破棄 + reorderMode 解除 (H-2 / H-3。モード中はタブ切替を封じているため通常 unmount しないが、防御として置く) |
 
@@ -299,7 +302,7 @@ type ListTabState struct {
 
 | ケース | 挙動 |
 |--------|------|
-| `FileTimes` に無い filename (stat 失敗 / race で消失) | mtime 0 扱いで mtime ソート時は末尾グループ (同着はファイル名昇順 tiebreak)。エラーにしない |
+| `FileTimes` に無い filename (walk 中の `Info()` 失敗 / race で消失) | mtime 0 扱いで mtime ソート時は末尾グループ (同着はファイル名昇順 tiebreak)。エラーにしない |
 | 旧 state.json (Sort フィールド無し) / 不正値 | `manual` に fallback (validateState + frontend 双方で防御) |
 | (P2) 並び替え保存 CONFLICT | 既存 conflict フロー (reload)。local 並びは disk 正で上書き |
 | (P2) 並び替え保存 その他失敗 | error トースト + 再 Load で並びを戻す |
@@ -311,8 +314,9 @@ type ListTabState struct {
 
 ### 10.1 Go
 
-- `LoadResult.FileTimes`: 存在ファイルの mtime が入る / sidecar-only (orphan) は行なし /
-  stat 失敗ファイルは行なし (既存 service_test の流儀で fake scanner + 実 tempdir)。
+- scanner: walk 中の mtime 収集 (実 tempdir + Chtimes、非画像は行なし)。
+- `LoadResult.FileTimes`: scanner times の passthrough / sidecar-only (orphan) は行なし /
+  `Info()` 失敗相当 (times に行が無い path) は行なし (fake scanner)。
 - `validateState`: Sort 空文字 → manual / 不正値 → manual / 有効 5 値は素通し。
 - (P2) `Save` の配列順保持は既存テストで担保済み (順序を変えて渡した entries が
   そのままの順で書かれることを明示 pin するテストを 1 本追加)。
@@ -323,6 +327,8 @@ type ListTabState struct {
   数字混在) / mtimeAsc・Desc + mtime 欠落 (0 扱い末尾 + name tiebreak) / 安定ソート
   (同値で元順維持)。
 - `sortMode.ts` D-1 同値テスト: 5 値の文字列が Go 側定数と一致。
+- `fileTimesEquivalent`: 一致 / 上書き検出 / entries 外の行 (in-flight delete 残り) を無視 /
+  両側欠落は等価・片側欠落は差分 / undefined・null 耐性。
 - グループ内順序: `sortEntries` → `groupByDirectory` の合成でグループ内が
   ソート順・グループ列は従来順のまま、を pin。
 - (P2) 並び替え計算純関数 (`reorderEntries(entries, filename, insertBefore)`):
@@ -341,6 +347,8 @@ type ListTabState struct {
 - 並び順セレクトの 5 モードで表示が切り替わり、範囲選択 / 矢印キー移動 /
   SampleModal prev·next が表示順に追従する。
 - 再起動でソートモードが復元される。旧 state.json (手で Sort を消す) でも起動できる。
+- watch auto + mtime ソート中にフォルダ内の画像を同名上書き → 並びが自動追従する
+  (toast なしの silent 更新。code-review 反映の fileTimes gate 確認)。
 - (P2) 手動モードで並べ替えモードに入り Card を DnD → 再読み込み / 再起動で並びが
   維持される。`_classification.json` の配列順が変わっていることを目視確認。
 - (P2) モード外では DnD が一切発動しない。名前順モード / フィルタ適用中は
@@ -420,7 +428,10 @@ Phase 1 は同期 state のみで async リスクが小さい。ただし §8.1 
 
 | ファイル | 変更内容 | Phase |
 |---------|---------|:--:|
-| `internal/classification/types.go` / `service.go` | `LoadResult.FileTimes` + Load 時 stat | 1 |
+| `internal/classification/types.go` / `service.go` | `LoadResult.FileTimes` (scanner times の passthrough) | 1 |
+| `internal/classification/scanner.go` | `ListImageFiles` を names+times 返却に拡張 (walk 中に mtime 収集) | 1 |
+| `frontend/src/features/classification/entriesEquivalent.ts` | `fileTimesEquivalent` 追加 (watcher no-op gate 用、vitest 対象) | 1 |
+| `frontend/src/features/classification/useClassificationWatcher.ts` | no-op gate に fileTimes 等価判定を追加 (2 箇所) | 1 |
 | `internal/state/state.go` | `ListTabState.Sort` + validateState 正規化 | 1 |
 | `frontend/src/features/classification/sort.ts` (新規) | `sortEntries` 純関数 (vitest 対象) | 1 |
 | `frontend/src/features/classification/sortMode.ts` (新規) | D-1 共通定数 (5 値 + 既定) + `normalizeSortMode` | 1 |
