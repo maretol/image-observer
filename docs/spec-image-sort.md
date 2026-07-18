@@ -17,6 +17,7 @@
 |------|---------|---------|
 | 2026-07-18 | 初版ドラフト | issue #144 + triage 合意 (スコープ = ソート基準選択 + 手動並び替えの両方) を受けて起案。2 層モデル (sidecar 配列順 = 手動順の正本 + 表示派生ソート) + ListTabState additive 永続化 + H-8 同期モデル表。 |
 | 2026-07-18 | レビュー反映 (1) | ユーザー指示で D5 を「常時 DnD」から**明示的な並べ替えモード**に変更。モード中はプレビュー / 選択 / コンテキストメニュー / ビューアタブへの移動 (トップタブ切替 + 関連キーバインド) を無効化し並べ替え専念 (§5.2)。§8 に reorderMode の event source 行を追加。 |
+| 2026-07-18 | Phase 1 実装反映 | ソート適用点を filter 後段 (ClassificationView 内、順序保存の述語なので §3 の sort→filter と同値) に確定。sortMode state の所有は useClassification (persistableState 経由で session save に乗るため)。§14 Phase 1 の実ファイルを実装に合わせ更新 (App.tsx / useSessionLoad は変更不要だった)。 |
 
 ---
 
@@ -63,12 +64,15 @@
 _classification.json entries 配列順  ← 手動順の正本 (現状の実体を公式化)
         │  LoadClassification (LoadResult に FileTimes を additive 追加)
         ▼
-loadResult.entries ── sortEntries(entries, sortMode, fileTimes) ── 純関数 (新規 sort.ts)
-        │                    ▲
-        │             sortMode: ListTabState additive 永続化 (state.json v6 のまま)
+loadResult.entries (不変のまま)
+        │
         ▼
-filterEntries → groupByDirectory → filteredGroups → displayedOrder
-        │  (既存の派生チェーン。ソートは最上流に 1 箇所差すだけ)
+filterEntries ── sortEntries(filtered, sortMode, fileTimes) ── 純関数 (sort.ts)
+        │                    ▲          (filter は順序保存の述語なので sort→filter と同値。
+        │             sortMode: useClassification が所有、ListTabState additive 永続化)
+        ▼
+groupByDirectory → filteredGroups → displayedOrder
+        │  (既存の派生チェーン。ソートは 1 箇所差すだけ)
         ▼
 範囲選択 / gridNav / SampleModal prev·next が自動追従
 
@@ -229,8 +233,9 @@ type ListTabState struct {
 
 新規 state:
 
-- `sortMode` (ClassificationView 層。`ListTabState.Sort` の hydrate / save ミラー) —
-  **同期 UI state** で async source は session hydrate のみ。
+- `sortMode` (useClassification が所有し persistableState 経由で session save に乗せる。
+  `ListTabState.Sort` の hydrate / save ミラー) — **同期 UI state** で async source は
+  session hydrate のみ。
 - (Phase 2) `reorderMode` (並べ替えモード on/off。App レベルまで lift する — TopTabsBar /
   useGlobalKeybindings の gate に必要) — 同期 UI state だが、folder 切替 / unmount で
   解除する経路を持つ。永続化しない。
@@ -416,12 +421,12 @@ Phase 1 は同期 state のみで async リスクが小さい。ただし §8.1 
 | `internal/classification/types.go` / `service.go` | `LoadResult.FileTimes` + Load 時 stat | 1 |
 | `internal/state/state.go` | `ListTabState.Sort` + validateState 正規化 | 1 |
 | `frontend/src/features/classification/sort.ts` (新規) | `sortEntries` 純関数 (vitest 対象) | 1 |
-| `frontend/src/features/classification/sortMode.ts` (新規) | D-1 共通定数 (5 値 + 既定) | 1 |
+| `frontend/src/features/classification/sortMode.ts` (新規) | D-1 共通定数 (5 値 + 既定) + `normalizeSortMode` | 1 |
 | `frontend/src/features/classification/ClassificationHeader.tsx` | 並び順セレクト | 1 |
-| `frontend/src/features/classification/ClassificationView.tsx` | sortMode state + 派生チェーンへの組み込み | 1 |
-| `frontend/src/features/session/useSessionLoad.ts` / `useSessionSave.ts` | Sort の hydrate / save | 1 |
-| `frontend/src/App.tsx` | sortMode の orchestrator 配線 (session ↔ list) | 1 |
-| `frontend/src/App.css` | セレクトの focus スタイル | 1 |
+| `frontend/src/features/classification/ClassificationView.tsx` | filter 済み entries への sort 適用 (派生チェーン組み込み) | 1 |
+| `frontend/src/features/classification/useClassification.ts` | sortMode state (initialList hydrate + persistableState) | 1 |
+| `frontend/src/features/session/useSessionSave.ts` | `ListPersist.sort` の save 通し (hydrate は既存 initialList 経路で追加変更なし) | 1 |
+| `frontend/src/App.css` | セレクト + 同行 reload の focus スタイル | 1 |
 | `frontend/src/features/classification/reorderEntries.ts` (新規) | 並び替え計算純関数 | 2 |
 | `frontend/src/features/classification/reorderMode.ts` (新規) | `canEnterReorderMode` 純関数 (vitest 対象) | 2 |
 | `frontend/src/features/classification/useCardReorder.ts` (新規) | drag state + gate + 保存 (§8) | 2 |
