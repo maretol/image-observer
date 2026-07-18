@@ -1,5 +1,12 @@
 import type { classification } from "../../../wailsjs/go/models";
-import { SORT_MANUAL, type SortMode } from "./sortMode";
+import {
+  SORT_MANUAL,
+  SORT_MTIME_ASC,
+  SORT_MTIME_DESC,
+  SORT_NAME_ASC,
+  SORT_NAME_DESC,
+  type SortMode,
+} from "./sortMode";
 
 // 一覧タブの表示派生ソート (#144, spec-image-sort.md §3)。loadResult.entries の配列順
 // (= sidecar 正本の手動順) は書き換えず、表示チェーン (filter 済み entries → group 化) の
@@ -15,13 +22,13 @@ export function sortEntries(
   switch (mode) {
     case SORT_MANUAL:
       return entries;
-    case "nameAsc":
+    case SORT_NAME_ASC:
       return sortBy(entries, (a, b) => compareName(a, b));
-    case "nameDesc":
+    case SORT_NAME_DESC:
       return sortBy(entries, (a, b) => -compareName(a, b));
-    case "mtimeAsc":
+    case SORT_MTIME_ASC:
       return sortBy(entries, (a, b) => compareMtime(a, b, fileTimes, 1));
-    case "mtimeDesc":
+    case SORT_MTIME_DESC:
       return sortBy(entries, (a, b) => compareMtime(a, b, fileTimes, -1));
   }
 }
