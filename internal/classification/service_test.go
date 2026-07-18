@@ -2,11 +2,8 @@ package classification
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 )
 
 // fakeRepo is an in-memory SidecarRepository for service tests.
@@ -77,14 +74,21 @@ func (f *fakeRepo) CreateJSON(folderPath string, c *Classification) (int64, erro
 
 type fakeScanner struct {
 	files []string
+	// times は ListImageFiles の第 2 戻り値 (nil なら空 map)。実 walk での収集は
+	// scanner_test.go 側で検証し、service 側は passthrough だけを見る。
+	times map[string]int64
 	err   error
 }
 
-func (s fakeScanner) ListImageFiles(folderPath string) ([]string, error) {
+func (s fakeScanner) ListImageFiles(folderPath string) ([]string, map[string]int64, error) {
 	if s.err != nil {
-		return nil, s.err
+		return nil, nil, s.err
 	}
-	return append([]string(nil), s.files...), nil
+	times := make(map[string]int64, len(s.times))
+	for k, v := range s.times {
+		times[k] = v
+	}
+	return append([]string(nil), s.files...), times, nil
 }
 
 func TestService_Load_MergeAddsUnclassifiedAtEnd(t *testing.T) {
@@ -260,28 +264,9 @@ func TestService_CreateEmpty(t *testing.T) {
 	}
 }
 
-// #144: FileTimes は disk 上の実ファイルにだけ mtime (Unix 秒) を持ち、orphan
-// (sidecar のみ) と stat 失敗 (scanner が返したが disk に無い) は行を持たない。
+// #144: FileTimes は scanner が walk 中に収集した map の passthrough。orphan (sidecar のみで
+// scanner が列挙しないファイル) は行を持たない。実 walk での mtime 収集は scanner_test.go 側で検証。
 func TestService_Load_FileTimes(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "child"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "a.jpg"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "child", "b.png"), []byte("y"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	aTime := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	bTime := time.Date(2026, 6, 7, 8, 9, 10, 0, time.UTC)
-	if err := os.Chtimes(filepath.Join(dir, "a.jpg"), aTime, aTime); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(filepath.Join(dir, "child", "b.png"), bTime, bTime); err != nil {
-		t.Fatal(err)
-	}
-
 	repo := &fakeRepo{
 		mtime:  100,
 		source: "json",
@@ -290,25 +275,28 @@ func TestService_Load_FileTimes(t *testing.T) {
 			Entries: []Entry{{Filename: "ghost.png"}}, // orphan (disk に無い)
 		},
 	}
-	// "gone.gif" は scanner が返すが disk に無い = stat 失敗経路。
-	scn := fakeScanner{files: []string{"a.jpg", "child/b.png", "gone.gif"}}
+	scn := fakeScanner{
+		files: []string{"a.jpg", "child/b.png", "locked.gif"},
+		// locked.gif は Info() 失敗を模して行なし。
+		times: map[string]int64{"a.jpg": 1000, "child/b.png": 2000},
+	}
 	svc := NewService(repo, scn)
-	res, err := svc.Load(dir)
+	res, err := svc.Load("/folder")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if got, want := res.FileTimes["a.jpg"], aTime.Unix(); got != want {
+	if got, want := res.FileTimes["a.jpg"], int64(1000); got != want {
 		t.Errorf("FileTimes[a.jpg] = %d, want %d", got, want)
 	}
-	if got, want := res.FileTimes["child/b.png"], bTime.Unix(); got != want {
+	if got, want := res.FileTimes["child/b.png"], int64(2000); got != want {
 		t.Errorf("FileTimes[child/b.png] = %d, want %d", got, want)
 	}
 	if _, ok := res.FileTimes["ghost.png"]; ok {
 		t.Errorf("orphan ghost.png must not have a FileTimes row")
 	}
-	if _, ok := res.FileTimes["gone.gif"]; ok {
-		t.Errorf("stat-failed gone.gif must not have a FileTimes row")
+	if _, ok := res.FileTimes["locked.gif"]; ok {
+		t.Errorf("Info()-failed locked.gif must not have a FileTimes row")
 	}
 	if len(res.FileTimes) != 2 {
 		t.Errorf("FileTimes size = %d, want 2 (%v)", len(res.FileTimes), res.FileTimes)

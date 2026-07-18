@@ -2,8 +2,6 @@ package classification
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -24,7 +22,9 @@ func (s *Service) Load(folderPath string) (*LoadResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	files, err := s.scanner.ListImageFiles(folderPath)
+	// fileTimes は scanner が walk 中に収集済み (#144、二重 stat を避ける)。Info() 失敗の
+	// path は行を持たない (frontend は 0 扱いで末尾に寄せる)。
+	files, fileTimes, err := s.scanner.ListImageFiles(folderPath)
 	if err != nil {
 		return nil, err
 	}
@@ -58,17 +58,6 @@ func (s *Service) Load(folderPath string) (*LoadResult, error) {
 			continue
 		}
 		entries = append(entries, Entry{Filename: f})
-	}
-
-	// Step 3: mtime ソート (#144) 用の FileTimes。stat 失敗 (コピー中ロック / race で消失) は
-	// 行を持たず、エラーにしない。
-	fileTimes := make(map[string]int64, len(files))
-	for _, f := range files {
-		info, err := os.Stat(filepath.Join(folderPath, filepath.FromSlash(f)))
-		if err != nil {
-			continue
-		}
-		fileTimes[f] = info.ModTime().Unix()
 	}
 
 	return &LoadResult{
@@ -139,7 +128,7 @@ func (s *Service) UpdateEntry(folderPath string, entry Entry, expectedMtime int6
 
 // CreateEmpty は folderPath の実画像から新規 sidecar を書く。JSON が既にあれば ErrAlreadyExists。
 func (s *Service) CreateEmpty(folderPath string) (int64, error) {
-	files, err := s.scanner.ListImageFiles(folderPath)
+	files, _, err := s.scanner.ListImageFiles(folderPath)
 	if err != nil {
 		return 0, err
 	}
@@ -165,7 +154,7 @@ func (s *Service) currentOrphans(folderPath string, supplied []Entry) ([]Entry, 
 	if out.Data == nil {
 		return nil, nil
 	}
-	files, err := s.scanner.ListImageFiles(folderPath)
+	files, _, err := s.scanner.ListImageFiles(folderPath)
 	if err != nil {
 		return nil, fmt.Errorf("scan for orphan check: %w", err)
 	}
