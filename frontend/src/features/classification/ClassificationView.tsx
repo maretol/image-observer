@@ -34,6 +34,9 @@ import { arrowDirection, pickGridNeighbor } from "./gridNav";
 import { groupByDirectory, groupKeyOf } from "./groups";
 import { pickSibling } from "./sampleModalNav";
 import { sortEntries } from "./sort";
+import { reorderEntries } from "./reorderEntries";
+import { canEnterReorderMode } from "./reorderMode";
+import { useCardReorder } from "./useCardReorder";
 import type { UseClassificationReturn } from "./useClassification";
 
 export type ClassificationViewProps = {
@@ -106,6 +109,10 @@ export function ClassificationView({
     dismissDuplicatePair,
     sortMode,
     setSortMode,
+    reorderMode,
+    enterReorderMode,
+    exitReorderMode,
+    commitReorder,
   } = state;
 
   const allEntries = loadResult?.entries ?? [];
@@ -139,6 +146,40 @@ export function ClassificationView({
   const filteredGroups = useMemo(
     () => groupByDirectory(sortedEntries),
     [sortedEntries],
+  );
+
+  // 並べ替えモード (#144 Phase 2)。tokenRef は drag 開始時に capture する世代 token
+  // (= loadResult の object identity)。render 時同期なのは folderRef 等と同じ理由。
+  const reorderTokenRef = useRef<unknown>(null);
+  reorderTokenRef.current = loadResult;
+  const onReorderDrop = useCallback(
+    (srcFilename: string, groupKey: string, insertIdx: number) => {
+      // token 一致は useCardReorder が確認済みなので、この loadResult は drop 判定の
+      // 根拠になった表示と同一世代。
+      const lr = reorderTokenRef.current as UseClassificationReturn["loadResult"];
+      if (!lr) return;
+      const next = reorderEntries(lr.entries, srcFilename, groupKey, insertIdx);
+      if (!next) return; // no-op スロット / グループ跨ぎ / src 消失
+      void commitReorder(next);
+    },
+    [commitReorder],
+  );
+  const cardReorder = useCardReorder({
+    enabled: reorderMode,
+    onDrop: onReorderDrop,
+    onExitMode: exitReorderMode,
+    tokenRef: reorderTokenRef,
+  });
+  const canEnterReorder = useMemo(
+    () => canEnterReorderMode(sortMode, filter),
+    [sortMode, filter],
+  );
+  const groupReorder = useMemo(
+    () =>
+      reorderMode
+        ? { state: cardReorder.state, onStartDrag: cardReorder.startDrag }
+        : null,
+    [reorderMode, cardReorder.state, cardReorder.startDrag],
   );
 
   // Shift+click 範囲選択用の可視 card フラット順。折りたたみグループも含む (範囲が
@@ -497,7 +538,18 @@ export function ClassificationView({
         onChangeSortMode={setSortMode}
         onOpenFolder={openFolder}
         onReload={reload}
+        reorderMode={reorderMode}
+        canEnterReorder={canEnterReorder}
+        onToggleReorderMode={
+          reorderMode ? exitReorderMode : enterReorderMode
+        }
       />
+      {/* 並べ替えモード中はフィルタ / 検索 / 一括開閉を inert で丸ごと無効化する
+          (pointer + キーボードの両方を塞ぐ, #144 §5.2)。グループ個別の折りたたみは許可。 */}
+      <div
+        className="cls-filter-block"
+        inert={reorderMode || undefined}
+      >
       <TagChips
         entries={allEntries}
         selected={filter.tags}
@@ -535,6 +587,7 @@ export function ClassificationView({
             すべて折りたたむ
           </button>
         ) : null}
+      </div>
       </div>
       {selectedFilenames.length > 0 ? (
         <div className="cls-bulk-toolbar" role="region" aria-label="選択操作">
@@ -603,7 +656,8 @@ export function ClassificationView({
           className="cls-groups"
           ref={groupsRefCallback}
           onScroll={onGroupsScroll}
-          onKeyDown={onGroupsKeyDown}
+          // mode 中は矢印キーのカード移動 (focus 前提) を無効化 (#144 §5.2)。
+          onKeyDown={reorderMode ? undefined : onGroupsKeyDown}
         >
           {filteredGroups.map((g) => (
             <DirectoryGroup
@@ -626,6 +680,7 @@ export function ClassificationView({
               onRequestCardContextMenu={onRequestCardContextMenu}
               duplicateSet={duplicateSet}
               onShowDuplicates={onShowDuplicates}
+              reorder={groupReorder}
             />
           ))}
         </div>

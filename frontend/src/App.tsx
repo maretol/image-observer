@@ -114,7 +114,13 @@ function AppInner({ initialState }: AppInnerProps) {
     list: classification.persistableState,
   });
 
-  useGlobalKeybindings({ topTab, setTopTab, viewer, settingsOpen });
+  useGlobalKeybindings({
+    topTab,
+    setTopTab,
+    viewer,
+    settingsOpen,
+    listReorderMode: classification.reorderMode,
+  });
 
   const onSelectList = useCallback(() => setTopTab("list"), []);
   const onSelectViewer = useCallback(
@@ -200,6 +206,7 @@ function AppInner({ initialState }: AppInnerProps) {
         onAddViewer={onAddViewer}
         onOpenSettings={() => setSettingsOpen(true)}
         maxViewers={MAX_VIEWERS}
+        interactionDisabled={classification.reorderMode}
       />
       <div className="top-tab-content">
         {topTab === "list" ? (

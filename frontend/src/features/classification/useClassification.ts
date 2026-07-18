@@ -16,6 +16,7 @@ import { useClassificationMerge } from "./useClassificationMerge";
 import { useClassificationReplay } from "./useClassificationReplay";
 import { useClassificationSelection } from "./useClassificationSelection";
 import { useClassificationWatcher } from "./useClassificationWatcher";
+import { useClassificationReorder } from "./useClassificationReorder";
 import { useDirectoryGroups } from "./useDirectoryGroups";
 import { useDuplicateCheck } from "./useDuplicateCheck";
 import { normalizeSortMode, type SortMode } from "./sortMode";
@@ -100,6 +101,12 @@ export type UseClassificationReturn = {
   // 消費する — loadResult.entries (= sidecar 正本の手動順) は並べ替えない。
   sortMode: SortMode;
   setSortMode: (mode: SortMode) => void;
+  // 並べ替えモード (#144 Phase 2)。App レベル (TopTabsBar / keybindings gate) も読む。
+  // 永続化しない一時 state で、folder 切替 / Load 失敗 / unmount 相当のリセットで解除。
+  reorderMode: boolean;
+  enterReorderMode: () => void;
+  exitReorderMode: () => void;
+  commitReorder: (newEntries: classification.Entry[]) => Promise<void>;
   persistableState: {
     folderPath: string;
     filter: {
@@ -191,6 +198,15 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     normalizeSortMode(opts.initialList?.sort),
   );
 
+  // 並べ替えモード (#144 Phase 2)。ref は commitReorder の drop 時再確認用に render 時同期
+  // (folderRef と同じ理由 — post-render effect 同期だと await 中の解除を取りこぼす)。
+  const [reorderMode, setReorderMode] = useState(false);
+  const reorderModeRef = useRef(reorderMode);
+  reorderModeRef.current = reorderMode;
+  // saveEdit / resolveConflictForce の IPC 区間カウンタ (useClassificationEdit が増減、
+  // commitReorder の drop gate が参照, spec-image-sort.md §8.2)。
+  const editSaveInFlightRef = useRef(0);
+
   const toast = useToastFn();
   // opts.watchMode は直接使う (watchModeRef 同期 + useClassificationWatcher の prop) — local に
   // 分解しても reader なしで opts を shadow するだけ。
@@ -262,6 +278,9 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     setMergePrompt({ open: false, preview: null, folderPath: "" });
     pendingResultRef.current = null;
     resetSelectionForFolderSwitch();
+    // 並べ替えモードも entries 依存 (folder 切替 / Load 失敗で並べ替え文脈は無効)。
+    // 解除で useCardReorder 側の dragState も enabled 落ちで自動破棄される (#144 Phase 2)。
+    setReorderMode(false);
     // duplicatePairs も filename-keyed (#136)。残すと旧 folder のバッジが新 folder の同名
     // ファイルに誤表示される。
     resetDuplicates();
@@ -412,6 +431,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     loadResultRef,
     folderRef,
     requestGenRef,
+    editSaveInFlightRef,
     setLoadResult,
     setEditing,
     setConflict,
@@ -440,6 +460,22 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     confirm,
     toast,
   });
+
+  const { enterReorderMode, exitReorderMode, commitReorder } =
+    useClassificationReorder({
+      sortMode,
+      filter,
+      folderRef,
+      requestGenRef,
+      loadResultRef,
+      reorderModeRef,
+      editSaveInFlightRef,
+      setReorderMode,
+      setLoadResult,
+      clearSelected,
+      reload,
+      toast,
+    });
 
   const persistableState = useMemo(
     () => ({
@@ -499,6 +535,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       dismissDuplicatePair,
       sortMode,
       setSortMode,
+      reorderMode,
+      enterReorderMode,
+      exitReorderMode,
+      commitReorder,
       persistableState,
     }),
     [
@@ -540,6 +580,10 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       duplicatePairs,
       dismissDuplicatePair,
       sortMode,
+      reorderMode,
+      enterReorderMode,
+      exitReorderMode,
+      commitReorder,
       persistableState,
     ],
   );

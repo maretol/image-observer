@@ -8,8 +8,8 @@
 実装は **Phase 1 (ソートモード) / Phase 2 (手動 DnD 並び替え)** に分割する (§12)。
 
 > **ステータス**: ユーザー合意済み (2026-07-18、D5 は並べ替えモード制に変更の上で合意)。
-> Phase 1 (ソートモード) を feat/144-image-sort で実装。Phase 2 (並べ替えモード + DnD) は
-> 別ブランチで着手時に §8 を改訂してから。
+> Phase 1 (ソートモード) = feat/144-image-sort (PR #145) / Phase 2 (並べ替えモード + DnD) =
+> feat/144-image-sort-phase2 で実装済み。
 
 ---
 
@@ -21,6 +21,8 @@
 | 2026-07-18 | レビュー反映 (1) | ユーザー指示で D5 を「常時 DnD」から**明示的な並べ替えモード**に変更。モード中はプレビュー / 選択 / コンテキストメニュー / ビューアタブへの移動 (トップタブ切替 + 関連キーバインド) を無効化し並べ替え専念 (§5.2)。§8 に reorderMode の event source 行を追加。 |
 | 2026-07-18 | Phase 1 実装反映 | ソート適用点を filter 後段 (ClassificationView 内、順序保存の述語なので §3 の sort→filter と同値) に確定。sortMode state の所有は useClassification (persistableState 経由で session save に乗るため)。§14 Phase 1 の実ファイルを実装に合わせ更新 (App.tsx / useSessionLoad は変更不要だった)。 |
 | 2026-07-18 | code-review 反映 | (1) FileTimes の収集を Load の二重 stat から **scanner の walk 中収集** に変更 (`FileScanner.ListImageFiles` が names+times を返す、§6.1)。(2) watcher の no-op gate に **fileTimes 等価判定を追加** (`fileTimesEquivalent`) — 同名上書きで mtime ソートが stale になる穴を塞ぐ (§8.1 の watcher 行を訂正: 「既存 gate に任せる」は gate 自体が fileTimes を知らず不成立だった)。 |
+| 2026-07-18 | Phase 2 実装反映 | reorderEntries の signature は `(entries, srcFilename, groupKey, insertIdx)` (挿入は anchor member 直前 — グループ射影順が不変条件で、グループ外 entry との相対位置は仕様外)。DnD の gate 群 (mode / in-flight / folder / CONFLICT reload) は `useClassificationReorder` に分離し renderHook + IPC mock で検証。grid 挿入位置は `computeGridInsertIdx` (row-major、行帯 + 横中点)。TopTabsBar / フィルタ行の無効化は `inert` 属性で実装。 |
+| 2026-07-18 | Phase 2 着手改訂 | §8 を実装細部で確定: reorderMode の所有 = useClassification (return 経由で App が読み TopTabsBar / keybindings を gate)。**Esc の 2 段解除は useCardReorder の単一 listener** に集約 (drag 中止 → mode 解除。listener 2 本だと発火順 race で 1 回の Esc が両方走る)。drop の gen check は **drag 開始時に loadResult の object identity を capture**。autosave in-flight は saveEdit の IPC 区間で increment する `editSaveInFlightRef` を参照。保存は `commitReorder` = 楽観 local commit (gen bump) → `SaveClassification` → 成功で mtime patch / 失敗は toast + reload。選択は mode 突入時に clear。操作制限はフィルタ行等に `inert`、挿入インジケータは grid レイアウトを崩さない「挿入先 Card への ::before クラス」方式 (§5.2)。 |
 
 ---
 
@@ -155,12 +157,18 @@ Card DnD drop → entries 配列を並べ替え → setLoadResult (楽観 local 
   自前 pointer events 方式。モード中は click に割り当てられた動作が無いため競合しない)。
 - ドロップ先は **同一ディレクトリグループ内のみ** (D5)。グループ跨ぎはファイル移動を
   意味してしまうため無効 (カーソルで不可を示す)。
-- 挿入位置インジケータ (Card 間の縦バー) を表示。新規 CSS クラスは App.css に定義 (H-4)。
+- 挿入位置インジケータ (Card 間の縦バー) を表示。CSS grid のセルを占有して layout を
+  崩さないよう、独立要素でなく **挿入先 Card に `::before` の縦バーを出すクラス**
+  (`cls-card-insert-before` / 末尾は最終 Card に `-after`) で表現する。App.css に定義 (H-4)。
 - drop 確定で entries 配列内の該当 entry を移動 → local 反映 → **drop ごとに即時保存** (§8。
   「完了」時の一括保存にしないのは、途中クラッシュ / 強制終了で並びが丸ごと失われるのを
   避けるため + 既存 autosave の思想と揃えるため)。
 - マルチタッチ / 二重 pointerdown は先勝ちで無視、`pointercancel` / unmount cleanup で
   drag state を解放 (H-2)。
+- ブラウザ既定挙動の抑止: pointerdown で `preventDefault` (テキスト選択) +
+  `<img draggable={false}>` + `-webkit-user-drag: none` (ネイティブ画像ドラッグ)。
+  自前 pointer DnD がゴースト表示や pointermove の横取りと競合しないように
+  (TabBar / ImageView の先行流儀)。
 - キーボードでの並び替え (Ctrl+矢印等) は v1 では設けない (§11、a11y 改善として将来課題)。
 
 ### 5.3 トースト / エラー表示
@@ -442,7 +450,8 @@ Phase 1 は同期 state のみで async リスクが小さい。ただし §8.1 
 | `frontend/src/App.css` | セレクト + 同行 reload の focus スタイル | 1 |
 | `frontend/src/features/classification/reorderEntries.ts` (新規) | 並び替え計算純関数 | 2 |
 | `frontend/src/features/classification/reorderMode.ts` (新規) | `canEnterReorderMode` 純関数 (vitest 対象) | 2 |
-| `frontend/src/features/classification/useCardReorder.ts` (新規) | drag state + gate + 保存 (§8) | 2 |
+| `frontend/src/features/classification/useCardReorder.ts` (新規) | pointer DnD (drag state / 挿入計算 / Esc 2 段解除) | 2 |
+| `frontend/src/features/classification/useClassificationReorder.ts` (新規) | モード出入り + commitReorder (gate + 楽観 commit + SaveClassification) | 2 |
 | `frontend/src/features/classification/ClassificationHeader.tsx` | 「並べ替え」トグル + モード中の UI disabled | 2 |
 | `frontend/src/features/classification/Card.tsx` / `DirectoryGroup.tsx` | DnD ハンドラ + 挿入インジケータ + モード中の操作無効化 | 2 |
 | `frontend/src/features/classification/ClassificationView.tsx` | reorderMode state + Esc ハンドリング + プレビュー / メニュー gate | 2 |

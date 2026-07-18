@@ -1236,6 +1236,55 @@ html, body, #root {
   color: #ddd;
 }
 
+.cls-header-sort:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 並べ替えモードのトグル (#144 Phase 2)。 */
+.cls-header-reorder {
+  background: #2d2d30;
+  color: #ddd;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cls-header-reorder:hover:not(:disabled) {
+  background: #3f3f46;
+}
+
+.cls-header-reorder:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cls-header-reorder.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.cls-header-reorder:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* 並べ替えモード中に inert で無効化する領域の視覚表現 (#144 Phase 2)。
+   inert 自体が pointer + キーボードを塞ぐので、ここは「効かない」ことの提示だけ。 */
+.cls-filter-block {
+  flex-shrink: 0;
+}
+
+.cls-filter-block[inert],
+.top-tabs[inert] {
+  opacity: 0.45;
+}
+
 .cls-tagchips {
   display: flex;
   flex-wrap: wrap;
@@ -1641,6 +1690,55 @@ html, body, #root {
 .cls-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* 並べ替えモード中の Card (#144 Phase 2)。drag ハンドル化するので grab カーソル +
+   hover の持ち上がりを止める (drag 中の視覚ノイズ防止)。::before/::after の挿入バーを
+   card 内側エッジに置くため position: relative (overflow: hidden のため外側には出せない)。 */
+.cls-card-reorderable {
+  position: relative;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* -webkit-user-drag は非継承なので img にも直接指定 (draggable={false} の CSS 側の対、
+   WebKitGTK / WebView2 のネイティブ画像ドラッグ抑止)。 */
+.cls-card-reorderable .cls-card-thumb-img {
+  -webkit-user-drag: none;
+}
+
+.cls-card-reorderable:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.cls-card-drag-src {
+  opacity: 0.45;
+}
+
+/* 挿入位置インジケータ: 「この card の前 (左)」 = 左内側エッジの縦バー。行末 append は
+   最終 card の右内側エッジ (-after)。独立要素だと grid セルを 1 つ占有してしまうため
+   card 側の擬似要素で表現する (spec-image-sort.md §5.2)。 */
+.cls-card-insert-before::before,
+.cls-card-insert-after::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.cls-card-insert-before::before {
+  left: 0;
+}
+
+.cls-card-insert-after::after {
+  right: 0;
 }
 
 /* Selected card: accent tint + crisp 1px ring so the selection reads at a
