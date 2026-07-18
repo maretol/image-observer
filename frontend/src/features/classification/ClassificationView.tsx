@@ -33,6 +33,7 @@ import { tagSummary } from "./filters";
 import { arrowDirection, pickGridNeighbor } from "./gridNav";
 import { groupByDirectory, groupKeyOf } from "./groups";
 import { pickSibling } from "./sampleModalNav";
+import { sortEntries } from "./sort";
 import type { UseClassificationReturn } from "./useClassification";
 
 export type ClassificationViewProps = {
@@ -103,6 +104,8 @@ export function ClassificationView({
     deleteOne,
     duplicatePairs,
     dismissDuplicatePair,
+    sortMode,
+    setSortMode,
   } = state;
 
   const allEntries = loadResult?.entries ?? [];
@@ -124,9 +127,18 @@ export function ClassificationView({
     return { totalCountByGroup: counts, allGroupKeys: keys };
   }, [allEntries]);
 
+  // 表示派生ソート (#144)。loadResult.entries (sidecar 正本の手動順) は不変のまま、
+  // filter 済み配列だけを並べ替える (filter は順序保存の述語なので、entries → filter →
+  // sort は spec-image-sort.md §3 の sort → filter と同値)。下流の displayedOrder /
+  // gridNav / SampleModal prev·next は全て filteredGroups 派生なので自動追従。
+  const sortedEntries = useMemo(
+    () => sortEntries(filteredEntries, sortMode, loadResult?.fileTimes),
+    [filteredEntries, sortMode, loadResult?.fileTimes],
+  );
+
   const filteredGroups = useMemo(
-    () => groupByDirectory(filteredEntries),
-    [filteredEntries],
+    () => groupByDirectory(sortedEntries),
+    [sortedEntries],
   );
 
   // Shift+click 範囲選択用の可視 card フラット順。折りたたみグループも含む (範囲が
@@ -481,6 +493,8 @@ export function ClassificationView({
         allEntries={allEntries}
         filteredEntries={filteredEntries}
         loading={loading}
+        sortMode={sortMode}
+        onChangeSortMode={setSortMode}
         onOpenFolder={openFolder}
         onReload={reload}
       />

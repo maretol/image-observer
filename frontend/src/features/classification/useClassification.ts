@@ -18,6 +18,7 @@ import { useClassificationSelection } from "./useClassificationSelection";
 import { useClassificationWatcher } from "./useClassificationWatcher";
 import { useDirectoryGroups } from "./useDirectoryGroups";
 import { useDuplicateCheck } from "./useDuplicateCheck";
+import { normalizeSortMode, type SortMode } from "./sortMode";
 
 // テスト / 既存呼び出し向けの re-export。正の宣言は ./useClassificationWatcher (それを
 // 消費する EventsOn subscription の隣) にある。
@@ -95,6 +96,10 @@ export type UseClassificationReturn = {
   // ダブり候補ペア (dismiss 除外済み, #136)。null = 未検出 (off / 初回前 / クリア直後)。
   duplicatePairs: imghash.DuplicatePair[] | null;
   dismissDuplicatePair: (fileA: string, fileB: string) => Promise<void>;
+  // 表示派生ソート (#144)。同期 UI state で、表示チェーン (ClassificationView) だけが
+  // 消費する — loadResult.entries (= sidecar 正本の手動順) は並べ替えない。
+  sortMode: SortMode;
+  setSortMode: (mode: SortMode) => void;
   persistableState: {
     folderPath: string;
     filter: {
@@ -104,6 +109,7 @@ export type UseClassificationReturn = {
       query: string;
     };
     collapsedGroups: string[];
+    sort: SortMode;
   };
 };
 
@@ -178,6 +184,12 @@ export function useClassification(opts: Opts): UseClassificationReturn {
     resetForFolderSwitch: resetSelectionForFolderSwitch,
   } = useClassificationSelection();
   const groups = useDirectoryGroups(opts.initialList?.collapsedGroups ?? []);
+
+  // 表示派生ソート (#144)。folder 切替でリセットしない (タブ全体の表示設定、
+  // spec-image-sort.md D3)。hydrate 値は Go の validateState が clamp 済みだが二重防御で正規化。
+  const [sortMode, setSortMode] = useState<SortMode>(() =>
+    normalizeSortMode(opts.initialList?.sort),
+  );
 
   const toast = useToastFn();
   // opts.watchMode は直接使う (watchModeRef 同期 + useClassificationWatcher の prop) — local に
@@ -439,8 +451,9 @@ export function useClassification(opts: Opts): UseClassificationReturn {
         query: filter.query,
       },
       collapsedGroups: groups.collapsedList,
+      sort: sortMode,
     }),
-    [folderPath, filter, groups.collapsedList],
+    [folderPath, filter, groups.collapsedList, sortMode],
   );
 
   // 中身が実際に変わらない限り consumer (App.tsx / ClassificationView) が同じ identity を
@@ -484,6 +497,8 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       deleteOne,
       duplicatePairs,
       dismissDuplicatePair,
+      sortMode,
+      setSortMode,
       persistableState,
     }),
     [
@@ -524,6 +539,7 @@ export function useClassification(opts: Opts): UseClassificationReturn {
       deleteOne,
       duplicatePairs,
       dismissDuplicatePair,
+      sortMode,
       persistableState,
     ],
   );
