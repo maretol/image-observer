@@ -42,6 +42,7 @@ function setup(currentFolder = "A", baselineMtime = 1) {
   const folderRef = { current: currentFolder };
   const loadResultRef = { current: makeLoadResult(baselineMtime) };
   const requestGenRef = { current: 0 };
+  const editSaveInFlightRef = { current: 0 };
   const setLoadResult = vi.fn();
   const setEditing = vi.fn();
   const setConflict = vi.fn();
@@ -52,6 +53,7 @@ function setup(currentFolder = "A", baselineMtime = 1) {
     loadResultRef,
     folderRef,
     requestGenRef,
+    editSaveInFlightRef,
     setLoadResult,
     setEditing,
     setConflict,
@@ -63,6 +65,7 @@ function setup(currentFolder = "A", baselineMtime = 1) {
     result,
     folderRef,
     requestGenRef,
+    editSaveInFlightRef,
     setLoadResult,
     setEditing,
     setConflict,

@@ -8,7 +8,8 @@ import type { ConflictPrompt, EditingState } from "./useClassification";
 
 // Go 側 SaveJSON が expectedMtime 不一致で返す sentinel (internal/classification/
 // service.go の ErrConflict)。startsWith で比較し、suffix に実 mtime 詳細を載せる。
-const CONFLICT_PREFIX = "CONFLICT:";
+// export は useClassificationReorder (並び替え保存の CONFLICT 分岐, #144) が共有するため。
+export const CONFLICT_PREFIX = "CONFLICT:";
 
 // save を capture した folder を運ぶ (#110 C)。saveEdit は live folderRef でなく
 // ctx.folder で gate するので、folder 切替後に発火する save-on-unmount cleanup
@@ -37,6 +38,10 @@ type Props = {
 
   folderRef: React.MutableRefObject<string>;
   requestGenRef: React.MutableRefObject<number>;
+  // sidecar 書き込み IPC (saveEdit / resolveConflictForce) の in-flight カウンタ。
+  // 並び替え drop の gate (useClassificationReorder) が読む — 同じ mtime チェーンを
+  // bump し合う save が同時に飛ぶと後着が CONFLICT するため (#144 spec §8.2)。
+  editSaveInFlightRef: React.MutableRefObject<number>;
 
   setLoadResult: React.Dispatch<
     React.SetStateAction<classification.LoadResult | null>
@@ -59,6 +64,7 @@ export function useClassificationEdit(props: Props): UseClassificationEditReturn
     loadResultRef,
     folderRef,
     requestGenRef,
+    editSaveInFlightRef,
     setLoadResult,
     setEditing,
     setConflict,
@@ -90,6 +96,7 @@ export function useClassificationEdit(props: Props): UseClassificationEditReturn
       // 通ったので loadResultRef は ctx.folder を追う。
       const lr = loadResultRef.current;
       if (!lr) return;
+      ++editSaveInFlightRef.current;
       try {
         const out = await UpdateClassificationEntry(
           ctx.folder,
@@ -144,12 +151,15 @@ export function useClassificationEdit(props: Props): UseClassificationEditReturn
             err: msg,
           });
         }
+      } finally {
+        --editSaveInFlightRef.current;
       }
     },
     [
       folderRef,
       loadResultRef,
       requestGenRef,
+      editSaveInFlightRef,
       setConflict,
       setEditing,
       setLoadResult,
@@ -167,6 +177,7 @@ export function useClassificationEdit(props: Props): UseClassificationEditReturn
     if (!conflict) return;
     const cur = folderRef.current;
     if (!cur) return;
+    ++editSaveInFlightRef.current;
     try {
       const out = await UpdateClassificationEntry(cur, conflict.draft, 0);
       // state commit 前に folder check — 旧 folder の mutation 結果で新 folder state を
@@ -186,12 +197,15 @@ export function useClassificationEdit(props: Props): UseClassificationEditReturn
     } catch (e) {
       if (folderRef.current !== cur) return;
       toast(`強制上書きに失敗しました: ${errorMessage(e)}`, "error");
+    } finally {
+      --editSaveInFlightRef.current;
     }
   }, [
     conflict,
     folderRef,
     reload,
     requestGenRef,
+    editSaveInFlightRef,
     setConflict,
     setEditing,
     toast,
