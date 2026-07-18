@@ -2,6 +2,8 @@ package classification
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -58,6 +60,17 @@ func (s *Service) Load(folderPath string) (*LoadResult, error) {
 		entries = append(entries, Entry{Filename: f})
 	}
 
+	// Step 3: mtime ソート (#144) 用の FileTimes。stat 失敗 (コピー中ロック / race で消失) は
+	// 行を持たず、エラーにしない。
+	fileTimes := make(map[string]int64, len(files))
+	for _, f := range files {
+		info, err := os.Stat(filepath.Join(folderPath, filepath.FromSlash(f)))
+		if err != nil {
+			continue
+		}
+		fileTimes[f] = info.ModTime().Unix()
+	}
+
 	return &LoadResult{
 		FolderPath: folderPath,
 		Entries:    entries,
@@ -65,6 +78,7 @@ func (s *Service) Load(folderPath string) (*LoadResult, error) {
 		HasSidecar: out.Source == "json" || out.Source == "csv",
 		Source:     out.Source,
 		Mtime:      out.Mtime,
+		FileTimes:  fileTimes,
 	}, nil
 }
 

@@ -51,7 +51,20 @@ type ListTabState struct {
 	FolderPath      string          `json:"folderPath"`
 	Filter          ListFilterState `json:"filter"`
 	CollapsedGroups []string        `json:"collapsedGroups"`
+	// Sort は一覧タブのソートモード (#144)。空 / 不正値は SortManual に fallback —
+	// schema bump なしの加算追加で v6 は前後方互換 (spec-image-sort.md §7.1)。
+	Sort string `json:"sort"`
 }
+
+// Sort モードの許容値。手動 (sidecar 配列順) が既定 = 従来挙動。frontend の
+// features/classification/sortMode.ts と test 対の pin 断言で同期 (AGENTS.md D-1)。
+const (
+	SortManual    = "manual"
+	SortNameAsc   = "nameAsc"
+	SortNameDesc  = "nameDesc"
+	SortMtimeAsc  = "mtimeAsc"
+	SortMtimeDesc = "mtimeDesc"
+)
 
 // ListFilterState は frontend の filter store をミラー。Tags は OR set、Confidence は
 // "all" | "high" | "mid" | "low"。UntaggedOnly (#116) はタグ無し entry のみ表示し Tags と排他 —
@@ -163,6 +176,7 @@ func defaultListTabState() ListTabState {
 			Query:      "",
 		},
 		CollapsedGroups: []string{},
+		Sort:            SortManual,
 	}
 }
 
@@ -308,6 +322,13 @@ func validateState(s *StateData) error {
 		// ok
 	default:
 		s.List.Filter.Confidence = "all"
+	}
+	switch s.List.Sort {
+	case SortManual, SortNameAsc, SortNameDesc, SortMtimeAsc, SortMtimeDesc:
+		// ok
+	default:
+		// 旧 state.json (field 欠落 = 空文字) / 不正値は従来挙動の manual へ。
+		s.List.Sort = SortManual
 	}
 	return nil
 }
