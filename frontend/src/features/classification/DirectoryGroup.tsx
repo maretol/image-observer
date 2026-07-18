@@ -1,7 +1,21 @@
 import { ChevronIcon } from "../../shared/icons/ChevronIcon";
-import { Card } from "./Card";
+import { Card, type CardReorderProps } from "./Card";
 import type { DirectoryGroup as DirectoryGroupModel } from "./groups";
 import type { classification } from "../../../wailsjs/go/models";
+import {
+  DATA_REORDER_GROUP,
+  type CardReorderState,
+} from "./useCardReorder";
+
+// 並べ替えモード (#144 Phase 2) の配線。null なら通常表示。
+export type GroupReorderProps = {
+  state: CardReorderState | null;
+  onStartDrag: (
+    filename: string,
+    groupKey: string,
+    ev: { clientX: number; clientY: number; pointerId: number },
+  ) => void;
+};
 
 export type DirectoryGroupProps = {
   group: DirectoryGroupModel;
@@ -22,6 +36,8 @@ export type DirectoryGroupProps = {
   // ダブり候補 filename の集合 (#136)。含まれる Card に ⚠ バッジ。
   duplicateSet: ReadonlySet<string>;
   onShowDuplicates: (filename: string) => void;
+  // 並べ替えモード中のみ非 null (#144 Phase 2)。グループ折りたたみは mode 中も許可 (§5.2)。
+  reorder?: GroupReorderProps | null;
 };
 
 export function DirectoryGroup({
@@ -41,8 +57,36 @@ export function DirectoryGroup({
   onRequestCardContextMenu,
   duplicateSet,
   onShowDuplicates,
+  reorder = null,
 }: DirectoryGroupProps) {
   const filteredCount = group.entries.length;
+  // このグループで active な drag のみインジケータ / source 淡色化を出す。
+  const dragHere =
+    reorder?.state != null &&
+    reorder.state.active &&
+    !reorder.state.outside &&
+    reorder.state.groupKey === group.key
+      ? reorder.state
+      : null;
+  const cardReorderFor = (
+    filename: string,
+    idx: number,
+  ): CardReorderProps | null => {
+    if (!reorder) return null;
+    return {
+      onStartDrag: (ev) => reorder.onStartDrag(filename, group.key, ev),
+      indicator:
+        dragHere == null
+          ? null
+          : dragHere.insertIdx === idx
+            ? "before"
+            : idx === group.entries.length - 1 &&
+                dragHere.insertIdx === group.entries.length
+              ? "after"
+              : null,
+      dragSource: reorder.state?.srcFilename === filename,
+    };
+  };
   return (
     <section className="cls-group">
       <button
@@ -60,8 +104,11 @@ export function DirectoryGroup({
         </span>
       </button>
       {!collapsed ? (
-        <div className="cls-group-grid">
-          {group.entries.map((entry: classification.Entry) => (
+        <div
+          className="cls-group-grid"
+          {...(reorder ? { [DATA_REORDER_GROUP]: group.key } : {})}
+        >
+          {group.entries.map((entry: classification.Entry, idx: number) => (
             <Card
               key={entry.filename}
               folderPath={folderPath}
@@ -79,6 +126,7 @@ export function DirectoryGroup({
               }
               duplicateWarn={duplicateSet.has(entry.filename)}
               onShowDuplicates={() => onShowDuplicates(entry.filename)}
+              reorder={cardReorderFor(entry.filename, idx)}
             />
           ))}
         </div>

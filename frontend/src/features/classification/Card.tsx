@@ -4,7 +4,23 @@ import { ThumbErrorIcon } from "../../shared/icons/ThumbErrorIcon";
 import { WarnIcon } from "../../shared/icons/WarnIcon";
 import { extractTags } from "./filters";
 import { readableTextColor, tagBadgeClass, tagColor } from "./colors";
+import { DATA_REORDER_CARD } from "./useCardReorder";
 import { useGridThumbnail } from "./useGridThumbnail";
+
+// 並べ替えモード (#144 Phase 2) 中の Card への配線。null 以外が渡っている間、Card は
+// 「drag ハンドル」としてのみ機能する: プレビュー / 選択 / 編集 / メニュー / ダブり確認は
+// 全て無効 (spec-image-sort.md §5.2)。
+export type CardReorderProps = {
+  onStartDrag: (ev: {
+    clientX: number;
+    clientY: number;
+    pointerId: number;
+  }) => void;
+  // 挿入インジケータ。grid セルを占有しないよう独立要素でなく Card 側の ::before で表現。
+  indicator: "before" | "after" | null;
+  // drag 中の source Card (淡色化)。
+  dragSource: boolean;
+};
 
 export type CardProps = {
   folderPath: string;
@@ -27,6 +43,8 @@ export type CardProps = {
   // ダブり候補 (#136)。true でサムネ左下に ⚠ バッジ。クリックで確認モーダル。
   duplicateWarn: boolean;
   onShowDuplicates: () => void;
+  // 並べ替えモード中のみ非 null (#144 Phase 2)。
+  reorder?: CardReorderProps | null;
 };
 
 export function Card({
@@ -43,6 +61,7 @@ export function Card({
   onRequestContextMenu,
   duplicateWarn,
   onShowDuplicates,
+  reorder = null,
 }: CardProps) {
   const fullPath = `${folderPath}/${entry.filename}`;
   const { ref, url, state } = useGridThumbnail(fullPath);
@@ -59,56 +78,99 @@ export function Card({
     }
   };
 
+  const interactive = reorder === null;
+  const reorderClasses = reorder
+    ? [
+        "cls-card-reorderable",
+        reorder.dragSource ? "cls-card-drag-src" : "",
+        reorder.indicator === "before" ? "cls-card-insert-before" : "",
+        reorder.indicator === "after" ? "cls-card-insert-after" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : "";
+
   return (
     <div
-      className={`cls-card ${selected ? "cls-card-selected" : ""}`}
+      className={`cls-card ${selected ? "cls-card-selected" : ""} ${reorderClasses}`}
+      {...(reorder ? { [DATA_REORDER_CARD]: entry.filename } : {})}
       onContextMenu={(e) => {
         // webview 既定メニューを抑止。.cls-card wrapper で捕捉するので card 上
         // どこ (thumb / filename / badge) で右クリックしてもメニューが出る (#47 §5.1)。
+        // 並べ替えモード中はメニューを出さない (抑止のみ, #144 §5.2)。
         e.preventDefault();
-        onRequestContextMenu(e.clientX, e.clientY);
+        if (interactive) onRequestContextMenu(e.clientX, e.clientY);
       }}
+      onPointerDown={
+        reorder
+          ? (e) => {
+              // 主ボタンのみ drag 開始 (右クリック / 中クリックは無視)。マルチタッチの
+              // 二重 pointerdown は hook 側の先勝ち guard が落とす (H-2)。
+              if (e.button !== 0) return;
+              reorder.onStartDrag({
+                clientX: e.clientX,
+                clientY: e.clientY,
+                pointerId: e.pointerId,
+              });
+            }
+          : undefined
+      }
     >
       <div
         ref={ref}
         className="cls-card-thumb"
-        role="button"
-        tabIndex={0}
-        aria-label={
-          showCheckbox && selectionMode
-            ? `${entry.filename} の選択を切替`
-            : `${entry.filename} を開く`
+        // 並べ替えモード中は role/button 相当のセマンティクスを外す (クリック動作が無く、
+        // キーボード並べ替えも v1 対象外のため focus 対象から除外, #144 §5.2)。
+        {...(interactive
+          ? {
+              role: "button",
+              tabIndex: 0,
+              "aria-label":
+                showCheckbox && selectionMode
+                  ? `${entry.filename} の選択を切替`
+                  : `${entry.filename} を開く`,
+            }
+          : {})}
+        onClick={
+          interactive
+            ? (e) => {
+                if (modifierEnabled && e.shiftKey) {
+                  onExtendSelectionTo();
+                  return;
+                }
+                if (modifierEnabled && (e.ctrlKey || e.metaKey)) {
+                  onToggleSelect();
+                  return;
+                }
+                // 素のクリック。checkbox 表示 + 選択済みなら「選択に追加」(Finder 風)。
+                // modifier モードはこの分岐を通らず常に preview modal を開く。
+                if (showCheckbox && selectionMode) {
+                  onToggleSelect();
+                  return;
+                }
+                onClickPreview();
+              }
+            : undefined
         }
-        onClick={(e) => {
-          if (modifierEnabled && e.shiftKey) {
-            onExtendSelectionTo();
-            return;
-          }
-          if (modifierEnabled && (e.ctrlKey || e.metaKey)) {
-            onToggleSelect();
-            return;
-          }
-          // 素のクリック。checkbox 表示 + 選択済みなら「選択に追加」(Finder 風)。
-          // modifier モードはこの分岐を通らず常に preview modal を開く。
-          if (showCheckbox && selectionMode) {
-            onToggleSelect();
-            return;
-          }
-          onClickPreview();
-        }}
-        onKeyDown={(e) => {
-          // thumb 自身に focus があるときだけ反応 — でないと内側の checkbox / 編集
-          // ボタンでの Enter/Space が bubble して二重発火する (checkbox がトグル →
-          // 親が activate() で戻す)。
-          if (e.target !== e.currentTarget) return;
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            activate();
-          }
-        }}
+        onKeyDown={
+          interactive
+            ? (e) => {
+                // thumb 自身に focus があるときだけ反応 — でないと内側の checkbox / 編集
+                // ボタンでの Enter/Space が bubble して二重発火する (checkbox がトグル →
+                // 親が activate() で戻す)。
+                if (e.target !== e.currentTarget) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  activate();
+                }
+              }
+            : undefined
+        }
         title={entry.filename}
         style={
-          showCheckbox && selectionMode ? { cursor: "pointer" } : undefined
+          interactive && showCheckbox && selectionMode
+            ? { cursor: "pointer" }
+            : undefined
         }
       >
         {url ? (
@@ -122,7 +184,7 @@ export function Card({
             <ThumbErrorIcon />
           </span>
         ) : null}
-        {showCheckbox ? (
+        {interactive && showCheckbox ? (
           <label
             className="cls-card-select"
             onClick={(e) => e.stopPropagation()}
@@ -136,19 +198,21 @@ export function Card({
             />
           </label>
         ) : null}
-        <button
-          type="button"
-          className="cls-card-edit"
-          onClick={(e) => {
-            e.stopPropagation();
-            onClickEdit();
-          }}
-          title="編集"
-          aria-label="編集"
-        >
-          <EditIcon size={12} />
-        </button>
-        {duplicateWarn ? (
+        {interactive ? (
+          <button
+            type="button"
+            className="cls-card-edit"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClickEdit();
+            }}
+            title="編集"
+            aria-label="編集"
+          >
+            <EditIcon size={12} />
+          </button>
+        ) : null}
+        {interactive && duplicateWarn ? (
           // 警告なので hover-reveal (cls-card-edit) にせず常時表示。四隅は checkbox (左上) /
           // 編集 (右上) / .cls-card-preview 予約 (右下) が使うため左下 (#136 §5.1)。
           <button

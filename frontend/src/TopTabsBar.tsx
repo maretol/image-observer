@@ -23,6 +23,9 @@ export type TopTabsBarProps = {
   onAddViewer: () => void;
   onOpenSettings: () => void;
   maxViewers: number;
+  // 一覧タブの並べ替えモード中 true (#144 Phase 2)。バー全体を inert にして、ビューアタブ
+  // への移動 / 追加 / 設定を pointer + キーボードの両方から塞ぐ (spec-image-sort §5.2)。
+  interactionDisabled?: boolean;
 };
 
 export function TopTabsBar({
@@ -40,6 +43,7 @@ export function TopTabsBar({
   onAddViewer,
   onOpenSettings,
   maxViewers,
+  interactionDisabled = false,
 }: TopTabsBarProps) {
   // 閾値を越えて active になってから出す (通常クリックでインジケータが一瞬光らないよう)。
   const dragActive = reorder.state?.active ?? false;
@@ -47,7 +51,12 @@ export function TopTabsBar({
   const dragInsertIdx = dragActive ? (reorder.state?.insertIdx ?? -1) : -1;
 
   return (
-    <nav className="top-tabs" role="tablist" aria-label="トップレベルタブ">
+    <nav
+      className="top-tabs"
+      role="tablist"
+      aria-label="トップレベルタブ"
+      inert={interactionDisabled || undefined}
+    >
       <button
         type="button"
         role="tab"

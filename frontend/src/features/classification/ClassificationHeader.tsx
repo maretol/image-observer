@@ -19,6 +19,12 @@ export type ClassificationHeaderProps = {
   onChangeSortMode: (mode: SortMode) => void;
   onOpenFolder: () => void;
   onReload: () => void;
+  // 並べ替えモード (#144 Phase 2)。mode 中はフォルダ変更 / 再読込 / 並び順変更を disabled
+  // にして、有効条件が崩れる操作を入口から塞ぐ (spec-image-sort.md §5.2)。
+  reorderMode: boolean;
+  // 入口条件 (手動ソート + フィルタ非適用, canEnterReorderMode)。
+  canEnterReorder: boolean;
+  onToggleReorderMode: () => void;
 };
 
 // 並び順の表示ラベル (#144)。手動 = sidecar 配列順 (従来挙動)。
@@ -39,6 +45,9 @@ export function ClassificationHeader({
   onChangeSortMode,
   onOpenFolder,
   onReload,
+  reorderMode,
+  canEnterReorder,
+  onToggleReorderMode,
 }: ClassificationHeaderProps) {
   return (
     <div className="cls-header">
@@ -46,7 +55,7 @@ export function ClassificationHeader({
         type="button"
         className="folder-pick-button"
         onClick={onOpenFolder}
-        disabled={loading}
+        disabled={loading || reorderMode}
       >
         フォルダを開く
       </button>
@@ -62,6 +71,7 @@ export function ClassificationHeader({
         title="並び順"
         value={sortMode}
         onChange={(e) => onChangeSortMode(normalizeSortMode(e.target.value))}
+        disabled={reorderMode}
       >
         {SORT_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
@@ -71,9 +81,26 @@ export function ClassificationHeader({
       </select>
       <button
         type="button"
+        className={`cls-header-reorder ${reorderMode ? "active" : ""}`}
+        onClick={onToggleReorderMode}
+        // 解除 (完了) は常に押せる。入るときだけ入口条件で disabled (#144 §5.2)。
+        disabled={!reorderMode && (!folderPath || loading || !canEnterReorder)}
+        aria-pressed={reorderMode}
+        title={
+          reorderMode
+            ? "並べ替えを終了"
+            : canEnterReorder
+              ? "カードをドラッグして手動で並べ替え"
+              : "並べ替えは並び順「手動」+ フィルタ未適用のときに使えます"
+        }
+      >
+        {reorderMode ? "完了" : "並べ替え"}
+      </button>
+      <button
+        type="button"
         className="cls-header-reload"
         onClick={onReload}
-        disabled={!folderPath || loading}
+        disabled={!folderPath || loading || reorderMode}
         title="再読み込み"
         aria-label="再読み込み"
       >
