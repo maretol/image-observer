@@ -242,6 +242,7 @@ export namespace settings {
 	    editAutoSave: boolean;
 	    duplicateDetectMode: string;
 	    duplicateThreshold: number;
+	    maxViewers: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsData(source);
@@ -263,6 +264,7 @@ export namespace settings {
 	        this.editAutoSave = source["editAutoSave"];
 	        this.duplicateDetectMode = source["duplicateDetectMode"];
 	        this.duplicateThreshold = source["duplicateThreshold"];
+	        this.maxViewers = source["maxViewers"];
 	    }
 	}
 

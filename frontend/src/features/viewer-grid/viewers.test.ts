@@ -104,11 +104,27 @@ describe("addViewer", () => {
     const names = s.viewers.map((v) => v.name);
     expect(names).toEqual(["ビューア 1", "ビューア 3", "ビューア 2"]);
   });
-  it("refuses to exceed MAX_VIEWERS", () => {
+  it("refuses to exceed the default MAX_VIEWERS when max is omitted", () => {
     const full = setN(MAX_VIEWERS);
     expect(full.viewers).toHaveLength(MAX_VIEWERS);
     const next = addViewer(full);
     expect(next).toBe(full); // referential no-op
+  });
+  it("allows exceeding MAX_VIEWERS when a larger max is given (#148)", () => {
+    const full = setN(MAX_VIEWERS);
+    const next = addViewer(full, MAX_VIEWERS + 4);
+    expect(next.viewers).toHaveLength(MAX_VIEWERS + 1);
+  });
+  it("refuses at a custom max below the default", () => {
+    const s = setN(3);
+    expect(addViewer(s, 3)).toBe(s);
+  });
+  it("refuses (without truncating) when the set already exceeds max", () => {
+    // 上限を下げた後の状態 (#148 D2): 既存 viewer は削らず追加だけ拒否する。
+    const s = setN(5);
+    const next = addViewer(s, 3);
+    expect(next).toBe(s);
+    expect(next.viewers).toHaveLength(5);
   });
 });
 
