@@ -3,6 +3,7 @@
 ビューアタブを単一の固定タブから「**ユーザーが追加 / 削除 / リネームできる複数ビューア**」へ拡張する。各ビューアは独立した BSP レイアウト ([docs/spec-viewer-flexlayout.md](spec-viewer-flexlayout.md)) を持つ。VS Code の「ウィンドウ → 新しいウィンドウ」やブラウザの複数タブグループに近い UX を目指す。
 
 > **ステータス**: 実装完了 (state schema v6、`features/viewer-grid/viewers.ts` + `useViewerSet.ts`)。本書 §13 の決定事項は確定済み、§11 / §14 は履歴として残置。
+> **追記 (2026-07-20, #148)**: 本書の「MAX_VIEWERS = 8 固定」は [spec-viewer-max-count.md](spec-viewer-max-count.md) で上書き — 上限は `settings.maxViewers` (既定 8 / 1..32) になり、8 は既定値 / fallback に変わった。
 
 ---
 
