@@ -1,5 +1,5 @@
 import { t } from "../../../shared/messages";
-import { MAX_VIEWERS_HARD } from "../../viewer-grid/viewers";
+import { MAX_VIEWERS_HARD, MIN_VIEWERS } from "../../viewer-grid/viewers";
 import type { Settings } from "../useSettings";
 import { Field, NumberInput, Segment } from "../SettingsFields";
 
@@ -55,7 +55,7 @@ export function ViewerSection({
       >
         <NumberInput
           value={data.maxViewers}
-          min={1}
+          min={MIN_VIEWERS}
           max={MAX_VIEWERS_HARD}
           step={1}
           onChange={(n) => onChange({ maxViewers: n })}

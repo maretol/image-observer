@@ -13,17 +13,18 @@
 | 日付 | ラウンド | 主な変更 |
 |------|---------|---------|
 | 2026-07-20 | 初版ドラフト | issue #148 を受けて起案。settings additive field + state ハードキャップ 32 + add-gate 方式。 |
+| 2026-07-20 | 実装 + セルフレビュー反映 | D1〜D5 初版どおり実装、DoD チェック。レビュー指摘で TS 側に D-1 pin テスト (viewers.test.ts) と `MIN_VIEWERS` 定数を追加 (§6 の定数群に含める)。 |
 
 ---
 
 ## 1. ゴール (DoD)
 
-- [ ] 設定ダイアログから「ビューアタブの最大数」(1..32) を変更できる
-- [ ] 変更は保存後すぐ反映 (再起動不要): + ボタンの活性 / 追加拒否 toast が新上限に追従
-- [ ] 上限を現在の open viewer 数より下げても既存 viewer は閉じられない (追加だけ拒否)
-- [ ] settings.json への保存 / 復元、欠落・不正値の per-field fallback (既定 8)
-- [ ] state.json 復元で 9..32 個の viewer が truncate されない (ハードキャップ 32 のみ適用)
-- [ ] Go / フロントのテストが上記境界を検証する
+- [x] 設定ダイアログから「ビューアタブの最大数」(1..32) を変更できる
+- [x] 変更は保存後すぐ反映 (再起動不要): + ボタンの活性 / 追加拒否 toast が新上限に追従
+- [x] 上限を現在の open viewer 数より下げても既存 viewer は閉じられない (追加だけ拒否)
+- [x] settings.json への保存 / 復元、欠落・不正値の per-field fallback (既定 8)
+- [x] state.json 復元で 9..32 個の viewer が truncate されない (ハードキャップ 32 のみ適用)
+- [x] Go / フロントのテストが上記境界を検証する
 
 ## 2. 用語
 
@@ -84,7 +85,9 @@ MaxViewers int `json:"maxViewers"`
 
 - `viewers.ts`: `MAX_VIEWERS = 8` は**既定値 (settings ロード中 fallback) として存続**。
   `addViewer(set, max = MAX_VIEWERS)` のように上限を引数化。`ViewerSet.viewers` の不変条件
-  コメントは「長さ 1..32 (ハードキャップ)」に更新
+  コメントは「長さ 1..32 (ハードキャップ)」に更新。設定 UI の入力範囲用に `MIN_VIEWERS = 1` /
+  `MAX_VIEWERS_HARD = 32` も export し、Go 側リテラルとのドリフトは viewers.test.ts の
+  D-1 pin テストで検知 (duplicateDetect.test.ts と同じ流儀)
 - `useViewerSet`: opts に `maxViewers?: number` (fallback `MAX_VIEWERS`) を追加し、
   追加 gate / toast / addViewer 呼び出しに使う
 - `App.tsx`: `settings.data?.maxViewers ?? MAX_VIEWERS` を計算し、useViewerSet opts と

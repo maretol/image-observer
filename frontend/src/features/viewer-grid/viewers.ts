@@ -21,10 +21,12 @@ import type { state } from "../../../wailsjs/go/models";
 
 // MAX_VIEWERS = 8 はタブ追加上限の既定値 (settings.maxViewers ロード中の fallback。Go 側
 // defaultMaxViewers と対)。Ctrl+Shift+2..9 のキーバインドは上限設定に関わらず先頭 8 個のみ。
-// MAX_VIEWERS_HARD = 32 は settings で選べる上限の上界 (Go 側 settings.MaxViewersHardCap /
-// state.maxViewersHard と対、spec-viewer-max-count.md §7)。MAX_NAME_LEN は byte でなく
+// MIN_VIEWERS / MAX_VIEWERS_HARD は settings で選べる上限の下界 / 上界 (Go 側 minMaxViewers /
+// settings.MaxViewersHardCap = state.maxViewersHard と対、spec-viewer-max-count.md §7)。
+// 3 定数のドリフトは viewers.test.ts の D-1 pin テストで検知。MAX_NAME_LEN は byte でなく
 // rune 数 (日本語名も 32 文字使える)。DEFAULT_NAME_PREFIX が空白で終わるのは末尾に整数を足すため ("ビューア 1")。
 export const MAX_VIEWERS = 8;
+export const MIN_VIEWERS = 1;
 export const MAX_VIEWERS_HARD = 32;
 export const MAX_NAME_LEN = 32;
 export const DEFAULT_NAME_PREFIX = "ビューア ";

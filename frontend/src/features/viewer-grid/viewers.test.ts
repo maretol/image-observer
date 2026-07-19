@@ -11,6 +11,8 @@ import {
   closeViewer,
   initialViewerSet,
   MAX_VIEWERS,
+  MAX_VIEWERS_HARD,
+  MIN_VIEWERS,
   moveTabAcrossViewers,
   moveViewer,
   newViewer,
@@ -39,6 +41,21 @@ function setN(n: number): ViewerSet {
   s = setActiveViewer(s, s.viewers[0].id);
   return s;
 }
+
+// ─── constants (AGENTS.md D-1 ドリフト検知) ─────────────────────────
+
+// これらのリテラルは Go 側 `internal/settings.defaultMaxViewers` / `minMaxViewers` /
+// `MaxViewersHardCap` (= `state.maxViewersHard`、TestMaxViewersHardMatchesSettings が pin)
+// と二重管理 (#148)。片側だけ変えると、設定 UI の NumberInput 範囲と Go Validate の範囲が
+// ズレて、UI が許した値を Save が弾き silent に既定 8 へ戻る (duplicateDetect.test.ts と
+// 同じ役割)。
+describe("viewer limit constants", () => {
+  it("default / bounds match the Go side literals", () => {
+    expect(MAX_VIEWERS).toBe(8);
+    expect(MIN_VIEWERS).toBe(1);
+    expect(MAX_VIEWERS_HARD).toBe(32);
+  });
+});
 
 // ─── suggestViewerName ──────────────────────────────────────────────
 
