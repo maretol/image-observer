@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+
+	"image-observer/internal/settings"
 )
 
 func setStateFile(t *testing.T) string {
@@ -590,26 +593,55 @@ func TestValidateState_V6NameSanitization(t *testing.T) {
 	}
 }
 
-func TestValidateState_V6TooManyViewers_Truncated(t *testing.T) {
-	p := setStateFile(t)
-	os.MkdirAll(filepath.Dir(p), 0o755)
-	// 9 viewers — one over the limit.
+// v6ViewersStateJSON builds a v6 state.json body with n minimal viewers (id "v-0"..).
+func v6ViewersStateJSON(n int) string {
 	var sb strings.Builder
 	sb.WriteString(`{"version":6,"window":{"width":1024,"height":768,"x":-1,"y":-1},"viewers":[`)
-	for i := range 9 {
+	for i := range n {
 		if i > 0 {
 			sb.WriteString(",")
 		}
-		fmtID := func(i int) string { return string(rune('a' + i)) }
-		sb.WriteString(`{"id":"v-` + fmtID(i) + `","name":"V","layout":{"root":{"kind":"leaf","id":"L-` + fmtID(i) + `","tabs":[],"activeIndex":-1},"activeId":"L-` + fmtID(i) + `"}}`)
+		id := strconv.Itoa(i)
+		sb.WriteString(`{"id":"v-` + id + `","name":"V","layout":{"root":{"kind":"leaf","id":"L-` + id + `","tabs":[],"activeIndex":-1},"activeId":"L-` + id + `"}}`)
 	}
-	sb.WriteString(`],"activeViewerId":"v-a","topTab":"list","list":{"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}}`)
-	if err := os.WriteFile(p, []byte(sb.String()), 0o644); err != nil {
+	sb.WriteString(`],"activeViewerId":"v-0","topTab":"list","list":{"folderPath":"","filter":{"tags":[],"confidence":"all","query":""},"collapsedGroups":[]}}`)
+	return sb.String()
+}
+
+func TestValidateState_V6TooManyViewers_Truncated(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	// maxViewersHard+1 viewers — one over the hard cap.
+	if err := os.WriteFile(p, []byte(v6ViewersStateJSON(maxViewersHard+1)), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	s := Load()
-	if len(s.Viewers) != maxViewers {
-		t.Errorf("expected %d viewers after truncation, got %d", maxViewers, len(s.Viewers))
+	if len(s.Viewers) != maxViewersHard {
+		t.Errorf("expected %d viewers after truncation, got %d", maxViewersHard, len(s.Viewers))
+	}
+}
+
+// TestValidateState_ViewersOverDefaultSetting_Preserved pins the add-gate policy (#148,
+// spec-viewer-max-count.md §7): 復元時の truncate はハードキャップのみで、設定上限 (既定 8) を
+// 超える viewer 数でも session を破壊しない。
+func TestValidateState_ViewersOverDefaultSetting_Preserved(t *testing.T) {
+	p := setStateFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	if err := os.WriteFile(p, []byte(v6ViewersStateJSON(12)), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if len(s.Viewers) != 12 {
+		t.Errorf("12 viewers (over default setting 8, under hard cap) should be preserved, got %d", len(s.Viewers))
+	}
+}
+
+// TestMaxViewersHardMatchesSettings は truncate 上界と settings の Validate 上界のドリフトを
+// 検知する (AGENTS.md D-1)。ずれると「settings が許した上限まで開く → 再起動で truncate」が起きる。
+func TestMaxViewersHardMatchesSettings(t *testing.T) {
+	if maxViewersHard != settings.MaxViewersHardCap {
+		t.Errorf("maxViewersHard (%d) must equal settings.MaxViewersHardCap (%d)",
+			maxViewersHard, settings.MaxViewersHardCap)
 	}
 }
 

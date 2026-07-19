@@ -57,6 +57,9 @@ func TestLoad_Missing_ReturnsDefaults(t *testing.T) {
 	if s.DuplicateThreshold != defaultDuplicateThreshold {
 		t.Errorf("DuplicateThreshold default: got %d, want %d", s.DuplicateThreshold, defaultDuplicateThreshold)
 	}
+	if s.MaxViewers != defaultMaxViewers {
+		t.Errorf("MaxViewers default: got %d, want %d", s.MaxViewers, defaultMaxViewers)
+	}
 	if len(s.TagColors) == 0 {
 		t.Errorf("TagColors default should be a non-empty map (defaultTagColors)")
 	}
@@ -83,6 +86,7 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	in.EditAutoSave = false
 	in.DuplicateDetectMode = DuplicateDetectOff
 	in.DuplicateThreshold = 0
+	in.MaxViewers = 16
 	if err := Save(in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -125,6 +129,9 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	}
 	if out.DuplicateThreshold != 0 {
 		t.Errorf("DuplicateThreshold: got %d, want 0 (round-trip preserves explicit zero)", out.DuplicateThreshold)
+	}
+	if out.MaxViewers != 16 {
+		t.Errorf("MaxViewers: got %d, want 16", out.MaxViewers)
 	}
 }
 
@@ -205,6 +212,16 @@ func TestSave_RejectsInvalid(t *testing.T) {
 	if err := Save(bad); err == nil {
 		t.Errorf("Save should reject DuplicateThreshold above max")
 	}
+	bad = DefaultSettings()
+	bad.MaxViewers = minMaxViewers - 1
+	if err := Save(bad); err == nil {
+		t.Errorf("Save should reject MaxViewers below min")
+	}
+	bad = DefaultSettings()
+	bad.MaxViewers = MaxViewersHardCap + 1
+	if err := Save(bad); err == nil {
+		t.Errorf("Save should reject MaxViewers above hard cap")
+	}
 }
 
 func TestSave_StampsVersion(t *testing.T) {
@@ -264,6 +281,7 @@ func TestLoad_PerFieldFallbackKeepsValidFields(t *testing.T) {
 		"watchMode":            "polling",   // invalid → fall back
 		"duplicateDetectMode":  "sometimes", // invalid → fall back
 		"duplicateThreshold":   99,          // out of range → fall back
+		"maxViewers":           99,          // out of range (> hard cap 32) → fall back
 	})
 	if err := os.WriteFile(p, bad, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -307,6 +325,9 @@ func TestLoad_PerFieldFallbackKeepsValidFields(t *testing.T) {
 	}
 	if s.DuplicateThreshold != defaultDuplicateThreshold {
 		t.Errorf("out-of-range DuplicateThreshold should fall back, got %d", s.DuplicateThreshold)
+	}
+	if s.MaxViewers != defaultMaxViewers {
+		t.Errorf("out-of-range MaxViewers should fall back, got %d", s.MaxViewers)
 	}
 }
 
@@ -356,6 +377,10 @@ func TestLoad_NewFieldsMissing_GetDefaults(t *testing.T) {
 	if s.DuplicateThreshold != defaultDuplicateThreshold {
 		t.Errorf("missing DuplicateThreshold should default to %d (not Go int zero), got %d",
 			defaultDuplicateThreshold, s.DuplicateThreshold)
+	}
+	if s.MaxViewers != defaultMaxViewers {
+		t.Errorf("missing MaxViewers should default to %d (zero value is out of range), got %d",
+			defaultMaxViewers, s.MaxViewers)
 	}
 }
 
