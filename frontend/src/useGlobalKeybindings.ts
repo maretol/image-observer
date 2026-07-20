@@ -26,36 +26,31 @@ type Opts = {
   topTab: TopTab;
   setTopTab: (t: TopTab) => void;
   viewer: ReturnType<typeof useViewerSet>;
-  settingsOpen: boolean;
-  // 一覧タブの並べ替えモード (#144 Phase 2)。true の間はタブ切替 / タブ操作系の
-  // キーバインドを丸ごと gate する (並べ替え途中の文脈を失わせない, spec-image-sort §5.2)。
-  // Esc は useCardReorder 側が受け持つ。
-  listReorderMode: boolean;
+  // タブ切替系のグローバル入力を封じる条件。App.tsx の tabSwitchGated が唯一の出所で、
+  // useTaskbarViewerSwitch (#149) と共有する — gate 条件をフックごとに列挙すると、次の
+  // モーダル/モード追加時に片方だけ配線されて入力経路間で挙動が割れる。
+  gated: boolean;
 };
 
 export function useGlobalKeybindings({
   topTab,
   setTopTab,
   viewer,
-  settingsOpen,
-  listReorderMode,
+  gated,
 }: Opts): void {
   const topTabRef = useRef(topTab);
-  const settingsOpenRef = useRef(settingsOpen);
   const viewerRef = useRef(viewer);
-  const listReorderModeRef = useRef(listReorderMode);
+  const gatedRef = useRef(gated);
   // keydown ハンドラは ref 経由で読むので、毎 render で最新 state を反映する
   // (useEffect の遅延を挟まないため)。
   topTabRef.current = topTab;
-  settingsOpenRef.current = settingsOpen;
   viewerRef.current = viewer;
-  listReorderModeRef.current = listReorderMode;
+  gatedRef.current = gated;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e.target)) return;
-      if (settingsOpenRef.current) return; // ダイアログ側に Esc ハンドラがある
-      if (listReorderModeRef.current) return; // 並べ替えモード中はタブ操作を封じる (#144)
+      if (gatedRef.current) return; // 設定ダイアログ / 並べ替えモード中 (App.tsx tabSwitchGated 参照)
 
       // (N-1) オフセットは Ctrl+Shift+2 が従来の単一ビューア時代と同じ「最初の
       // ビューア」を指すように (#7 + #11)。e.code を使うのはレイアウト非依存に

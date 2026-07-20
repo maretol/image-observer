@@ -70,6 +70,14 @@ jobs:
         # release.yml.
         run: go test ./...
 
+      - name: Go cross-compile check (windows)
+        # The windows build-tag files (internal/imgfile / winhwnd /
+        # winplacement / winrestart / wintaskbar) are excluded from the
+        # linux `go test` above and would otherwise only compile at
+        # release-tag time (release.yml). They are pure syscall (no cgo),
+        # so the ubuntu runner can cross-compile them (#149 D8).
+        run: GOOS=windows go build ./...
+
       - name: Frontend install
         working-directory: frontend
         run: npm ci

@@ -27,6 +27,7 @@ import { ToastProvider } from "./shared/components/Toast";
 import { installGlobalErrorHandlers, logger } from "./shared/utils/logger";
 import { TopTabsBar } from "./TopTabsBar";
 import { useGlobalKeybindings } from "./useGlobalKeybindings";
+import { useTaskbarViewerSwitch } from "./useTaskbarViewerSwitch";
 import type { TopTab } from "./topTab";
 import { GetLogPath } from "../wailsjs/go/main/App";
 import type { state } from "../wailsjs/go/models";
@@ -119,12 +120,26 @@ function AppInner({ initialState }: AppInnerProps) {
     list: classification.persistableState,
   });
 
+  // タブ切替系のグローバル入力 (キーボード / タスクバー #149) を封じる条件の一元管理。
+  // settingsOpen 中はダイアログ側が Esc 等を受け持ち、並べ替えモード (#144) 中は途中の
+  // 文脈を守る (Esc は useCardReorder 側)。新しいモーダル/モードの gate はここに足す —
+  // フック側に直接足すと入力経路間で挙動が割れる。
+  const tabSwitchGated = settingsOpen || classification.reorderMode;
+
   useGlobalKeybindings({
     topTab,
     setTopTab,
     viewer,
-    settingsOpen,
-    listReorderMode: classification.reorderMode,
+    gated: tabSwitchGated,
+  });
+
+  // タスクバーサムネイルツールバーの ◀▶ (#149)。非 Windows では Go 側がイベントを
+  // emit しないだけでリスナ登録自体は無害。
+  useTaskbarViewerSwitch({
+    topTab,
+    setTopTab,
+    viewer,
+    gated: tabSwitchGated,
   });
 
   const onSelectList = useCallback(() => setTopTab("list"), []);
