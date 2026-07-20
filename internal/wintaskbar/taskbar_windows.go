@@ -6,7 +6,9 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"fmt"
+	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"image-observer/internal/logging"
@@ -32,7 +34,7 @@ const (
 	clsctxInprocServer = 0x1
 
 	// THUMBBUTTONMASK / THUMBBUTTONFLAGS
-	thbIcon     = 0x1
+	thbIcon     = 0x2 // THB_ICON。0x1 は THB_BITMAP (イメージリストの iBitmap 用) — 取り違えると hIcon が無視される
 	thbTooltip  = 0x4
 	thbFlags    = 0x8
 	thbfEnabled = 0x0
@@ -72,6 +74,7 @@ type thumbButton struct {
 var (
 	modUser32                    = syscall.NewLazyDLL("user32.dll")
 	modOle32                     = syscall.NewLazyDLL("ole32.dll")
+	procGetWindowLongPtrW        = modUser32.NewProc("GetWindowLongPtrW")
 	procSetWindowLongPtrW        = modUser32.NewProc("SetWindowLongPtrW")
 	procCallWindowProcW          = modUser32.NewProc("CallWindowProcW")
 	procPostMessageW             = modUser32.NewProc("PostMessageW")
@@ -81,45 +84,90 @@ var (
 	procCoCreateInstance         = modOle32.NewProc("CoCreateInstance")
 )
 
+// Wails は window を navigationCompleted (WebView2 のロード完了) まで表示しないため、goroutine で
+// 走る OnStartup からの初回 trySetup は HWND 未発見になりうる。表示されるまで再試行する (spec §3.2)。
+const (
+	setupRetryInterval = 250 * time.Millisecond
+	setupRetryMax      = 40 // × 250ms = 最長 10 秒で諦める (best-effort, D7)
+)
+
+// wndProc の thunk。syscall.NewCallback は解放不能仕様なので retry をまたいで 1 回だけ作る。
+var wndProcThunk = syscall.NewCallback(wndProc)
+
 // module state。Setup は process につき 1 回 (main.go OnStartup) しか呼ばれず、window の
 // 破棄 = process 終了なので、意図的にリセット経路を持たない一方向 state (spec §8 / H-3)。
-// syscall.NewCallback も解放不能仕様のため subclass の解除は行わない。
+// subclass の解除も行わない。origWndProc だけは Setup goroutine で write / UI スレッドで read
+// されるため atomic でアクセスする (他は「atomic store より前に write / wndProc 冒頭の
+// atomic load より後に read」の順序保証に載せる)。
 var (
 	onSwitchCb             func(direction string)
-	origWndProc            uintptr
+	origWndProc            uintptr        // atomic.LoadUintptr / StoreUintptr でのみアクセス
 	wmTaskbarButtonCreated uintptr        // RegisterWindowMessageW("TaskbarButtonCreated")
 	taskbarPtr             unsafe.Pointer // ITaskbarList3* (UI スレッドで lazy init)
 	hIconPrev, hIconNext   uintptr
+	buttonsRegistered      bool // 初回登録成功済みか。wndProc (UI スレッド) 内でのみ読み書き — 同期不要
 )
 
-// Setup は main window を subclass してサムネイルツールバーの配線を行う (#149)。
-// COM 操作はここでは行わず、PostMessage で wndProc (UI スレッド) に委譲する (spec §3.2)。
-// 失敗は best-effort: warn を残して ok=false を返し、機能無効のまま起動を続けさせる (D7)。
+// Setup はサムネイルツールバーの配線を開始する (#149)。COM 操作はここでは行わず、PostMessage で
+// wndProc (UI スレッド) に委譲する (spec §3.2)。Wails の OnStartup は goroutine で走り window の
+// 表示 (navigationCompleted) より先に到達しうるため、初回試行で HWND が見つからなければ
+// バックグラウンドで再試行する。ok=false は非 Windows ビルド (taskbar_other.go) と、再試行しても
+// 無意味な即時失敗のみ。それ以外の失敗は best-effort: warn を残して機能無効のまま起動を続けさせる (D7)。
 func Setup(onSwitch func(direction string)) (ok bool) {
-	hwnd, found := winhwnd.FindMainWindow()
-	if !found {
-		logging.Warn("wintaskbar", "main window HWND not found; thumbnail toolbar disabled")
-		return false
-	}
-	onSwitchCb = onSwitch
-
 	// TaskbarButtonCreated: タスクバーボタン生成時 (起動時 + explorer 再起動時) に届く登録
 	// メッセージ。これを受けてボタンを (再) 登録するのが公式手順。
-	msgID, _, _ := procRegisterWindowMessageW.Call(uintptr(unsafe.Pointer(utf16Ptr("TaskbarButtonCreated"))))
+	// NUL を含まないリテラルなので UTF16PtrFromString の err は起きない。
+	msgName, _ := syscall.UTF16PtrFromString("TaskbarButtonCreated")
+	msgID, _, _ := procRegisterWindowMessageW.Call(uintptr(unsafe.Pointer(msgName)))
 	if msgID == 0 {
 		logging.Warn("wintaskbar", "RegisterWindowMessageW failed; thumbnail toolbar disabled")
 		return false
 	}
 	wmTaskbarButtonCreated = msgID
+	onSwitchCb = onSwitch
 
-	newProc := syscall.NewCallback(wndProc)
-	prev, _, errno := procSetWindowLongPtrW.Call(hwnd, gwlpWndProc, newProc)
+	if trySetup() {
+		return true
+	}
+	go func() {
+		for range setupRetryMax {
+			time.Sleep(setupRetryInterval)
+			if trySetup() {
+				return
+			}
+		}
+		logging.Warn("wintaskbar", "main window not found after retries; thumbnail toolbar disabled")
+	}()
+	return true
+}
+
+// trySetup は HWND 探索 → 旧 wndproc の atomic 公開 → subclass 装着 → 初期登録 PostMessage を
+// 1 回試みる。単一 goroutine (Setup 呼び出し元 or retry loop) から直列に呼ばれるため二重装着はない。
+func trySetup() bool {
+	hwnd, found := winhwnd.FindMainWindow()
+	if !found {
+		// window が navigationCompleted 前で未表示のケース。retry が控えているので debug 止まり。
+		logging.Debug("wintaskbar", "main window HWND not found yet; will retry")
+		return false
+	}
+
+	// swap の「前」に旧 wndproc を取得して atomic で公開する。SetWindowLongPtrW の戻り値を代入する
+	// 方式だと、カーネル内で swap が完了した瞬間から UI スレッドが新 wndProc に入れるのに
+	// origWndProc がまだ 0 の隙間ができ、CallWindowProcW(NULL) (未定義動作) になりうる。
+	// atomic store は先行 write (onSwitchCb / wmTaskbarButtonCreated) の可視化も保証する
+	// (wndProc 側は冒頭の atomic load が対になる)。
+	prev, _, errno := procGetWindowLongPtrW.Call(hwnd, gwlpWndProc)
 	if prev == 0 {
+		logging.Warn("wintaskbar", "GetWindowLongPtrW failed; thumbnail toolbar disabled", "err", errno.Error())
+		return false
+	}
+	atomic.StoreUintptr(&origWndProc, prev)
+
+	if ret, _, errno := procSetWindowLongPtrW.Call(hwnd, gwlpWndProc, wndProcThunk); ret == 0 {
 		logging.Warn("wintaskbar", "SetWindowLongPtrW(GWLP_WNDPROC) failed; thumbnail toolbar disabled",
 			"err", errno.Error())
 		return false
 	}
-	origWndProc = prev
 
 	// subclass 装着前に TaskbarButtonCreated が発火済みの場合の取りこぼし対策 + 初期登録を
 	// UI スレッドへ委譲。PostMessage 失敗は次の TaskbarButtonCreated (explorer 再起動時) 頼み。
@@ -132,6 +180,10 @@ func Setup(onSwitch func(direction string)) (ok bool) {
 // wndProc は subclass 後の window procedure。自分宛て以外は必ず元の wndproc へ素通しする。
 // UI スレッド (Wails のメッセージループ) 上で呼ばれる。
 func wndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
+	// 冒頭の atomic load が trySetup の atomic store と対になり、先行 write
+	// (onSwitchCb / wmTaskbarButtonCreated) の可視性を保証する。store は subclass 装着より
+	// 前に済んでいるため、この関数が呼ばれる時点で orig は必ず非 0。
+	orig := atomic.LoadUintptr(&origWndProc)
 	switch {
 	case msg == wmInitTaskbar || msg == wmTaskbarButtonCreated:
 		// explorer 再起動でタスクバー側の登録は消えるため「登録済み flag」では gate せず
@@ -148,7 +200,7 @@ func wndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 			return 0
 		}
 	}
-	ret, _, _ := procCallWindowProcW.Call(origWndProc, hwnd, msg, wparam, lparam)
+	ret, _, _ := procCallWindowProcW.Call(orig, hwnd, msg, wparam, lparam)
 	return ret
 }
 
@@ -205,12 +257,18 @@ func addButtons(hwnd uintptr) {
 	setTip(&buttons[0], "前のビューア")
 	setTip(&buttons[1], "次のビューア")
 
-	// ITaskbarList3::ThumbBarAddButtons (vtable 15)。同一タスクバーボタンへの 2 回目は
-	// エラーを返すが、それは経路 2 の冪等化の正常系なので debug に落とす (spec §10)。
+	// ITaskbarList3::ThumbBarAddButtons (vtable 15)。debug に落とすのは「一度成功した後の
+	// 再登録エラー」(経路 2 の冪等化の正常系) だけ。一度も成功していない失敗 (E_INVALIDARG 等)
+	// は既定 INFO レベルで見える warn にしないと、ボタンが出ない障害が無痕跡になる (spec §10)。
 	if hr := comCall(taskbarPtr, 15, hwnd, 2, uintptr(unsafe.Pointer(&buttons[0]))); hr != 0 {
-		logging.Debug("wintaskbar", "ThumbBarAddButtons returned non-zero (already added?)", "hr", hresult(hr))
+		if buttonsRegistered {
+			logging.Debug("wintaskbar", "ThumbBarAddButtons returned non-zero on re-add (already added?)", "hr", hresult(hr))
+		} else {
+			logging.Warn("wintaskbar", "ThumbBarAddButtons failed on first registration", "hr", hresult(hr))
+		}
 		return
 	}
+	buttonsRegistered = true
 	logging.Info("wintaskbar", "thumbnail toolbar buttons registered")
 }
 
@@ -294,15 +352,6 @@ func setTip(b *thumbButton, tip string) {
 		return // 不正文字列は tooltip 無しで続行 (ボタン自体は機能する)
 	}
 	copy(b.szTip[:], u)
-}
-
-// utf16Ptr は Win32 API 用の NUL 終端 UTF-16 ポインタを返す。
-func utf16Ptr(s string) *uint16 {
-	p, err := syscall.UTF16PtrFromString(s)
-	if err != nil {
-		panic(fmt.Sprintf("wintaskbar: invalid literal %q", s))
-	}
-	return p
 }
 
 // hresult は HRESULT をログ用 16 進表記にする。
