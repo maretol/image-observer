@@ -8,12 +8,11 @@ import (
 
 	"image-observer/internal/logging"
 	"image-observer/internal/state"
+	"image-observer/internal/winhwnd"
 )
 
 // Win32 定数。
 const (
-	gwOwner = 4 // GW_OWNER: window の owner (true top-level は 0)
-
 	// SW_SHOWMINIMIZED (2) は意図的に扱わない: minimized も rcNormalPosition 経由で non-maximized として
 	// 保存する (D6) ため minimized で開き直すことは無い。
 	swShowNormal    = 1 // SW_SHOWNORMAL
@@ -41,51 +40,15 @@ type windowPlacement struct {
 }
 
 var (
-	modUser32                    = syscall.NewLazyDLL("user32.dll")
-	modKernel32                  = syscall.NewLazyDLL("kernel32.dll")
-	procEnumWindows              = modUser32.NewProc("EnumWindows")
-	procGetWindowThreadProcessId = modUser32.NewProc("GetWindowThreadProcessId")
-	procIsWindowVisible          = modUser32.NewProc("IsWindowVisible")
-	procGetWindow                = modUser32.NewProc("GetWindow")
-	procGetWindowTextLengthW     = modUser32.NewProc("GetWindowTextLengthW")
-	procGetWindowPlacement       = modUser32.NewProc("GetWindowPlacement")
-	procSetWindowPlacement       = modUser32.NewProc("SetWindowPlacement")
-	procGetCurrentProcessId      = modKernel32.NewProc("GetCurrentProcessId")
+	modUser32              = syscall.NewLazyDLL("user32.dll")
+	procGetWindowPlacement = modUser32.NewProc("GetWindowPlacement")
+	procSetWindowPlacement = modUser32.NewProc("SetWindowPlacement")
 )
-
-// findMainWindow は EnumWindows でこの process の main top-level window HWND を探す (#129 / D1)。
-// Wails v2 が native handle を公開しないため。判定条件は下の各 if を参照 (own-PID / visible / owner 無し /
-// caption 有り)。title 文字列では match しない — WindowSetTitle で壊れる hard-code の二重化を避ける (D-1)。
-// callback は呼び出しごとに生成し module scope の結果 state を避ける (H-3)。
-func findMainWindow() (hwnd uintptr, ok bool) {
-	pid, _, _ := procGetCurrentProcessId.Call()
-	var found uintptr
-	cb := syscall.NewCallback(func(h uintptr, _ uintptr) uintptr {
-		var wpid uint32
-		procGetWindowThreadProcessId.Call(h, uintptr(unsafe.Pointer(&wpid)))
-		if uintptr(wpid) != pid {
-			return 1 // 自分のではない — 列挙継続
-		}
-		if visible, _, _ := procIsWindowVisible.Call(h); visible == 0 {
-			return 1
-		}
-		if owner, _, _ := procGetWindow.Call(h, gwOwner); owner != 0 {
-			return 1 // owned (dialog/popup) — main window ではない
-		}
-		if length, _, _ := procGetWindowTextLengthW.Call(h); length == 0 {
-			return 1 // caption 無し helper window
-		}
-		found = h
-		return 0 // 列挙停止
-	})
-	procEnumWindows.Call(cb, 0)
-	return found, found != 0
-}
 
 // Restore は保存 geometry を SetWindowPlacement で main window に適用する (#129)。ok=false (HWND 未発見 /
 // syscall 失敗) は caller に Wails-runtime 復元 (#86) への fallback を促す。
 func Restore(s state.WindowState) (ok bool) {
-	hwnd, found := findMainWindow()
+	hwnd, found := winhwnd.FindMainWindow()
 	if !found {
 		logging.Warn("winplacement", "main window HWND not found; falling back to runtime restore")
 		return false
@@ -120,7 +83,7 @@ func Restore(s state.WindowState) (ok bool) {
 // capture geometry は常に non-maximized サイズ (minimized も non-maximized 保存 = D6)。ok=false なら caller は
 // 保存を skip する。
 func Capture() (s state.WindowState, ok bool) {
-	hwnd, found := findMainWindow()
+	hwnd, found := winhwnd.FindMainWindow()
 	if !found {
 		logging.Warn("winplacement", "main window HWND not found; skipping placement capture")
 		return state.WindowState{}, false
