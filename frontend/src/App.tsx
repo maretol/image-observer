@@ -27,6 +27,7 @@ import { ToastProvider } from "./shared/components/Toast";
 import { installGlobalErrorHandlers, logger } from "./shared/utils/logger";
 import { TopTabsBar } from "./TopTabsBar";
 import { useGlobalKeybindings } from "./useGlobalKeybindings";
+import { useTaskbarViewerSwitch } from "./useTaskbarViewerSwitch";
 import type { TopTab } from "./topTab";
 import { GetLogPath } from "../wailsjs/go/main/App";
 import type { state } from "../wailsjs/go/models";
@@ -120,6 +121,16 @@ function AppInner({ initialState }: AppInnerProps) {
   });
 
   useGlobalKeybindings({
+    topTab,
+    setTopTab,
+    viewer,
+    settingsOpen,
+    listReorderMode: classification.reorderMode,
+  });
+
+  // タスクバーサムネイルツールバーの ◀▶ (#149)。非 Windows では Go 側がイベントを
+  // emit しないだけでリスナ登録自体は無害。gate はキーバインドのタブ切替と同一。
+  useTaskbarViewerSwitch({
     topTab,
     setTopTab,
     viewer,

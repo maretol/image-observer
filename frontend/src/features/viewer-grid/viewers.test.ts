@@ -9,6 +9,7 @@ import { newTab } from "./useTabs";
 import {
   addViewer,
   closeViewer,
+  cycleViewerId,
   initialViewerSet,
   MAX_VIEWERS,
   MAX_VIEWERS_HARD,
@@ -299,6 +300,28 @@ describe("setActiveViewer", () => {
   it("no-ops on unknown id", () => {
     const s = setN(1);
     expect(setActiveViewer(s, "missing")).toBe(s);
+  });
+});
+
+// ─── cycleViewerId (#149) ───────────────────────────────────────────
+
+describe("cycleViewerId", () => {
+  const viewers = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  it("next は次の viewer、末尾からは先頭へ wrap する", () => {
+    expect(cycleViewerId(viewers, "a", "next")).toBe("b");
+    expect(cycleViewerId(viewers, "c", "next")).toBe("a");
+  });
+  it("prev は前の viewer、先頭からは末尾へ wrap する", () => {
+    expect(cycleViewerId(viewers, "b", "prev")).toBe("a");
+    expect(cycleViewerId(viewers, "a", "prev")).toBe("c");
+  });
+  it("viewer 1 個は同じ id を返す (呼び出し側の same-id guard で no-op)", () => {
+    expect(cycleViewerId([{ id: "only" }], "only", "next")).toBe("only");
+    expect(cycleViewerId([{ id: "only" }], "only", "prev")).toBe("only");
+  });
+  it("activeViewerId 不明は先頭へ fallback、空配列は null", () => {
+    expect(cycleViewerId(viewers, "missing", "next")).toBe("a");
+    expect(cycleViewerId([], "a", "next")).toBeNull();
   });
 });
 
