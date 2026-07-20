@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // useTaskbarViewerSwitch の配線テスト (#149, spec-taskbar-viewer-switch.md §8 経路 4/5)。
 // 巡回計算そのものは viewers.test.ts の cycleViewerId が持ち、ここでは EventsOn の
-// 1 回登録 + render-time ref sync + gate (settingsOpen / listReorderMode / list タブ) を pin する。
+// 1 回登録 + render-time ref sync + gate (App.tsx tabSwitchGated / list タブ) を pin する。
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -28,8 +28,7 @@ import type { TopTab } from "./topTab";
 
 type HookProps = {
   topTab: TopTab;
-  settingsOpen?: boolean;
-  listReorderMode?: boolean;
+  gated?: boolean;
   activeViewerId?: string;
   viewerIds?: string[];
 };
@@ -47,8 +46,7 @@ function setup(initial: HookProps) {
       topTab: p.topTab,
       setTopTab,
       viewer,
-      settingsOpen: p.settingsOpen ?? false,
-      listReorderMode: p.listReorderMode ?? false,
+      gated: p.gated ?? false,
     };
   };
   const hook = renderHook((p: HookProps) => useTaskbarViewerSwitch(build(p)), {
@@ -89,19 +87,20 @@ describe("useTaskbarViewerSwitch", () => {
     expect(setActiveViewer).not.toHaveBeenCalled();
   });
 
-  it("設定ダイアログ表示中 / 並べ替えモード中は無視する", () => {
+  it("gated (設定ダイアログ / 並べ替えモード) 中は無視する", () => {
     const { setActiveViewer, setTopTab, rerender } = setup({
       topTab: "viewer",
-      settingsOpen: true,
+      gated: true,
     });
     fire("next");
-    rerender({ topTab: "viewer", listReorderMode: true });
+    // rerender 後も ref 経由で最新の gated を読む。
+    rerender({ topTab: "viewer", gated: true });
     fire("next");
     expect(setActiveViewer).not.toHaveBeenCalled();
     expect(setTopTab).not.toHaveBeenCalled();
   });
 
-  it("viewer 1 個は no-op (same-id guard)", () => {
+  it("viewer 1 個は no-op (cycleViewerId が null を返す)", () => {
     const { setActiveViewer } = setup({
       topTab: "viewer",
       viewerIds: ["only"],

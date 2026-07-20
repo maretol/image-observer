@@ -120,22 +120,26 @@ function AppInner({ initialState }: AppInnerProps) {
     list: classification.persistableState,
   });
 
+  // タブ切替系のグローバル入力 (キーボード / タスクバー #149) を封じる条件の一元管理。
+  // settingsOpen 中はダイアログ側が Esc 等を受け持ち、並べ替えモード (#144) 中は途中の
+  // 文脈を守る (Esc は useCardReorder 側)。新しいモーダル/モードの gate はここに足す —
+  // フック側に直接足すと入力経路間で挙動が割れる。
+  const tabSwitchGated = settingsOpen || classification.reorderMode;
+
   useGlobalKeybindings({
     topTab,
     setTopTab,
     viewer,
-    settingsOpen,
-    listReorderMode: classification.reorderMode,
+    gated: tabSwitchGated,
   });
 
   // タスクバーサムネイルツールバーの ◀▶ (#149)。非 Windows では Go 側がイベントを
-  // emit しないだけでリスナ登録自体は無害。gate はキーバインドのタブ切替と同一。
+  // emit しないだけでリスナ登録自体は無害。
   useTaskbarViewerSwitch({
     topTab,
     setTopTab,
     viewer,
-    settingsOpen,
-    listReorderMode: classification.reorderMode,
+    gated: tabSwitchGated,
   });
 
   const onSelectList = useCallback(() => setTopTab("list"), []);

@@ -315,13 +315,13 @@ describe("cycleViewerId", () => {
     expect(cycleViewerId(viewers, "b", "prev")).toBe("a");
     expect(cycleViewerId(viewers, "a", "prev")).toBe("c");
   });
-  it("viewer 1 個は同じ id を返す (呼び出し側の same-id guard で no-op)", () => {
-    expect(cycleViewerId([{ id: "only" }], "only", "next")).toBe("only");
-    expect(cycleViewerId([{ id: "only" }], "only", "prev")).toBe("only");
-  });
-  it("activeViewerId 不明は先頭へ fallback、空配列は null", () => {
-    expect(cycleViewerId(viewers, "missing", "next")).toBe("a");
+  it("「切り替え不要」は null — viewer 1 個 (巡回先 = 現在) と空配列", () => {
+    expect(cycleViewerId([{ id: "only" }], "only", "next")).toBeNull();
+    expect(cycleViewerId([{ id: "only" }], "only", "prev")).toBeNull();
     expect(cycleViewerId([], "a", "next")).toBeNull();
+  });
+  it("activeViewerId 不明は先頭へ fallback", () => {
+    expect(cycleViewerId(viewers, "missing", "next")).toBe("a");
   });
 });
 

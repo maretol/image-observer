@@ -114,7 +114,8 @@ export function activeViewer(set: ViewerSet): Viewer {
 
 // タスクバー ◀▶ (#149) の相対巡回先 viewer id を返す。wrap-around。activeViewerId が
 // 見つからない場合は先頭へ fallback (通常は不変条件が防ぐが、hydrate 直後の防御)。
-// 空配列は null。viewer 1 個は同じ id を返す (呼び出し側の next !== active guard で no-op)。
+// 「切り替え不要」(空 / 1 個 / 移動先が現在と同じ) はすべて null — 呼び出し側は
+// null チェックだけで済み、same-id guard の暗黙契約を持ち込まない。
 export function cycleViewerId(
   viewers: ReadonlyArray<{ id: string }>,
   activeViewerId: string,
@@ -125,7 +126,8 @@ export function cycleViewerId(
   const idx = viewers.findIndex((v) => v.id === activeViewerId);
   if (idx < 0) return viewers[0].id;
   const step = direction === "next" ? 1 : -1;
-  return viewers[(((idx + step) % n) + n) % n].id;
+  const next = viewers[(((idx + step) % n) + n) % n].id;
+  return next === activeViewerId ? null : next;
 }
 
 // `${DEFAULT_NAME_PREFIX}<数字>` にマッチする名前で未使用の最小正整数 N を選ぶ。
