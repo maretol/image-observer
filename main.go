@@ -18,6 +18,7 @@ import (
 	"image-observer/internal/thumb"
 	"image-observer/internal/winplacement"
 	"image-observer/internal/winrestart"
+	"image-observer/internal/wintaskbar"
 )
 
 //go:embed all:frontend/dist
@@ -94,6 +95,13 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup: func(ctx context.Context) {
 			app.startup(ctx)
+			// タスクバーのサムネイルツールバー (#149)。クリックは EventsEmit でフロントへ渡し、
+			// FE 側 (useTaskbarViewerSwitch) が gate + activeViewer 巡回を担う。非 Windows は
+			// no-op (ok=false)、Windows での失敗は Setup 内部で warn 済みの best-effort
+			// (winrestart.Register と同じ扱いで、代替経路は無い)。
+			wintaskbar.Setup(func(direction string) {
+				runtime.EventsEmit(ctx, wintaskbar.ViewerSwitchEvent, direction)
+			})
 			// never-positioned sentinel (初回 / state 欠落) は復元 geometry が無いので Wails 既定 placement に
 			// 任せ restore を skip する (#129: (-1,-1) 適用で左上隅に押し込まれる)。
 			posUnset := persisted.Window.X == state.WindowPositionUnset &&
