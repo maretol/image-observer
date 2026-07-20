@@ -70,6 +70,12 @@ const (
 	defaultDuplicateThreshold = 5
 	minDuplicateThreshold     = 0
 	maxDuplicateThreshold     = 16
+	// MaxViewers はビューアタブの追加上限 (#148)。既定 8 はフロント viewers.ts の
+	// MAX_VIEWERS と対。MaxViewersHardCap を export するのは state.json 復元の truncate 上界
+	// (state.maxViewersHard) と同値であることを state 側テストで担保するため。
+	defaultMaxViewers = 8
+	minMaxViewers     = 1
+	MaxViewersHardCap = 32
 )
 
 // SettingsData.LogLevel の許容値。
@@ -141,6 +147,10 @@ type SettingsData struct {
 	// 欠落 (#136 前 build) は Load の probe で既定 5 に倒す。
 	DuplicateDetectMode string `json:"duplicateDetectMode"`
 	DuplicateThreshold  int    `json:"duplicateThreshold"`
+	// MaxViewers はビューアタブの追加上限 (#148, spec-viewer-max-count.md)。追加時 gate のみで、
+	// 下げても open 中の viewer は閉じない (state.json 復元の truncate は maxViewersHard=32 側)。
+	// 欠落 (ゼロ値 0) は範囲外なので probe 不要で既定 8 に落ちる。
+	MaxViewers int `json:"maxViewers"`
 }
 
 // settingsFilePathOverride はテストが user config dir 外へ redirect するため。
@@ -174,6 +184,7 @@ func DefaultSettings() SettingsData {
 		EditAutoSave:         true,
 		DuplicateDetectMode:  DuplicateDetectAuto,
 		DuplicateThreshold:   defaultDuplicateThreshold,
+		MaxViewers:           defaultMaxViewers,
 	}
 }
 
@@ -194,8 +205,17 @@ func Load() SettingsData {
 	}
 	var s SettingsData
 	if err := json.Unmarshal(data, &s); err != nil {
-		log.Printf("settings: parse failed (using defaults): %v", err)
-		return DefaultSettings()
+		// 型不一致 (例 "maxViewers": 8.5) は該当 field をゼロ値のまま skip して sibling の
+		// decode が継続する (encoding/json は最初の型エラーだけ返す)。file 全体を捨てると
+		// 1 つの悪い値が他の正当な設定を吹き飛ばすので、後続の applyFieldDefaults + probe に
+		// 不正 field の reset を委ねる (package doc の per-field fallback 方針、spec-viewer-max-count.md §13.1)。
+		var typeErr *json.UnmarshalTypeError
+		if !errors.As(err, &typeErr) {
+			// 構文エラー等は文書全体が読めないので従来どおり defaults へ。
+			log.Printf("settings: parse failed (using defaults): %v", err)
+			return DefaultSettings()
+		}
+		log.Printf("settings: field type mismatch (per-field fallback): %v", err)
 	}
 	if s.Version != SettingsSchemaVersion {
 		log.Printf("settings: version mismatch (got %d, want %d), using defaults",
@@ -276,6 +296,9 @@ func Validate(s *SettingsData) error {
 		return fmt.Errorf("duplicateThreshold out of range (%d..%d)",
 			minDuplicateThreshold, maxDuplicateThreshold)
 	}
+	if s.MaxViewers < minMaxViewers || s.MaxViewers > MaxViewersHardCap {
+		return fmt.Errorf("maxViewers out of range (%d..%d)", minMaxViewers, MaxViewersHardCap)
+	}
 	for k, v := range s.TagColors {
 		if !isValidHexColor(v) {
 			return fmt.Errorf("tagColors[%q] is not a valid #rrggbb color: %q", k, v)
@@ -319,6 +342,9 @@ func applyFieldDefaults(s *SettingsData, probe map[string]json.RawMessage) {
 	}
 	if s.DuplicateThreshold < minDuplicateThreshold || s.DuplicateThreshold > maxDuplicateThreshold {
 		s.DuplicateThreshold = defaultDuplicateThreshold
+	}
+	if s.MaxViewers < minMaxViewers || s.MaxViewers > MaxViewersHardCap {
+		s.MaxViewers = defaultMaxViewers
 	}
 	// nil (field 無し) は defaults を seed。明示的な空 {} は「override 無し」の保存値としてそのまま保持
 	// (frontend が DEFAULT_PALETTE に fallback する)。

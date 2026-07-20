@@ -88,9 +88,14 @@ function AppInner({ initialState }: AppInnerProps) {
       ? settings.data.maxImagePixelsMP * 1_000_000
       : DEFAULT_MAX_PIXELS;
 
+  // タブ追加上限 (#148)。ロード中の一瞬は既定 MAX_VIEWERS。追加時 gate のみなので、
+  // 上限超の復元 session でも viewer は閉じられない (spec-viewer-max-count.md D2)。
+  const maxViewers = settings.data?.maxViewers ?? MAX_VIEWERS;
+
   const viewer = useViewerSet({
     initialSet,
     maxImagePixels,
+    maxViewers,
   });
   const classification = useClassification({
     initialList: initialState?.list ?? null,
@@ -205,7 +210,7 @@ function AppInner({ initialState }: AppInnerProps) {
         reorder={tabReorder}
         onAddViewer={onAddViewer}
         onOpenSettings={() => setSettingsOpen(true)}
-        maxViewers={MAX_VIEWERS}
+        maxViewers={maxViewers}
         interactionDisabled={classification.reorderMode}
       />
       <div className="top-tab-content">

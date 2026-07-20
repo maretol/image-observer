@@ -19,9 +19,15 @@ import type { state } from "../../../wailsjs/go/models";
 
 // ─── Constants ───────────────────────────────────────────────────────
 
-// MAX_VIEWERS = 8 は Ctrl+Shift+2..9 のキーバインド範囲に対応。MAX_NAME_LEN は byte でなく
+// MAX_VIEWERS = 8 はタブ追加上限の既定値 (settings.maxViewers ロード中の fallback。Go 側
+// defaultMaxViewers と対)。Ctrl+Shift+2..9 のキーバインドは上限設定に関わらず先頭 8 個のみ。
+// MIN_VIEWERS / MAX_VIEWERS_HARD は settings で選べる上限の下界 / 上界 (Go 側 minMaxViewers /
+// settings.MaxViewersHardCap = state.maxViewersHard と対、spec-viewer-max-count.md §7)。
+// 3 定数のドリフトは viewers.test.ts の D-1 pin テストで検知。MAX_NAME_LEN は byte でなく
 // rune 数 (日本語名も 32 文字使える)。DEFAULT_NAME_PREFIX が空白で終わるのは末尾に整数を足すため ("ビューア 1")。
 export const MAX_VIEWERS = 8;
+export const MIN_VIEWERS = 1;
+export const MAX_VIEWERS_HARD = 32;
 export const MAX_NAME_LEN = 32;
 export const DEFAULT_NAME_PREFIX = "ビューア ";
 
@@ -34,7 +40,7 @@ export type Viewer = {
 };
 
 export type ViewerSet = {
-  viewers: Viewer[]; // 長さ 1..MAX_VIEWERS (不変条件)
+  viewers: Viewer[]; // 長さ 1..MAX_VIEWERS_HARD (不変条件。追加時 gate は settings.maxViewers)
   activeViewerId: string; // viewers[*].id のいずれか
 };
 
@@ -137,10 +143,11 @@ export function sanitizeName(raw: string): string | null {
 
 // ─── Mutations (pure) ────────────────────────────────────────────────
 
-// 新 viewer を作り (suggestViewerName で自動命名) active を切り替える。MAX_VIEWERS 到達時は
-// 同じ set を返す — 上限の通知 (toast/log) は呼び出し側の責任。
-export function addViewer(set: ViewerSet): ViewerSet {
-  if (set.viewers.length >= MAX_VIEWERS) return set;
+// 新 viewer を作り (suggestViewerName で自動命名) active を切り替える。max (settings.maxViewers、
+// 未指定は既定 MAX_VIEWERS) 到達時は同じ set を返す — 上限の通知 (toast/log) は呼び出し側の責任。
+// 既に max を超えている set (上限を下げた後) への add も拒否のみで、既存 viewer は削らない。
+export function addViewer(set: ViewerSet, max: number = MAX_VIEWERS): ViewerSet {
+  if (set.viewers.length >= max) return set;
   const name = suggestViewerName(set.viewers.map((v) => v.name));
   const v = newViewer(name);
   return {

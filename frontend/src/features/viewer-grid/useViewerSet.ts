@@ -71,6 +71,7 @@ export type { Edge, Layout, SplitDirection };
 export function useViewerSet(opts?: {
   initialSet?: ViewerSet;
   maxImagePixels?: number;
+  maxViewers?: number;
 }) {
   const [set, setSet] = useState<ViewerSet>(
     opts?.initialSet ?? initialViewerSet(),
@@ -80,6 +81,13 @@ export function useViewerSet(opts?: {
   useEffect(() => {
     maxPixelsRef.current = opts?.maxImagePixels ?? DEFAULT_MAX_PIXELS;
   }, [opts?.maxImagePixels]);
+
+  // タブ追加上限 (settings.maxViewers、ロード中は MAX_VIEWERS)。ref なのは maxPixelsRef と
+  // 同じ理由 — addViewerCb を作り直さず live 値を読むため (#148)。
+  const maxViewersRef = useRef(opts?.maxViewers ?? MAX_VIEWERS);
+  useEffect(() => {
+    maxViewersRef.current = opts?.maxViewers ?? MAX_VIEWERS;
+  }, [opts?.maxViewers]);
 
   // 最新 set を ref に保ち、async callback (preflight + bulk loop) が毎変更で作り直さず live state を読めるように。
   const setRef = useRef(set);
@@ -93,12 +101,13 @@ export function useViewerSet(opts?: {
 
   const addViewerCb = useCallback(() => {
     setSet((cur) => {
-      if (cur.viewers.length >= MAX_VIEWERS) {
-        toast(`ビューア数の上限 (${MAX_VIEWERS}) に達しました`, "warn");
-        logger.warn("viewer-set", "add refused", { max: MAX_VIEWERS });
+      const max = maxViewersRef.current;
+      if (cur.viewers.length >= max) {
+        toast(`ビューア数の上限 (${max}) に達しました`, "warn");
+        logger.warn("viewer-set", "add refused", { max });
         return cur;
       }
-      const next = addViewer(cur);
+      const next = addViewer(cur, max);
       logger.info("viewer-set", "add", {
         id: next.viewers[next.viewers.length - 1].id,
         total: next.viewers.length,

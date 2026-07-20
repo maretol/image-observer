@@ -21,9 +21,13 @@ import (
 // 保てるように (#11)。v5 は lossless に migrate、それ以前は DefaultData に fallback。
 const StateSchemaVersion = 6
 
-// maxViewers=8 は Ctrl+Shift+2..9 のキーバインド範囲。maxNameLen は byte でなく rune 数 (日本語名も 32 文字)。
+// maxViewersHard=32 は復元時の garbage 除去用ハードキャップ (#148, spec-viewer-max-count.md §7)。
+// ユーザー設定の上限 (settings.MaxViewers、既定 8) はタブ追加時の gate (フロント) でのみ強制し、
+// ここでは参照しない — 設定を下げた後の復元で open していた viewer を破壊しないため。
+// settings.MaxViewersHardCap と同値 (TestMaxViewersHardMatchesSettings で担保)。
+// maxNameLen は byte でなく rune 数 (日本語名も 32 文字)。
 const (
-	maxViewers           = 8
+	maxViewersHard       = 32
 	maxNameLen           = 32
 	defaultViewerName    = "ビューア 1"
 	defaultViewerNamePat = "ビューア %d"
@@ -280,12 +284,12 @@ func validateState(s *StateData) error {
 		s.Window.Height = 768
 	}
 
-	// Viewers: 1..maxViewers / 一意 ID / sanitize 名 / 有効 layout を強制。
+	// Viewers: 1..maxViewersHard / 一意 ID / sanitize 名 / 有効 layout を強制。
 	if len(s.Viewers) == 0 {
 		s.Viewers = []ViewerState{defaultViewer()}
 	}
-	if len(s.Viewers) > maxViewers {
-		s.Viewers = s.Viewers[:maxViewers]
+	if len(s.Viewers) > maxViewersHard {
+		s.Viewers = s.Viewers[:maxViewersHard]
 	}
 	seenIDs := make(map[string]struct{}, len(s.Viewers))
 	for i := range s.Viewers {

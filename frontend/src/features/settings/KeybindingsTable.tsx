@@ -4,7 +4,8 @@ const KEYBINDINGS: Array<{ keys: string; action: string; scope: string }> = [
   { keys: "Ctrl+Shift+1", action: "一覧タブに切替", scope: "全体" },
   {
     keys: "Ctrl+Shift+2 〜 9",
-    action: "N 番目 (1〜8) のビューアタブに切替",
+    action:
+      "N 番目 (1〜8) のビューアタブに切替 (最大数を 9 以上にしても 9 個目以降には割り当てなし)",
     scope: "全体",
   },
   {

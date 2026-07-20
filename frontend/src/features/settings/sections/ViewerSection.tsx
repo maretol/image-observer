@@ -1,4 +1,5 @@
 import { t } from "../../../shared/messages";
+import { MAX_VIEWERS_HARD, MIN_VIEWERS } from "../../viewer-grid/viewers";
 import type { Settings } from "../useSettings";
 import { Field, NumberInput, Segment } from "../SettingsFields";
 
@@ -46,6 +47,18 @@ export function ViewerSection({
           step={50}
           suffix="MP"
           onChange={(n) => onChange({ maxImagePixelsMP: n })}
+        />
+      </Field>
+      <Field
+        label={t("settings.viewer.maxViewers.label")}
+        hint={t("settings.viewer.maxViewers.hint")}
+      >
+        <NumberInput
+          value={data.maxViewers}
+          min={MIN_VIEWERS}
+          max={MAX_VIEWERS_HARD}
+          step={1}
+          onChange={(n) => onChange({ maxViewers: n })}
         />
       </Field>
     </>

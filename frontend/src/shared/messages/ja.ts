@@ -80,6 +80,9 @@ export const ja = {
   "settings.viewer.maxPixels.label": "開ける画像サイズの上限",
   "settings.viewer.maxPixels.hint":
     "画像のピクセル数が上限を超える場合は警告して開きません。次回画像を開く操作から有効。",
+  "settings.viewer.maxViewers.label": "ビューアタブの最大数",
+  "settings.viewer.maxViewers.hint":
+    "タブ追加の上限 (既定 8)。9 個目以降のタブにはショートカット (Ctrl+Shift+2〜9) が割り当たりません。上限を下げても開いているタブは閉じられず、追加だけができなくなります。",
 
   // --- settings: thumbnail section -----------------------------------------
   "settings.thumbnail.size.label": "表示サイズ",
