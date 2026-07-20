@@ -205,8 +205,17 @@ func Load() SettingsData {
 	}
 	var s SettingsData
 	if err := json.Unmarshal(data, &s); err != nil {
-		log.Printf("settings: parse failed (using defaults): %v", err)
-		return DefaultSettings()
+		// 型不一致 (例 "maxViewers": 8.5) は該当 field をゼロ値のまま skip して sibling の
+		// decode が継続する (encoding/json は最初の型エラーだけ返す)。file 全体を捨てると
+		// 1 つの悪い値が他の正当な設定を吹き飛ばすので、後続の applyFieldDefaults + probe に
+		// 不正 field の reset を委ねる (package doc の per-field fallback 方針、spec-viewer-max-count.md §13.1)。
+		var typeErr *json.UnmarshalTypeError
+		if !errors.As(err, &typeErr) {
+			// 構文エラー等は文書全体が読めないので従来どおり defaults へ。
+			log.Printf("settings: parse failed (using defaults): %v", err)
+			return DefaultSettings()
+		}
+		log.Printf("settings: field type mismatch (per-field fallback): %v", err)
 	}
 	if s.Version != SettingsSchemaVersion {
 		log.Printf("settings: version mismatch (got %d, want %d), using defaults",

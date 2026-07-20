@@ -224,6 +224,24 @@ func TestSave_RejectsInvalid(t *testing.T) {
 	}
 }
 
+// TestSaveLoad_MaxViewersBoundaries は範囲の境界そのもの (1 / 32) が受理されることを pin する。
+// 範囲チェックの off-by-one (< が <= になる等) は「外側の拒否」テストだけでは検知できない
+// (ミューテーションテストで実証、spec-viewer-max-count.md §13.3)。
+func TestSaveLoad_MaxViewersBoundaries(t *testing.T) {
+	for _, n := range []int{minMaxViewers, MaxViewersHardCap} {
+		setSettingsFile(t)
+		in := DefaultSettings()
+		in.MaxViewers = n
+		if err := Save(in); err != nil {
+			t.Fatalf("Save should accept boundary MaxViewers=%d: %v", n, err)
+		}
+		out := Load()
+		if out.MaxViewers != n {
+			t.Errorf("boundary MaxViewers=%d should survive Save->Load unchanged, got %d", n, out.MaxViewers)
+		}
+	}
+}
+
 func TestSave_StampsVersion(t *testing.T) {
 	setSettingsFile(t)
 	in := DefaultSettings()
@@ -328,6 +346,60 @@ func TestLoad_PerFieldFallbackKeepsValidFields(t *testing.T) {
 	}
 	if s.MaxViewers != defaultMaxViewers {
 		t.Errorf("out-of-range MaxViewers should fall back, got %d", s.MaxViewers)
+	}
+}
+
+// TestLoad_TypeMismatchedField_KeepsOtherFields は「型不一致 1 field で file 全体が
+// defaults に飛ぶ」regression を pin する (spec-viewer-max-count.md §13.1)。encoding/json は
+// 型エラー field をゼロ値のまま skip して decode を継続するので、他の正当な値は保持し
+// 該当 field だけ applyFieldDefaults で既定に落ちること。
+func TestLoad_TypeMismatchedField_KeepsOtherFields(t *testing.T) {
+	p := setSettingsFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	bad, _ := json.Marshal(map[string]any{
+		"version":       SettingsSchemaVersion,
+		"logLevel":      "debug",      // valid, non-default — must survive
+		"thumbnailSize": 512,          // valid, non-default — must survive
+		"watchMode":     WatchModeOff, // valid, non-default — must survive
+		"tagColors":     map[string]string{"keep": "#abc123"},
+		"editAutoSave":  false, // 明示 false (probe 区別対象) — must survive
+		"maxViewers":    8.5,   // 型不一致 (int に非整数) → この field だけ既定 8 へ
+	})
+	if err := os.WriteFile(p, bad, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.MaxViewers != defaultMaxViewers {
+		t.Errorf("type-mismatched MaxViewers should fall back to %d, got %d", defaultMaxViewers, s.MaxViewers)
+	}
+	if s.LogLevel != "debug" {
+		t.Errorf("valid LogLevel should survive a sibling type error, got %q", s.LogLevel)
+	}
+	if s.ThumbnailSize != 512 {
+		t.Errorf("valid ThumbnailSize should survive a sibling type error, got %d", s.ThumbnailSize)
+	}
+	if s.WatchMode != WatchModeOff {
+		t.Errorf("valid WatchMode should survive a sibling type error, got %q", s.WatchMode)
+	}
+	if s.TagColors["keep"] != "#abc123" {
+		t.Errorf("valid tag color should survive a sibling type error, got %v", s.TagColors)
+	}
+	if s.EditAutoSave != false {
+		t.Errorf("explicit EditAutoSave=false should survive a sibling type error, got true")
+	}
+}
+
+// 構文エラー (文書全体が読めない) は従来どおり full defaults に fallback することも pin する
+// (§13.1 の分岐の反対側)。
+func TestLoad_SyntaxError_FallsBackToDefaults(t *testing.T) {
+	p := setSettingsFile(t)
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	if err := os.WriteFile(p, []byte(`{"version":1,"logLevel":"debug",`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := Load()
+	if s.LogLevel != "info" {
+		t.Errorf("syntax error should fall back to full defaults, got logLevel %q", s.LogLevel)
 	}
 }
 
