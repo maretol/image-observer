@@ -54,7 +54,7 @@
 | **単一モード** | Card 右クリック時、メニューが「1 枚のカードに対する操作」を提示する形態。 |
 | **バルクモード** | Card 右クリック時、メニューが「現在の選択集合に対する操作」を提示する形態。 |
 | **bulk-toolbar** | 既存 `.cls-bulk-toolbar`。selection ≥1 で表示される常設バルク操作 UI。 |
-| **selection 集合** | `useClassification.selectedFilenames` (`Set<filename>`)。フォルダ変更で自動クリア。 |
+| **selection 集合** | `useClassification.selectedFilenames` (`Set<filename>` を選択順のまま配列化、#167)。フォルダ変更で自動クリア。 |
 | **inSelection** | 右クリックされた card の filename が selection 集合に含まれるかどうかの bool。 |
 
 ---
