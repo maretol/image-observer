@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { CloseIcon } from "../../shared/icons/CloseIcon";
+import { blurActiveElement, preventMouseFocus } from "../../shared/utils/focus";
 import { DATA_VIEWER_TAB } from "./useViewerTabReorder";
 import type { Viewer } from "./viewers";
 
@@ -49,10 +50,6 @@ export function ViewerTab({
   shouldSuppressClick,
 }: ViewerTabProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  // #53: wrapper の padding 領域クリックでも focus を一覧タブ (タブ全体が
-  // <button>) と同じく「選択中のタブにフォーカスが乗る」状態に揃えるため、
-  // wrapper onClick から内側 name button を focus する用の ref。
-  const nameButtonRef = useRef<HTMLButtonElement>(null);
   // Esc cancel / Enter commit は、isEditing が false になり input が focus 中に unmount され、
   // React が unmount ノードに同期 blur を dispatch して onCommitRename を (冗長な) draft 値で
   // 呼ぶのを抑止する。フラグは各 keydown 分岐で unmount を起こす前に立てる。
@@ -130,7 +127,10 @@ export function ViewerTab({
         if (anyRenaming) return;
         if (isFromClose(e)) return; // close ボタンは自前の onClick を持つ
         // wrapper span の text 選択を抑止。wrapper は focus 不可なので、drag が active になった
-        // ときの I-beam カーソル + user-select の副作用を消すだけ。
+        // ときの I-beam カーソル + user-select の副作用を消すだけ。ただし mousedown の既定動作
+        // (= 直前の focus 要素の blur) も一緒に止まるので、native と同じく明示的に blur する
+        // (#150: 直前 focus を残さない。タブ chrome 自体には focus を乗せない)。
+        blurActiveElement();
         e.preventDefault();
         onStartDrag(index, {
           clientX: e.clientX,
@@ -144,12 +144,11 @@ export function ViewerTab({
         // 再アクティブ化しないよう、その trailing click 1 回を抑止 (#50)。
         if (shouldSuppressClick()) return;
         onActivate();
-        // 一覧タブはタブ全体が <button> なので click で自動的にフォーカスが
-        // 乗るが、ビューアタブの wrapper は <span> でフォーカス不可。padding
-        // 領域クリック時に focus-visible リング含めて一覧タブと挙動を揃える
-        // ため、内側 name button へ明示的に focus を寄せる。name button 上の
-        // 直接クリックなら既に focus されているので呼んでも no-op。
-        nameButtonRef.current?.focus();
+        // マウス click でタブ名に focus は寄せない (#150)。かつて #53 で一覧タブ (全体が
+        // <button>) に合わせて name button を focus していたが、focus が残ると次のキー操作
+        // (Ctrl+Tab / Shift+ホイールの Shift 等) で :focus-visible が点灯し「変な枠」になる。
+        // 一覧タブ側も onMouseDown で focus を受けないようにして、揃え方を逆転させた。
+        // keyboard (Tab → Enter) は mousedown を経ず native focus のまま → リングは出る。
       }}
       onDoubleClick={(e) => {
         if (isFromClose(e)) return;
@@ -158,9 +157,12 @@ export function ViewerTab({
       }}
     >
       <button
-        ref={nameButtonRef}
         type="button"
         role="tab"
+        // #150: pointerdown が drag guard で早期 return する経路 (rename 中 / 副ボタン) でも
+        // mousedown の native focus を name button に乗せない。rename 入力の blur-commit は
+        // preventMouseFocus 内の明示 blur で維持される。
+        onMouseDown={preventMouseFocus}
         aria-selected={isActive}
         className="top-tab-viewer-name"
         title={viewer.name}
@@ -171,6 +173,9 @@ export function ViewerTab({
         <button
           type="button"
           className="top-tab-viewer-close"
+          // #150: close 確認ダイアログ (ModalShell) が「直前 focus」として × を捕まえ、
+          // キャンセル後に focus を戻してリングを点灯させないように。
+          onMouseDown={preventMouseFocus}
           onClick={(e) => {
             e.stopPropagation();
             onClose();

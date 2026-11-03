@@ -4,6 +4,7 @@ import type { useViewerTabReorder } from "./features/viewer-grid/useViewerTabReo
 import type { Viewer } from "./features/viewer-grid/viewers";
 import { PlusIcon } from "./shared/icons/PlusIcon";
 import { SettingsIcon } from "./shared/icons/SettingsIcon";
+import { preventMouseFocus } from "./shared/utils/focus";
 import type { TopTab } from "./topTab";
 
 // ウィンドウヘッダのトップレベルタブ列 ("一覧" + ビューアタブ + 追加 / 設定ボタン)。
@@ -62,6 +63,10 @@ export function TopTabsBar({
         role="tab"
         aria-selected={topTab === "list"}
         className={`top-tab top-tab-list ${topTab === "list" ? "active" : ""}`}
+        // #150: トップタブ列の chrome はマウス操作で focus を受け取らない (一覧 / ビューア名 /
+        // 閉じる / 追加 / 設定で共通)。focus が残ると次のキー操作で :focus-visible が点灯する。
+        // keyboard (Tab → Enter) は native focus のままなのでリングは従来どおり出る。
+        onMouseDown={preventMouseFocus}
         onClick={onSelectList}
       >
         一覧
@@ -105,6 +110,7 @@ export function TopTabsBar({
       <button
         type="button"
         className="top-tab-add"
+        onMouseDown={preventMouseFocus}
         onClick={onAddViewer}
         disabled={viewers.length >= maxViewers}
         title={
@@ -119,6 +125,9 @@ export function TopTabsBar({
       <button
         type="button"
         className="top-tab-settings"
+        // #150: 設定ダイアログ (ModalShell) が close 時に復帰する「直前 focus」に歯車を
+        // 捕まえさせない (Esc で閉じた直後にリングが点く経路)。
+        onMouseDown={preventMouseFocus}
         onClick={onOpenSettings}
         title="設定"
         aria-label="設定を開く"
