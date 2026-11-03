@@ -283,6 +283,15 @@ html, body, #root {
   background: #252526;
 }
 
+/* #150: キーボード (Tab) で到達したときだけリング。同じ列の .top-tab / .top-tab-viewer-name と
+   同水準に揃える (F-1 拡張)。マウス操作は onMouseDown の preventDefault で focus 自体を
+   乗せないので、この rule は keyboard 専用。 */
+.top-tab-add:focus-visible,
+.top-tab-settings:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -3px;
+}
+
 .top-tab-content {
   flex: 1;
   position: relative;
