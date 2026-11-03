@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type UseClassificationSelectionReturn = {
   selected: Set<string>;
+  // 選択順 (Set の挿入順) の配列。bulk open のタブ順に直結する (#167)。
   selectedFilenames: string[];
   isSelected: (filename: string) => boolean;
   toggleSelected: (filename: string) => void;
@@ -82,10 +83,12 @@ export function useClassificationSelection(): UseClassificationSelectionReturn {
     setSelectAnchor(null);
   }, []);
 
-  const selectedFilenames = useMemo(
-    () => Array.from(selected).sort(),
-    [selected],
-  );
+  // 選択した順 (= Set の挿入順) をそのまま配列化する。bulk open はこの配列順にタブを足すので、
+  // ここで sort するとユーザーが選んだ順序が捨てられる (#167)。順序の規約:
+  //   - toggle で追加した filename は末尾に付く。解除→再選択は末尾へ移動
+  //   - Shift 範囲選択は表示順で末尾に追加し、既選択分の位置は動かさない
+  //   - watcher prune / 削除は Set を順序込みで複製するだけなので残存分の順序は保たれる
+  const selectedFilenames = useMemo(() => Array.from(selected), [selected]);
 
   return {
     selected,
